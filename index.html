@@ -103,6 +103,9 @@
     
     .nowrap { white-space: nowrap; }
     .description-col { min-width: 200px; }
+    .col-sm { width: 60px; max-width: 60px; }
+    .col-med { width: 100px; max-width: 100px; }
+    .actions-cell { width: 120px; text-align: center; }
     
     #controls { text-align: center; margin-top: 1.25rem; }
     #btnMore { display: inline-flex; align-items: center; gap: 0.5rem; border-radius: 0.5rem; border: 1px solid #d1d5db; padding: 0.75rem 1.5rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; background: white; }
@@ -940,10 +943,17 @@ ALL_OCS_ITEMS = itemsObj;
         if (items.length > 0) {
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
                             ${hasInactiveItems ? '<th class="checkbox-cell"></th>' : ''}
-                            <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
-                            <th>Tamanho</th><th>Qtd.</th><th class="status-prazo">Prazo</th>
-                            <th>Dt. Entrega</th>
-                            <th>Ações</th></tr></thead><tbody>`;
+                            <th class="col-sm">Cartela</th>
+                            <th class="col-med">Cód. Cli</th>
+                            <th class="description-col">Desc</th>
+                            <th class="col-sm">Tam</th>
+                            <th class="col-sm">Qtd.</th>
+                            <th class="col-med">Dt Entrega</th>
+                            <th class="col-med">Cód. OS</th>
+                            <th class="col-sm">Prazo</th>
+                            <th class="col-med">Status</th>
+                            <th class="col-med">Posição</th>
+                            <th class="actions-cell">Ações</th></tr></thead><tbody>`;
             
             items.forEach(item => {
                 if (!item) return; 
@@ -951,6 +961,7 @@ ALL_OCS_ITEMS = itemsObj;
                 const itemId = `item-linha-${item.planilhaLinha}`; 
                 const isInactive = item.Status === 'Inativo';
                 const isFaturado = item.Status === 'Faturado';
+                const posicao = item['POSIÇÃO'] || item.POSICAO || '-';
                 
                 bodyHtml += `<tr id="${itemId}" class="${itemStatusClass}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
                 
@@ -963,14 +974,17 @@ ALL_OCS_ITEMS = itemsObj;
                 }
                 
                 bodyHtml += `
-                        <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
-                        <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
+                        <td class="nowrap col-sm">${item.CARTELA ?? 'N/A'}</td>
+                        <td class="nowrap col-med">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
                         <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
-                        <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
-                        <td class="nowrap">${fmtInt(item['QTD. ABERTA'])}</td>
-                        <td class="status-prazo nowrap">${item.PRAZO ?? 'N/A'}</td>
-                        <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
-                        <td class="nowrap">`;
+                        <td class="nowrap col-sm">${item.TAMANHO ?? 'N/A'}</td>
+                        <td class="nowrap col-sm">${fmtInt(item['QTD. ABERTA'])}</td>
+                        <td class="nowrap col-med">${formatarData(item['DT. ENTREGA'])}</td>
+                        <td class="nowrap col-med">${item['CÓD. OS'] ?? 'N/A'}</td>
+                        <td class="nowrap col-sm">${item.PRAZO ?? 'N/A'}</td>
+                        <td class="nowrap col-med">${item.Status ?? 'N/A'}</td>
+                        <td class="nowrap col-med">${posicao}</td>
+                        <td class="actions-cell">`;
                 
                 if (isFaturado) {
                     const disabled = hasInactiveItems ? 'disabled' : '';
