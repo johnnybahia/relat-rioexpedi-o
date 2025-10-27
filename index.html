@@ -392,6 +392,81 @@
     
     // ==== FUNÇÕES AUXILIARES ====
 
+    function coalesce(value, fallback) {
+        return value === undefined || value === null ? fallback : value;
+    }
+
+    function show(el, visible) {
+        if (!el) return;
+        if (visible) {
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
+    }
+    
+    function fmtInt(val) {
+        const num = Number(val);
+        if (isNaN(num)) return '0';
+        return num.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+    }
+    
+    function _normSearch_(str) {
+        if (!str) return '';
+        return String(str).trim().toUpperCase();
+    }
+    
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // ===== COMPATIBILIZAÇÃO v15.5 (normalização de chaves sem mudar funcionalidades) =====
+    function normalizeItemKeys(i) {
+      return {
+        @@ -370,96 +370,100 @@
+    // Modais
+    const $warningModal = document.getElementById('warningModal');
+    const $warningInactiveCount = document.getElementById('warning-inactive-count');
+    const $warningItemList = document.getElementById('warning-item-list');
+    const $warningOkBtn = document.getElementById('warning-ok-btn');
+    const $warningDeleteBtn = document.getElementById('warning-delete-btn');
+    
+    const $confirmModal = document.getElementById('confirmModal');
+    const $modalFaturarList = document.getElementById('modal-faturar-list');
+    const $modalExcluirList = document.getElementById('modal-excluir-list');
+    const $modalConfirmBtn = document.getElementById('modal-confirm-btn');
+    const $modalCancelBtn = document.getElementById('modal-cancel-btn');
+    
+    const $deleteAllModal = document.getElementById('deleteAllModal');
+    const $deleteAllList = document.getElementById('delete-all-list');
+    const $deleteAllConfirmBtn = document.getElementById('delete-all-confirm-btn');
+    const $deleteAllCancelBtn = document.getElementById('delete-all-cancel-btn');
+    
+    const $successModal = document.getElementById('successModal');
+    const $successMessage = document.getElementById('success-message');
+    
+    const $keyboardHint = document.getElementById('keyboard-hint');
+    
+    // ==== FUNÇÕES AUXILIARES ====
+
+    function show(el, visible) {
+        if (!el) return;
+        if (visible) {
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+    function coalesce(value, fallback) {
+        return value === undefined || value === null ? fallback : value;
+    }
+
     function show(el, visible) {
         if (!el) return;
         if (visible) {
@@ -438,6 +513,17 @@
         'SITUAÇÃO DE ITENS': i.situacaoItens ?? 'N/A',
         'POSIÇÃO NA PRODUÇÃO': i.posicaoProducao ?? 'N/A',
         'Status': i.status ?? 'Desconhecido',
+        'CARTELA': coalesce(i.cartela, 'N/A'),
+        'CÓD. CLIENTE': coalesce(i.codCliente, 'N/A'),
+        'DESCRIÇÃO': coalesce(i.descricao, 'N/A'),
+        'TAMANHO': coalesce(i.tamanho, 'N/A'),
+        'QTD. ABERTA': coalesce(i.qtdAberta, 0),
+        'PRAZO': coalesce(i.prazo, null),
+        'DT. ENTREGA': coalesce(i.dtEntrega, null),
+        'CÓD. OS': coalesce(i.codOs, 'N/A'),
+        'SITUAÇÃO DE ITENS': coalesce(i.situacaoItens, 'N/A'),
+        'POSIÇÃO NA PRODUÇÃO': coalesce(i.posicaoProducao, 'N/A'),
+        'Status': coalesce(i.status, 'Desconhecido'),
         uniqueId: i.uniqueId,
         planilhaLinha: i.planilhaLinha
       };
@@ -969,7 +1055,7 @@ ALL_OCS_ITEMS = itemsObj;
                 const isInactive = item.Status === 'Inativo';
                 const isFaturado = item.Status === 'Faturado';
                 
-                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
+bodyHtml += `<tr id="${itemId}" class="${itemStatusClass}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
                 
                 if (hasInactiveItems) {
                     if (isInactive) {
@@ -979,17 +1065,17 @@ ALL_OCS_ITEMS = itemsObj;
                     }
                 }
                 
-                 bodyHtml += `
-                        <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
-                        <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
-                        <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
-                        <td class="nowrap tamanho-col">${item.TAMANHO ?? 'N/A'}</td>
+                 bodyHtml += `␊
+                        <td class="nowrap">${coalesce(item.CARTELA, 'N/A')}</td>
+                        <td class="nowrap">${coalesce(item['CÓD. CLIENTE'], 'N/A')}</td>
+                        <td class="description-col">${coalesce(item.DESCRIÇÃO, 'N/A')}</td>
+                        <td class="nowrap tamanho-col">${coalesce(item.TAMANHO, 'N/A')}</td>
                         <td class="nowrap">${fmtInt(item['QTD. ABERTA'])}</td>
                         <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
-                        <td class="os-col">${item['CÓD. OS'] ?? 'N/A'}</td>
+                       <td class="os-col">${coalesce(item['CÓD. OS'], 'N/A')}</td>
                         <td class="status-prazo nowrap">${formatarPrazoValor(item.PRAZO)}</td>
-                        <td class="status-col">${item['SITUAÇÃO DE ITENS'] ?? 'N/A'}</td>
-                        <td class="position-col">${item['POSIÇÃO NA PRODUÇÃO'] ?? 'N/A'}</td>
+                       <td class="status-col">${coalesce(item['SITUAÇÃO DE ITENS'], 'N/A')}</td>
+                        <td class="position-col">${coalesce(item['POSIÇÃO NA PRODUÇÃO'], 'N/A')}</td>
                         <td class="nowrap">`;
                 
                 if (isFaturado) {
@@ -1614,4 +1700,5 @@ ALL_OCS_ITEMS = itemsObj;
   </script>
 </body>
 </html>
+
 
