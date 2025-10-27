@@ -87,15 +87,19 @@
     .item-table th, .item-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
     .item-table th { background-color: #f9fafb; font-weight: 600; color: #374151; border-bottom-width: 2px; border-color: #e5e7eb; white-space: nowrap; }
     .item-table tr:last-child td { border-bottom: none; }
-    
+
     .item-table td.status-prazo { font-weight: 600; text-align: center; }
     .item-table tr.item-inativo { background-color: #f3f4f6; opacity: 0.85; }
     .item-table tr.item-faturado { background-color: #dcfce7; font-weight: 500; }
-    
+
     .item-table tr.keyboard-focus { outline: 3px solid #3b82f6; outline-offset: -3px; }
-    
+
     .item-checkbox { width: 18px; height: 18px; cursor: pointer; margin: 0; }
     .checkbox-cell { width: 40px; text-align: center; }
+    .tamanho-col { white-space: nowrap; }
+    .os-col { white-space: nowrap; min-width: 90px; }
+    .status-col { white-space: normal; word-break: break-word; min-width: 140px; }
+    .position-col { white-space: normal; word-break: break-word; min-width: 150px; }
     .btn-finalizar { padding: 4px 10px; background-color: #3b82f6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.75rem; font-weight: 500; transition: background-color 0.2s; }
     .btn-finalizar:hover { background-color: #2563eb; }
     .btn-finalizar:disabled { background-color: #9ca3af; cursor: not-allowed; opacity: 0.6; }
@@ -430,6 +434,9 @@
         'QTD. ABERTA': i.qtdAberta ?? 0,
         'PRAZO': i.prazo ?? null,
         'DT. ENTREGA': i.dtEntrega ?? null,
+        'CÓD. OS': i.codOs ?? 'N/A',
+        'SITUAÇÃO DE ITENS': i.situacaoItens ?? 'N/A',
+        'POSIÇÃO NA PRODUÇÃO': i.posicaoProducao ?? 'N/A',
         'Status': i.status ?? 'Desconhecido',
         uniqueId: i.uniqueId,
         planilhaLinha: i.planilhaLinha
@@ -631,6 +638,15 @@
         console.error('Erro ao formatar data:', e, 'Input:', dataInput);
         return 'Erro Data';
       }
+    }
+
+    function formatarPrazoValor(prazo) {
+        if (prazo === null || prazo === undefined || prazo === 'N/A') return 'N/A';
+        const num = Number(prazo);
+        if (Number.isNaN(num)) {
+            return String(prazo);
+        }
+        return Number.isInteger(num) ? num.toString() : num.toFixed(1);
     }
 
     // ==== CARREGAMENTO DE DADOS ====
@@ -941,8 +957,9 @@ ALL_OCS_ITEMS = itemsObj;
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
                             ${hasInactiveItems ? '<th class="checkbox-cell"></th>' : ''}
                             <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
-                            <th>Tamanho</th><th>Qtd.</th><th class="status-prazo">Prazo</th>
-                            <th>Dt. Entrega</th>
+                            <th class="tamanho-col">Tam.</th><th class="nowrap">Qtd.</th><th class="nowrap">Entrega</th>
+                            <th class="os-col">Cód. OS</th><th class="status-prazo nowrap">Prazo</th>
+                            <th class="status-col">Situação</th><th class="position-col">Produção</th>
                             <th>Ações</th></tr></thead><tbody>`;
             
             items.forEach(item => {
@@ -966,10 +983,13 @@ ALL_OCS_ITEMS = itemsObj;
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
                         <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
                         <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
-                        <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
+                        <td class="nowrap tamanho-col">${item.TAMANHO ?? 'N/A'}</td>
                         <td class="nowrap">${fmtInt(item['QTD. ABERTA'])}</td>
-                        <td class="status-prazo nowrap">${item.PRAZO ?? 'N/A'}</td>
                         <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
+                        <td class="os-col">${item['CÓD. OS'] ?? 'N/A'}</td>
+                        <td class="status-prazo nowrap">${formatarPrazoValor(item.PRAZO)}</td>
+                        <td class="status-col">${item['SITUAÇÃO DE ITENS'] ?? 'N/A'}</td>
+                        <td class="position-col">${item['POSIÇÃO NA PRODUÇÃO'] ?? 'N/A'}</td>
                         <td class="nowrap">`;
                 
                 if (isFaturado) {
