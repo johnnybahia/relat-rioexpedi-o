@@ -29,9 +29,11 @@ const OS_COL = 11;       // L
 const DTREC_COL = 12;    // M
 const DTENT_COL = 13;    // N
 const PRAZO_COL = 14;    // O
+const SITUACAO_COL = 15; // P - SITUAÇÃO DE ITENS
+const POSICAO_COL = 16;  // Q - POSIÇÃO NA PRODUÇÃO
 
 // Índices de colunas - ABA Relatorio_DB
-const STATUS_COL = 14;   // O
+const STATUS_COL = 17;   // R (agora é a coluna 17 devido às novas colunas)
 
 // ====== FUNÇÃO WEB APP ======
 function doGet(e) {
@@ -140,9 +142,9 @@ function sincronizarDados() {
     Logger.log("\n📖 2. LENDO Relatorio_DB");
     const dbRows = dbSheet.getLastRow() - 1;
     let dbData = [];
-    
+
     if (dbRows > 0) {
-      dbData = dbSheet.getRange(2, 1, dbRows, 15).getValues();
+      dbData = dbSheet.getRange(2, 1, dbRows, 18).getValues();
     }
     
     const dbMap = new Map();
@@ -176,13 +178,14 @@ function sincronizarDados() {
       
       if (fonteMap.has(id)) {
         const fonteRow = fonteMap.get(id);
-        
+
         const novaLinha = [
           fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
           fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
           fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
           fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
-          fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   ""
+          fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   fonteRow[SITUACAO_COL],
+          fonteRow[POSICAO_COL], ""
         ];
         
         let mudou = false;
@@ -212,7 +215,8 @@ function sincronizarDados() {
         fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
         fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
         fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
-        fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo"
+        fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   fonteRow[SITUACAO_COL],
+        fonteRow[POSICAO_COL], "Ativo"
       ];
       novos.push(novaLinha);
     }
@@ -225,12 +229,12 @@ function sincronizarDados() {
     Logger.log("\n💾 4. APLICANDO");
     if (novos.length > 0) {
       const proxLinha = dbSheet.getLastRow() + 1;
-      dbSheet.getRange(proxLinha, 1, novos.length, 15).setValues(novos);
+      dbSheet.getRange(proxLinha, 1, novos.length, 18).setValues(novos);
       Logger.log(`   ✅ ${novos.length} novos adicionados`);
     }
     if (updates.length > 0) {
       updates.forEach(u => {
-        dbSheet.getRange(u.linha, 1, 1, 15).setValues([u.dados]);
+        dbSheet.getRange(u.linha, 1, 1, 18).setValues([u.dados]);
         Logger.log(`   ✅ Linha ${u.linha}: ${u.de} → ${u.para}`);
       });
     }
@@ -359,6 +363,8 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     'ORD. COMPRA': getDisp('ORD. COMPRA', 'SEM OC'),
     CLIENTE: getDisp('CLIENTE', 'SEM CLIENTE'),
     PEDIDO: getDisp('PEDIDO', 'N/A'),
+    'SITUAÇÃO DE ITENS': getDisp('SITUAÇÃO DE ITENS', 'N/A'),
+    'POSIÇÃO NA PRODUÇÃO': getDisp('POSIÇÃO NA PRODUÇÃO', 'N/A'),
 
     // NÚMEROS/DATA cruas
     'QTD. ABERTA': _toNumber_(get('QTD. ABERTA', 0)),
