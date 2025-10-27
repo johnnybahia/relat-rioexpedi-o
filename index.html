@@ -1,0 +1,1596 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relatório de Pedidos (v20.0 COMPATÍVEL - Backend v15.5)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background-color: #f0f2f5; margin: 0; padding: 10px; }
+    #loader { display: flex; flex-direction: column; align-items: center; justify-content: center; position: fixed; inset: 0; background-color: rgba(255,255,255,0.9); z-index: 1000; }
+    #loader.hidden { display: none; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #f3f4f6; border-top-color: #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-text { margin-top: 1rem; font-size: 1rem; color: #374151; }
+    .container { max-width: 1280px; margin-left: auto; margin-right: auto; background-color: white; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1); padding: 1.5rem; }
+    .header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; gap: 0.5rem;}
+    .header h1 { font-size: 1.5rem; font-weight: bold; color: #1f2937; margin: 0; }
+    .header-meta { font-size: 0.875rem; color: #6b7280; text-align: right; }
+    #refreshButton { padding: 0.5rem; border-radius: 9999px; transition: background-color 0.2s; background: none; border: none; cursor: pointer;}
+    #refreshButton:hover { background-color: #f3f4f6; }
+    #refreshButton svg { height: 1.25rem; width: 1.25rem; color: #3b82f6; display: block;}
+    
+    /* Área de controles em uma linha */
+    .controls-wrapper { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; padding: 0.75rem; background-color: #f9fafb; border-radius: 0.5rem; border: 1px solid #e5e7eb; flex-wrap: wrap; }
+    
+    .global-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .btn-global-action { padding: 0.5rem 1rem; border: none; border-radius: 0.5rem; cursor: pointer; font-size: 0.875rem; font-weight: 600; transition: all 0.2s; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); white-space: nowrap; }
+    .btn-global-action:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-faturar-global { background-color: #22c55e; color: white; }
+    .btn-faturar-global:hover:not(:disabled) { background-color: #16a34a; box-shadow: 0 2px 4px 0 rgba(0,0,0,0.1); }
+    .btn-excluir-global { background-color: #ef4444; color: white; }
+    .btn-excluir-global:hover:not(:disabled) { background-color: #dc2626; box-shadow: 0 2px 4px 0 rgba(0,0,0,0.1); }
+    .selected-count { font-size: 0.75rem; color: #6b7280; font-weight: 500; white-space: nowrap; }
+    
+    .filters { display: flex; gap: 0.5rem; align-items: center; flex: 1; }
+    .filter-input { width: 200px; border-radius: 0.5rem; border: 1px solid #d1d5db; padding: 0.5rem 0.75rem; font-size: 0.875rem; background-color: #fff; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }
+    .filter-select { border-radius: 0.5rem; border: 1px solid #d1d5db; padding: 0.5rem 0.75rem; font-size: 0.875rem; background-color: #fff; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); cursor: pointer; }
+    
+    /* Autocomplete */
+    .filter-wrapper { position: relative; }
+    .autocomplete-list { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-radius: 0.5rem; margin-top: 0.25rem; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 1000; display: none; }
+    .autocomplete-list.visible { display: block; }
+    .autocomplete-item { padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.75rem; border-bottom: 1px solid #f3f4f6; }
+    .autocomplete-item:hover, .autocomplete-item.selected { background-color: #eff6ff; }
+    .autocomplete-item:last-child { border-bottom: none; }
+    
+    /* NOVO: Totalizadores gerais */
+    .totals-wrapper { display: flex; gap: 1rem; align-items: center; padding: 0.5rem 0.75rem; background-color: #eff6ff; border-radius: 0.5rem; border: 1px solid #3b82f6; }
+    .total-item { display: flex; flex-direction: column; align-items: center; }
+    .total-label { font-size: 0.625rem; color: #6b7280; font-weight: 600; text-transform: uppercase; }
+    .total-value { font-size: 1rem; color: #1f2937; font-weight: 700; }
+    
+    #stats { font-size: 0.625rem; color: #9ca3af; padding: 0; white-space: nowrap; }
+    
+    #cards-container { display: flex; flex-direction: column; gap: 1.5rem; }
+    
+    .card { background-color: #ffffff; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); overflow: hidden; }
+    .card.has-pending-faturados { border: 3px solid #ef4444; background-color: #fef2f2; }
+    
+    /* Linha selecionada por teclado */
+    tr.keyboard-selected { outline: 3px solid #3b82f6; outline-offset: -3px; background-color: #eff6ff !important; }
+    
+    .card-header { padding: 0.75rem 1rem; background-color: #f9fafb; border-bottom: 1px solid #ddd; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .card-header h3 { margin: 0; color: #1f2937; font-size: 1em; font-weight: 600; flex: 1; }
+    .card.has-pending-faturados .card-header { background-color: #fee2e2; border-bottom: 2px solid #ef4444; }
+    .card.has-pending-faturados .card-header h3 { color: #991b1b; }
+    
+    /* NOVO: Totalizador do card */
+    .card-totals { display: flex; gap: 0.75rem; align-items: center; font-size: 0.75rem; padding: 0.25rem 0.5rem; background-color: #f0fdf4; border-radius: 0.375rem; border: 1px solid #22c55e; }
+    .card-total-item { display: flex; align-items: center; gap: 0.25rem; }
+    .card-total-label { color: #166534; font-weight: 600; }
+    .card-total-value { color: #14532d; font-weight: 700; }
+    
+    /* Card message */
+    .card-message { padding: 0.5rem 1rem; background-color: #fef3c7; color: #92400e; text-align: center; font-weight: 600; font-size: 0.75rem; border-bottom: 1px solid #f59e0b; }
+    
+    /* Badge de status de prazo */
+    .prazo-badge { font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.5rem; border-radius: 0.25rem; white-space: nowrap; text-transform: uppercase; }
+    .prazo-badge.atrasado { background-color: #fecaca; color: #991b1b; }
+    .prazo-badge.no-prazo-limite { background-color: #fef3c7; color: #92400e; }
+    .prazo-badge.em-prazo { background-color: #bbf7d0; color: #14532d; }
+    
+    .card-body { padding: 0; overflow-x: auto; }
+    .card-body.loading { padding: 15px; text-align: center; color: #888; }
+    .card-body.error { padding: 15px; text-align: center; color: red; }
+    
+    .item-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .item-table th, .item-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+    .item-table th { background-color: #f9fafb; font-weight: 600; color: #374151; border-bottom-width: 2px; border-color: #e5e7eb; white-space: nowrap; }
+    .item-table tr:last-child td { border-bottom: none; }
+    
+    .item-table td.status-prazo { font-weight: 600; text-align: center; }
+    .item-table tr.item-inativo { background-color: #f3f4f6; opacity: 0.85; }
+    .item-table tr.item-faturado { background-color: #dcfce7; font-weight: 500; }
+    
+    .item-table tr.keyboard-focus { outline: 3px solid #3b82f6; outline-offset: -3px; }
+    
+    .item-checkbox { width: 18px; height: 18px; cursor: pointer; margin: 0; }
+    .checkbox-cell { width: 40px; text-align: center; }
+    .btn-finalizar { padding: 4px 10px; background-color: #3b82f6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.75rem; font-weight: 500; transition: background-color 0.2s; }
+    .btn-finalizar:hover { background-color: #2563eb; }
+    .btn-finalizar:disabled { background-color: #9ca3af; cursor: not-allowed; opacity: 0.6; }
+    .btn-finalizar:disabled:hover { background-color: #9ca3af; }
+    
+    .nowrap { white-space: nowrap; }
+    .description-col { min-width: 200px; }
+    
+    #controls { text-align: center; margin-top: 1.25rem; }
+    #btnMore { display: inline-flex; align-items: center; gap: 0.5rem; border-radius: 0.5rem; border: 1px solid #d1d5db; padding: 0.75rem 1.5rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; background: white; }
+    #btnMore:hover { background-color: #f9fafb; }
+    #btnMore:disabled { opacity: 0.5; cursor: not-allowed; }
+    #btnMore.hidden { display: none; }
+    
+    #noResults { display: none; color: #6b7280; padding: 2rem 0; text-align: center; }
+    #noResults.visible { display: block; }
+    
+    /* Modais */
+    .modal-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2000; }
+    .modal-overlay.hidden { display: none; }
+    .modal-content { background: white; border-radius: 0.75rem; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); max-width: 600px; width: 90%; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; }
+    .modal-header { padding: 1.25rem; border-bottom: 1px solid #e5e7eb; background-color: #f9fafb; }
+    .modal-header h2 { margin: 0; font-size: 1.25rem; font-weight: 700; color: #1f2937; }
+    .modal-header.warning { background-color: #fef3c7; border-bottom-color: #f59e0b; }
+    .modal-header.warning h2 { color: #92400e; }
+    .modal-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
+    .modal-section { margin-bottom: 1.5rem; }
+    .modal-section h3 { font-size: 1rem; font-weight: 600; margin: 0 0 0.75rem 0; color: #374151; }
+    .modal-section.faturar h3 { color: #16a34a; }
+    .modal-section.excluir h3 { color: #dc2626; }
+    .modal-item-list { list-style: none; padding: 0; margin: 0; }
+    .modal-item-list li { padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; background-color: #f9fafb; border-radius: 0.375rem; border-left: 3px solid #d1d5db; font-size: 0.875rem; }
+    .modal-section.faturar .modal-item-list li { border-left-color: #22c55e; background-color: #f0fdf4; }
+    .modal-section.excluir .modal-item-list li { border-left-color: #ef4444; background-color: #fef2f2; }
+    .modal-footer { padding: 1rem 1.25rem; border-top: 1px solid #e5e7eb; display: flex; gap: 0.75rem; justify-content: flex-end; background-color: #f9fafb; }
+    .modal-btn { padding: 0.6rem 1.5rem; border: none; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .modal-btn-confirm { background-color: #22c55e; color: white; }
+    .modal-btn-confirm:hover { background-color: #16a34a; }
+    .modal-btn-danger { background-color: #ef4444; color: white; }
+    .modal-btn-danger:hover { background-color: #dc2626; }
+    .modal-btn-cancel { background-color: #e5e7eb; color: #374151; }
+    .modal-btn-cancel:hover { background-color: #d1d5db; }
+    
+    .modal-message { font-size: 1rem; line-height: 1.6; color: #374151; text-align: center; font-weight: 500; padding: 1rem; }
+    .modal-message.warning { color: #92400e; background-color: #fef3c7; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 1rem; }
+    
+    /* Botões de ler lista e listas colapsáveis */
+    .toggle-list-btn { background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer; margin: 0.75rem 0; font-size: 0.875rem; font-weight: 600; transition: background 0.2s; }
+    .toggle-list-btn:hover { background: #2563eb; }
+    .collapsible-section { margin: 1rem 0; }
+    .collapsible-list { display: none; margin-top: 1rem; }
+    .collapsible-list.visible { display: block; }
+    
+    .keyboard-hint { position: fixed; bottom: 1rem; right: 1rem; background: #1f2937; color: white; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.75rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); z-index: 1500; opacity: 0.9; }
+    .keyboard-hint.hidden { display: none; }
+    .keyboard-hint kbd { background: #374151; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: monospace; margin: 0 0.25rem; }
+  </style>
+</head>
+<body>
+
+  <!-- Loader -->
+  <div id="loader" class="hidden">
+    <div class="spinner"></div>
+    <div id="loading-text">Carregando...</div>
+  </div>
+
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Relatório de Pedidos</h1>
+      <div class="header-meta">
+        <div id="updated-at">Carregando...</div>
+        <div id="stats"></div>
+      </div>
+      <button id="refreshButton" title="Atualizar dados">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- Controles -->
+    <div class="controls-wrapper">
+      <!-- Ações Globais -->
+      <div class="global-actions">
+        <button id="btn-faturar-global" class="btn-global-action btn-faturar-global" disabled>Faturado sem finalizar</button>
+        <button id="btn-excluir-global" class="btn-global-action btn-excluir-global" disabled>Excluir</button>
+        <span id="selected-count" class="selected-count">0 itens selecionados</span>
+      </div>
+
+      <!-- Filtros -->
+      <div class="filters">
+        <div class="filter-wrapper">
+          <input type="text" id="search-oc" class="filter-input" placeholder="Buscar OC ou Cliente..." autocomplete="off">
+          <div id="autocomplete-list" class="autocomplete-list"></div>
+        </div>
+        <select id="filter-status" class="filter-select">
+          <option value="all">Todos os Status</option>
+          <option value="with-checkboxes">Com Itens Inativos</option>
+          <option value="pending-faturados">Com Itens Faturados</option>
+        </select>
+        <select id="filter-prazo" class="filter-select">
+          <option value="tudo">Todos os Prazos</option>
+          <option value="atrasados">Atrasados</option>
+          <option value="em-prazo">No Prazo Limite</option>
+          <option value="a-vencer">A Vencer</option>
+          <option value="atrasados-em-prazo">Atrasados + No Prazo Limite</option>
+        </select>
+      </div>
+      
+      <!-- NOVO: Totalizadores Gerais -->
+      <div class="totals-wrapper">
+        <div class="total-item">
+          <span class="total-label">Metros</span>
+          <span id="total-metros" class="total-value">0</span>
+        </div>
+        <div class="total-item">
+          <span class="total-label">Pares</span>
+          <span id="total-pares" class="total-value">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cards Container -->
+    <div id="cards-container"></div>
+
+    <!-- No Results -->
+    <div id="noResults">Nenhuma OC encontrada com os filtros aplicados.</div>
+
+    <!-- Controls -->
+    <div id="controls">
+      <button id="btnMore" class="hidden">Carregar mais</button>
+    </div>
+  </div>
+
+  <!-- Modal de Aviso -->
+  <div id="warningModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header warning">
+        <h2>⚠️ Atenção: Itens Inativos Encontrados</h2>
+      </div>
+      <div class="modal-body">
+        <p class="modal-message warning">
+          Existem <strong><span id="warning-inactive-count">0</span></strong> itens inativos que precisam ser faturados ou excluídos.
+        </p>
+        <p style="text-align: center; color: #6b7280; font-size: 0.875rem;">
+  Selecione os itens usando as caixas de seleção e use os botões "Faturado sem finalizar" ou "Excluir" no topo da página.
+</p>        
+        <div class="collapsible-section">
+          <button class="toggle-list-btn" onclick="toggleInactiveList()">Ver Lista de Itens Inativos</button>
+          <ul id="warning-item-list" class="modal-item-list collapsible-list"></ul>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="warning-ok-btn" class="modal-btn modal-btn-cancel">Entendi</button>
+        <button id="warning-delete-btn" class="modal-btn modal-btn-danger">Excluir Todos</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Confirmação de Faturamento -->
+  <div id="confirmModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Confirmar Ação</h2>
+      </div>
+      <div class="modal-body">
+        <div class="modal-section faturar">
+          <h3>✓ Itens a Faturar (<span id="faturar-count">0</span>)</h3>
+          <ul id="modal-faturar-list" class="modal-item-list"></ul>
+        </div>
+        <div class="modal-section excluir">
+          <h3>✗ Itens a Excluir (<span id="excluir-count">0</span>)</h3>
+          <ul id="modal-excluir-list" class="modal-item-list"></ul>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="modal-cancel-btn" class="modal-btn modal-btn-cancel">Cancelar</button>
+        <button id="modal-confirm-btn" class="modal-btn modal-btn-confirm">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Exclusão em Massa -->
+  <div id="deleteAllModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header warning">
+        <h2>⚠️ Confirmar Exclusão</h2>
+      </div>
+      <div class="modal-body">
+        <p class="modal-message warning">
+          Você está prestes a excluir os seguintes itens:
+        </p>
+        <ul id="delete-all-list" class="modal-item-list"></ul>
+      </div>
+      <div class="modal-footer">
+        <button id="delete-all-cancel-btn" class="modal-btn modal-btn-cancel">Cancelar</button>
+        <button id="delete-all-confirm-btn" class="modal-btn modal-btn-danger">Confirmar Exclusão</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Sucesso -->
+  <div id="successModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>✅ Sucesso</h2>
+      </div>
+      <div class="modal-body">
+        <p id="success-message" class="modal-message"></p>
+      </div>
+      <div class="modal-footer">
+  <p class="modal-message" style="font-weight:700; text-align:center;">
+    Por favor, clicar em <strong>F5</strong>.
+  </p>
+</div>    
+</div>
+  </div>
+
+  <!-- Keyboard Hint -->
+  <div id="keyboard-hint" class="keyboard-hint hidden">
+    Use <kbd>↑</kbd> <kbd>↓</kbd> para navegar e <kbd>Espaço</kbd> para selecionar
+  </div>
+
+  <script>
+    // ==== VARIÁVEIS GLOBAIS ====
+    let ALL_OCS_INFO = [];
+    let FILTERED_OCS_INFO = [];
+    let ALL_OCS_ITEMS = {};
+    let appMeta = {};
+    let totalInactiveItems = 0;
+    
+    // Navegação por teclado
+    let allInactiveRows = [];
+    let currentKeyboardIndex = -1;
+    let allVisibleRows = [];
+    let currentRowIndex = -1;
+    
+    // Autocomplete
+    let autocompleteData = [];
+    let autocompleteIndex = -1;
+    
+    // ==== ELEMENTOS DO DOM ====
+    const $loader = document.getElementById('loader');
+    const $loadingText = document.getElementById('loading-text');
+    const $updatedAt = document.getElementById('updated-at');
+    const $stats = document.getElementById('stats');
+    const $cardsContainer = document.getElementById('cards-container');
+    const $btnMore = document.getElementById('btnMore');
+    const $noResults = document.getElementById('noResults');
+    const $refreshButton = document.getElementById('refreshButton');
+    
+    // Filtros
+    const $searchOC = document.getElementById('search-oc');
+    const $filterStatus = document.getElementById('filter-status');
+    const $filterPrazo = document.getElementById('filter-prazo');
+    const $autocompleteList = document.getElementById('autocomplete-list');
+    
+    // Ações Globais
+    const $btnFaturarGlobal = document.getElementById('btn-faturar-global');
+    const $btnExcluirGlobal = document.getElementById('btn-excluir-global');
+    const $selectedCount = document.getElementById('selected-count');
+    
+    // NOVO: Totalizadores
+    const $totalMetros = document.getElementById('total-metros');
+    const $totalPares = document.getElementById('total-pares');
+    
+    // Modais
+    const $warningModal = document.getElementById('warningModal');
+    const $warningInactiveCount = document.getElementById('warning-inactive-count');
+    const $warningItemList = document.getElementById('warning-item-list');
+    const $warningOkBtn = document.getElementById('warning-ok-btn');
+    const $warningDeleteBtn = document.getElementById('warning-delete-btn');
+    
+    const $confirmModal = document.getElementById('confirmModal');
+    const $modalFaturarList = document.getElementById('modal-faturar-list');
+    const $modalExcluirList = document.getElementById('modal-excluir-list');
+    const $modalConfirmBtn = document.getElementById('modal-confirm-btn');
+    const $modalCancelBtn = document.getElementById('modal-cancel-btn');
+    
+    const $deleteAllModal = document.getElementById('deleteAllModal');
+    const $deleteAllList = document.getElementById('delete-all-list');
+    const $deleteAllConfirmBtn = document.getElementById('delete-all-confirm-btn');
+    const $deleteAllCancelBtn = document.getElementById('delete-all-cancel-btn');
+    
+    const $successModal = document.getElementById('successModal');
+    const $successMessage = document.getElementById('success-message');
+    
+    const $keyboardHint = document.getElementById('keyboard-hint');
+    
+    // ==== FUNÇÕES AUXILIARES ====
+
+    function show(el, visible) {
+        if (!el) return;
+        if (visible) {
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
+    }
+    
+    function fmtInt(val) {
+        const num = Number(val);
+        if (isNaN(num)) return '0';
+        return num.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+    }
+    
+    function _normSearch_(str) {
+        if (!str) return '';
+        return String(str).trim().toUpperCase();
+    }
+    
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+
+    // ===== COMPATIBILIZAÇÃO v15.5 (normalização de chaves sem mudar funcionalidades) =====
+    function normalizeItemKeys(i) {
+      return {
+        'CARTELA': i.cartela ?? 'N/A',
+        'CÓD. CLIENTE': i.codCliente ?? 'N/A',
+        'DESCRIÇÃO': i.descricao ?? 'N/A',
+        'TAMANHO': i.tamanho ?? 'N/A',
+        'QTD. ABERTA': i.qtdAberta ?? 0,
+        'PRAZO': i.prazo ?? null,
+        'DT. ENTREGA': i.dtEntrega ?? null,
+        'Status': i.status ?? 'Desconhecido',
+        uniqueId: i.uniqueId,
+        planilhaLinha: i.planilhaLinha
+      };
+    }
+    
+    // ==== AUTOCOMPLETE ====
+    
+    function buildAutocompleteData() {
+        autocompleteData = ALL_OCS_INFO.map(oc => ({
+            label: `${oc.ordCompra} - ${oc.cliente}`,
+            value: oc.ordCompra
+        }));
+        console.log(`🔍 Dados de autocomplete construídos: ${autocompleteData.length} itens`);
+    }
+    
+    $searchOC.addEventListener('input', (e) => {
+        const term = _normSearch_(e.target.value);
+        
+        if (term.length < 1) {
+            hideAutocomplete();
+            aplicarFiltros();
+            return;
+        }
+        
+        const matches = autocompleteData.filter(item => 
+            _normSearch_(item.label).includes(term)
+        ).slice(0, 10);
+        
+        if (matches.length > 0) {
+            showAutocomplete(matches);
+        } else {
+            hideAutocomplete();
+        }
+        
+        aplicarFiltros();
+    });
+    
+    $searchOC.addEventListener('keydown', (e) => {
+        const items = $autocompleteList.querySelectorAll('.autocomplete-item');
+        if (items.length === 0) return;
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            autocompleteIndex = Math.min(autocompleteIndex + 1, items.length - 1);
+            updateAutocompleteSelection(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            autocompleteIndex = Math.max(autocompleteIndex - 1, -1);
+            updateAutocompleteSelection(items);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (autocompleteIndex >= 0 && autocompleteIndex < items.length) {
+                items[autocompleteIndex].click();
+            }
+        } else if (e.key === 'Escape') {
+            hideAutocomplete();
+        }
+    });
+    
+    $searchOC.addEventListener('blur', () => {
+        setTimeout(() => hideAutocomplete(), 200);
+    });
+    
+    function updateAutocompleteSelection(items) {
+        items.forEach((item, idx) => {
+            if (idx === autocompleteIndex) {
+                item.classList.add('selected');
+                item.scrollIntoView({ block: 'nearest' });
+            } else {
+                item.classList.remove('selected');
+            }
+        });
+    }
+    
+    function showAutocomplete(matches) {
+        $autocompleteList.innerHTML = '';
+        autocompleteIndex = -1;
+        
+        matches.forEach((match, idx) => {
+            const item = document.createElement('div');
+            item.className = 'autocomplete-item';
+            item.textContent = match.label;
+            item.dataset.value = match.value;
+            $autocompleteList.appendChild(item);
+        });
+        
+        $autocompleteList.classList.add('visible');
+        
+        // Adicionar event listeners
+        $autocompleteList.querySelectorAll('.autocomplete-item').forEach((item, idx) => {
+            item.addEventListener('click', () => {
+                $searchOC.value = item.dataset.value;
+                hideAutocomplete();
+                aplicarFiltros();
+            });
+        });
+    }
+    
+    function hideAutocomplete() {
+        $autocompleteList.classList.remove('visible');
+        $autocompleteList.innerHTML = '';
+        autocompleteIndex = -1;
+    }
+    
+    // ==== FUNÇÕES DE CÁLCULO ====
+    
+    // Determina unidade baseada no tamanho
+    function getUnidade(tamanho) {
+        const tamanhoUpper = String(tamanho || '').toUpperCase();
+        if (tamanhoUpper.includes('MM')) {
+            return 'metros';
+        } else if (tamanhoUpper.includes('CM')) {
+            return 'Pares';
+        } else {
+            return 'unidades';
+        }
+    }
+    
+    // Formata descrição completa do item para listas
+    function formatItemInfo(desc, tamanho, qtd) {
+        const unidade = getUnidade(tamanho);
+        const tamanhoStr = tamanho && tamanho !== 'N/A' ? ` - ${tamanho}` : '';
+        return `${desc}${tamanhoStr} - ${fmtInt(qtd)} ${unidade}`;
+    }
+    
+    // NOVO: Calcula totais de metros e pares de um conjunto de itens
+    function calcularTotais(items) {
+        let totalMetros = 0;
+        let totalPares = 0;
+        
+        items.forEach(item => {
+            const qtd = Number(item['QTD. ABERTA']) || 0;
+            const unidade = getUnidade(item.TAMANHO);
+            
+            if (unidade === 'metros') {
+                totalMetros += qtd;
+            } else if (unidade === 'Pares') {
+                totalPares += qtd;
+            }
+        });
+        
+        return { metros: totalMetros, pares: totalPares };
+    }
+    
+    // Calcula o prazo mínimo do card (menor prazo entre todos os itens)
+    function calcularPrazoMinimo(items) {
+        if (!items || items.length === 0) return null;
+        const prazos = items.map(item => {
+            const prazo = item.PRAZO;
+            if (prazo === null || prazo === undefined || prazo === 'N/A') return Infinity;
+            return Number(prazo);
+        }).filter(p => !isNaN(p));
+        
+        if (prazos.length === 0) return null;
+        return Math.min(...prazos);
+    }
+    
+    // Determina o status do prazo
+    function getStatusPrazo(prazo) {
+        if (prazo === null || prazo === undefined) return null;
+        if (prazo < 0) return 'atrasado';
+        if (prazo === 0) return 'no-prazo-limite';
+        return 'em-prazo';
+    }
+    
+    // Obtém o texto do badge de prazo
+    function getTextoPrazo(status) {
+        if (status === 'atrasado') return 'ATRASADO';
+        if (status === 'no-prazo-limite') return 'NO PRAZO LIMITE';
+        if (status === 'em-prazo') return 'EM PRAZO';
+        return '';
+    }
+    
+    function formatarData(dataInput) {
+      if (!dataInput) return 'N/A';
+      try {
+        let data;
+        if (typeof dataInput === 'number') {
+          const excelEpoch = new Date(1899, 11, 30);
+          data = new Date(excelEpoch.getTime() + (dataInput * 86400000));
+        } else if (dataInput instanceof Date) {
+          data = dataInput;
+        } else if (typeof dataInput === 'string') {
+          const s = dataInput.trim();
+          // SE já vier do backend como dd/MM/yyyy, não reparse
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+          data = new Date(s);
+        } else {
+          return 'N/A';
+        }
+        if (isNaN(data.getTime())) return 'Data Inválida';
+        const dia = String(data.getDate()).padStart(2, '0');
+        const mes = String(data.getMonth() + 1).padStart(2, '0');
+        const ano = data.getFullYear();
+        if (!dia || dia === 'NaN') return 'N/A';
+        return `${dia}/${mes}/${ano}`;
+      } catch (e) {
+        console.error('Erro ao formatar data:', e, 'Input:', dataInput);
+        return 'Erro Data';
+      }
+    }
+
+    // ==== CARREGAMENTO DE DADOS ====
+
+    function carregarListaOcs(isRefresh = false) {
+        console.log("🚀 SISTEMA UNIFICADO v19.0 - Carregando TUDO em 1 chamada...");
+        $loader.classList.remove('hidden');
+        $loadingText.textContent = isRefresh ? 'Atualizando...' : 'Carregando dados...';
+        
+        const cacheBuster = Date.now(); // Cache buster
+        
+        google.script.run
+            .withSuccessHandler(response => {
+                console.log("✅ Resposta recebida:", response);
+                
+                if (response && response.success) {
+                    // Backend v15.5 retorna: { success, ordCompras, allItems, stats, meta }
+                    console.log("🔍 DEBUG - Resposta completa:", response);
+
+                    // =======================
+                    // COMPAT v15.5 (normaliza sem mudar o restante do front)
+                    // =======================
+                    ALL_OCS_INFO = (response.ordCompras || []).map(oc => ({
+                      ordCompra: oc.ordCompraId,     // front usa "ordCompra"
+                      cliente: oc.cliente
+                    }));
+
+                   // Converter array ordCompras para objeto indexado (sempre { ok, items })
+const itemsObj = {};
+if (response.ordCompras) {
+  response.ordCompras.forEach(oc => {
+    const key = oc.ordCompra || oc.ordCompraId;
+    itemsObj[key] = { ok: true, items: oc.items || [] };
+  });
+}
+ALL_OCS_ITEMS = itemsObj;
+ // =======================
+
+                    appMeta = response.meta || {};
+                    
+                    console.log(`✅ ${ALL_OCS_INFO.length} OCs carregadas`);
+                    console.log(`✅ ${Object.keys(ALL_OCS_ITEMS).length} OCs com itens`);
+                    console.log(`✅ Total de itens: ${response.stats ? response.stats.totalItems : 0}`);
+                    console.log(`⏱️ Tempo: ${appMeta.executionTime || 0}ms`);
+                    if (appMeta.fromCache) {
+                        console.log(`📦 Dados do cache`);
+                    }
+                    
+                    // Atualizar metadados
+                    if (appMeta.displayTime) {
+                        $updatedAt.textContent = 'Atualizado: ' + appMeta.displayTime;
+                    } else if (appMeta.timestamp) {
+                        $updatedAt.textContent = 'Atualizado: ' + new Date(appMeta.timestamp).toLocaleString('pt-BR');
+                    }
+                    
+                    // Construir autocomplete
+                    buildAutocompleteData();
+                    
+                    // Limpar container se for refresh
+                    if (isRefresh) {
+                        $cardsContainer.innerHTML = '';
+                    }
+                    
+                    // Aplicar filtros e renderizar
+                    aplicarFiltros();
+                    
+                } else {
+                    console.error("❌ Resposta inválida:", response);
+                    alert("Erro ao carregar dados: " + (response && response.error ? response.error : "Resposta inválida"));
+                }
+                
+                $loader.classList.add('hidden');
+            })
+             .withFailureHandler(error => {
+  console.error('❌ Erro ao faturar:', error);
+  alert('Falha ao faturar itens: ' + error.message);
+  $btnFaturarGlobal.disabled = false;
+  $btnFaturarGlobal.textContent = 'Faturado sem finalizar'; // ← aqui
+})
+           
+.fetchAllDataUnified(cacheBuster);
+    }
+
+    function aplicarFiltros() {
+        const searchTerm = _normSearch_($searchOC.value);
+        const statusFilter = $filterStatus.value;
+        const prazoFilter = $filterPrazo.value;
+        
+        let filtered = [...ALL_OCS_INFO];
+        
+        if (searchTerm) {
+            filtered = filtered.filter(oc => {
+                const ocNorm = _normSearch_(oc.ordCompra);
+                const clienteNorm = _normSearch_(oc.cliente);
+                return ocNorm.includes(searchTerm) || clienteNorm.includes(searchTerm);
+            });
+        }
+        
+        if (statusFilter === 'with-checkboxes') {
+            filtered = filtered.filter(oc => {
+                const ocData = ALL_OCS_ITEMS[oc.ordCompra];
+                if (!ocData || !ocData.items) return false;
+                return ocData.items.some(item => item.Status === 'Inativo');
+            });
+        } else if (statusFilter === 'pending-faturados') {
+            filtered = filtered.filter(oc => {
+                const ocData = ALL_OCS_ITEMS[oc.ordCompra];
+                if (!ocData || !ocData.items) return false;
+                return ocData.items.some(item => item.Status === 'Faturado');
+            });
+        }
+        
+        // Filtro de prazo
+        if (prazoFilter !== 'tudo') {
+            filtered = filtered.filter(oc => {
+                const ocData = ALL_OCS_ITEMS[oc.ordCompra];
+                if (!ocData || !ocData.items) return false;
+                const prazoMin = calcularPrazoMinimo(ocData.items);
+                if (prazoMin === null) return false;
+                
+                switch(prazoFilter) {
+                    case 'atrasados':
+                        return prazoMin < 0;
+                    case 'em-prazo':
+                        return prazoMin === 0;
+                    case 'a-vencer':
+                        return prazoMin > 0;
+                    case 'atrasados-em-prazo':
+                        return prazoMin <= 0;
+                    default:
+                        return true;
+                }
+            });
+        }
+        
+        FILTERED_OCS_INFO = filtered;
+        $cardsContainer.innerHTML = '';
+        console.log(`🔍 Filtros aplicados. OCs filtradas: ${FILTERED_OCS_INFO.length}`);
+        
+        if (FILTERED_OCS_INFO.length === 0) {
+            $noResults.classList.add('visible');
+            updateStats();
+            updateTotaisGerais();
+        } else {
+            $noResults.classList.remove('visible');
+            
+            // RENDERIZAR CARDS DIRETAMENTE (dados já estão carregados!)
+            renderizarTodosOsCards();
+        }
+    }
+    
+    function renderizarTodosOsCards() {
+  console.log(`📦 Renderizando ${FILTERED_OCS_INFO.length} cards...`);
+
+  const cards = [];
+  totalInactiveItems = 0;
+
+  FILTERED_OCS_INFO.forEach(ocInfo => {
+    const ocData = ALL_OCS_ITEMS[ocInfo.ordCompra];
+    if (!ocData || !ocData.items || ocData.items.length === 0) return;
+
+    const items = ocData.items.filter(i => i.Status !== 'Excluido');
+    if (items.length === 0) return;
+
+    const hasInativos   = items.some(i => i.Status === 'Inativo');
+    const hasFaturados  = items.some(i => i.Status === 'Faturado');
+    const prazoMin      = calcularPrazoMinimo(items);
+    const prazoKey      = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
+    const groupRank     = hasInativos ? 0 : (hasFaturados ? 1 : 2);
+
+    if (hasInativos) {
+      totalInactiveItems += items.filter(i => i.Status === 'Inativo').length;
+    }
+
+    cards.push({
+      ocInfo,
+      items,
+      hasInativos,
+      hasFaturados,
+      prazoKey,
+      groupRank,
+      ocKey: String(ocInfo.ordCompra || '')
+    });
+  });
+
+  console.log(
+    `📊 grupos => inativos:${cards.filter(c=>c.groupRank===0).length} `
+    + `faturados:${cards.filter(c=>c.groupRank===1).length} `
+    + `normais:${cards.filter(c=>c.groupRank===2).length}`
+  );
+  console.log(`🔵 Total inativos: ${totalInactiveItems}`);
+
+  // ORDENAR: grupo (0,1,2) depois prazo ascendente
+  cards.sort((a, b) => {
+    if (a.groupRank !== b.groupRank) return a.groupRank - b.groupRank;
+    if (a.prazoKey !== b.prazoKey)   return a.prazoKey - b.prazoKey;
+    // desempate estável
+    return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
+  });
+
+  // Limpar e renderizar na ordem
+  $cardsContainer.innerHTML = '';
+  cards.forEach(c => {
+    renderOcCard(c.ocInfo, { ok: true, items: c.items });
+  });
+
+  updateStats();
+  updateInactiveRowsList();
+  updateVisibleRows();
+  updateTotaisGerais();
+
+  if (totalInactiveItems > 0) {
+    console.log(`⚠️ ${totalInactiveItems} itens inativos - mostrando modal`);
+    showWarningModal();
+  }
+}
+
+
+
+    function renderOcCard(ocInfo, itemResponse) {
+        if (!ocInfo || !ocInfo.ordCompra) { 
+            console.error("❌ renderOcCard chamado com ocInfo inválido:", ocInfo); 
+            return; 
+        }
+
+        let card = document.createElement("div");
+        card.className = "card";
+        const ocIdLimpo = String(ocInfo.ordCompra).replace(/[^a-zA-Z0-9-]/g, '');
+        const cardId = "card-" + ocIdLimpo;
+        
+        let existingCard = document.getElementById(cardId);
+        if (existingCard) { 
+            existingCard.innerHTML = ''; 
+            card = existingCard; 
+        } else { 
+            card.id = cardId; 
+        }
+
+        let items = [];
+        let hasInactiveItems = false;
+        let hasFaturadosItems = false;
+        
+        if (itemResponse && itemResponse.ok === true && itemResponse.items && itemResponse.items.length > 0) {
+            items = itemResponse.items.filter(item => item.Status !== 'Excluido');
+            hasInactiveItems = items.some(item => item.Status === 'Inativo');
+            hasFaturadosItems = items.some(item => item.Status === 'Faturado');
+            
+            console.log(`🔧 Renderizando OC ${ocInfo.ordCompra}: ${items.length} itens visíveis (${items.filter(i => i.Status === 'Inativo').length} inativos)`);
+        }
+
+        // DEBUG: Mostra warning se não tiver itens mas deveria ter
+        if (items.length === 0 && itemResponse.ok === true) {
+            console.warn(`⚠️ OC ${ocInfo.ordCompra}: Card seria removido (0 itens visíveis). Response:`, itemResponse);
+            if (existingCard) {
+                existingCard.remove();
+            }
+            return;
+        }
+
+        if (hasFaturadosItems) {
+            card.classList.add('has-pending-faturados');
+        } else {
+            card.classList.remove('has-pending-faturados');
+        }
+
+        // Calcula prazo e status
+        const prazoMin = calcularPrazoMinimo(items);
+        const statusPrazo = getStatusPrazo(prazoMin);
+        const textoPrazo = getTextoPrazo(statusPrazo);
+        
+        // NOVO: Calcula totais do card
+        const totaisCard = calcularTotais(items);
+        
+        console.log(`📊 OC ${ocInfo.ordCompra}: Prazo mínimo = ${prazoMin}, Status = ${statusPrazo}, Metros = ${totaisCard.metros}, Pares = ${totaisCard.pares}`);
+
+        let headerHtml = `
+            <div class="card-header">
+                ${statusPrazo ? `<span class="prazo-badge ${statusPrazo}">${textoPrazo}</span>` : ''}
+                <h3>OC: ${ocInfo.ordCompra} | ${ocInfo.cliente || 'Sem cliente'}</h3>`;
+        
+        // NOVO: Adiciona totalizador do card
+        if (totaisCard.metros > 0 || totaisCard.pares > 0) {
+            headerHtml += `<div class="card-totals">`;
+            if (totaisCard.metros > 0) {
+                headerHtml += `<div class="card-total-item">
+                    <span class="card-total-label">Metros:</span>
+                    <span class="card-total-value">${fmtInt(totaisCard.metros)}</span>
+                </div>`;
+            }
+            if (totaisCard.pares > 0) {
+                headerHtml += `<div class="card-total-item">
+                    <span class="card-total-label">Pares:</span>
+                    <span class="card-total-value">${fmtInt(totaisCard.pares)}</span>
+                </div>`;
+            }
+            headerHtml += `</div>`;
+        }
+        
+        headerHtml += `</div>`;
+        
+        if (hasFaturadosItems) {
+            headerHtml += `<div class="card-message">ITEM FATURADO AGUARDANDO FINALIZAR</div>`;
+        }
+
+        let bodyHtml = '';
+        
+        if (items.length > 0) {
+            bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
+                            ${hasInactiveItems ? '<th class="checkbox-cell"></th>' : ''}
+                            <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
+                            <th>Tamanho</th><th>Qtd.</th><th class="status-prazo">Prazo</th>
+                            <th>Dt. Entrega</th>
+                            <th>Ações</th></tr></thead><tbody>`;
+            
+            items.forEach(item => {
+                if (!item) return; 
+                const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
+                const itemId = `item-linha-${item.planilhaLinha}`; 
+                const isInactive = item.Status === 'Inativo';
+                const isFaturado = item.Status === 'Faturado';
+                
+                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
+                
+                if (hasInactiveItems) {
+                    if (isInactive) {
+                        bodyHtml += `<td class="checkbox-cell"><input type="checkbox" class="item-checkbox" onchange="updateGlobalSelectedCount()"></td>`;
+                    } else {
+                        bodyHtml += `<td class="checkbox-cell"></td>`;
+                    }
+                }
+                
+                bodyHtml += `
+                        <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
+                        <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
+                        <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
+                        <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
+                        <td class="nowrap">${fmtInt(item['QTD. ABERTA'])}</td>
+                        <td class="status-prazo nowrap">${item.PRAZO ?? 'N/A'}</td>
+                        <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
+                        <td class="nowrap">`;
+                
+                if (isFaturado) {
+                    const disabled = hasInactiveItems ? 'disabled' : '';
+                    const title = hasInactiveItems ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
+                    bodyHtml += `<button class="btn-finalizar" ${disabled} title="${title}" onclick="handleFinalizar('${item.uniqueId}', ${item.planilhaLinha}, '${cardId}')">Finalizado</button>`;
+                } else {
+                    bodyHtml += '-';
+                }
+                
+                bodyHtml += `</td></tr>`;
+            });
+            bodyHtml += `</tbody></table></div>`;
+        } else if (itemResponse && itemResponse.ok === false) {
+            const errorMsg = itemResponse.error ? (itemResponse.error.message || JSON.stringify(itemResponse.error)) : 'Erro desconhecido';
+            bodyHtml = `<div class="card-body error">Erro ao carregar itens: ${errorMsg}</div>`;
+        } else {
+            bodyHtml = `<div class="card-body loading">Nenhum item encontrado para esta OC.</div>`;
+        }
+
+        card.innerHTML = headerHtml + `<div class="card-body">${bodyHtml}</div>`;
+        
+        if (!existingCard) { 
+            $cardsContainer.appendChild(card); 
+        }
+    }
+    
+    function updateStats() {
+      if (!$stats) {
+        console.warn('⚠️ Elemento #stats não encontrado');
+        return;
+      }
+      const totalOcs = FILTERED_OCS_INFO.length;
+      const cardsRendered = $cardsContainer.querySelectorAll('.card').length;
+      $stats.textContent = `Exibindo ${cardsRendered} de ${totalOcs} OCs.`;
+    }
+    
+    // NOVO: Atualiza totalizadores gerais
+    function updateTotaisGerais() {
+        let totalMetros = 0;
+        let totalPares = 0;
+        
+        // Percorre todos os cards visíveis
+        FILTERED_OCS_INFO.forEach(ocInfo => {
+            const itemResponse = ALL_OCS_ITEMS[ocInfo.ordCompra];
+            if (itemResponse && itemResponse.ok && itemResponse.items) {
+                const items = itemResponse.items.filter(item => item.Status !== 'Excluido');
+                const totais = calcularTotais(items);
+                totalMetros += totais.metros;
+                totalPares += totais.pares;
+            }
+        });
+        
+        $totalMetros.textContent = fmtInt(totalMetros);
+        $totalPares.textContent = fmtInt(totalPares);
+        
+        console.log(`📊 Totais gerais atualizados: ${totalMetros} metros, ${totalPares} pares`);
+    }
+
+    function updateGlobalSelectedCount() {
+        const checkboxes = document.querySelectorAll('.item-checkbox:checked');
+        const count = checkboxes.length;
+        
+        $selectedCount.textContent = `${count} item${count !== 1 ? 'ns' : ''} selecionado${count !== 1 ? 's' : ''}`;
+        
+        $btnFaturarGlobal.disabled = count === 0;
+        $btnExcluirGlobal.disabled = count === 0;
+    }
+    
+    function updateInactiveRowsList() {
+        allInactiveRows = Array.from(document.querySelectorAll('tr.item-inativo'));
+        currentKeyboardIndex = -1;
+        console.log(`📋 Lista de linhas inativas atualizada: ${allInactiveRows.length} itens`);
+    }
+    
+    function updateVisibleRows() {
+        allVisibleRows = Array.from(document.querySelectorAll('.item-table tbody tr'));
+        currentRowIndex = -1;
+        console.log(`📋 Lista de linhas visíveis atualizada: ${allVisibleRows.length} itens`);
+    }
+    
+    function updateInactiveCount() {
+        const count = document.querySelectorAll('tr.item-inativo').length;
+        totalInactiveItems = count;
+        console.log(`📊 Total de itens inativos: ${totalInactiveItems}`);
+        return totalInactiveItems;
+    }
+    
+    // Reordena cards: Inativos → Faturados → Normais
+    function reorderCards() {
+  console.log('🔄 Reordenando cards...');
+
+  const cards = Array.from($cardsContainer.querySelectorAll('.card')).map(card => {
+    const hasInativos  = card.querySelectorAll('.item-inativo').length > 0;
+    const hasFaturados = card.classList.contains('has-pending-faturados');
+
+    // menor prazo entre as linhas visíveis do card
+    let prazoMin = Infinity;
+    card.querySelectorAll('td.status-prazo').forEach(td => {
+      const n = parseInt((td.textContent || '').trim(), 10);
+      if (!isNaN(n)) prazoMin = Math.min(prazoMin, n);
+    });
+    const prazoKey  = (prazoMin === Infinity) ? Infinity : prazoMin;
+    const groupRank = hasInativos ? 0 : (hasFaturados ? 1 : 2);
+    const ocKey     = (card.id || '').replace(/^card-/, '');
+
+    return { card, groupRank, prazoKey, ocKey };
+  });
+
+  cards.sort((a, b) => {
+    if (a.groupRank !== b.groupRank) return a.groupRank - b.groupRank;
+    if (a.prazoKey !== b.prazoKey)   return a.prazoKey - b.prazoKey;
+    return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
+  });
+
+  // reapenda na nova ordem
+  const frag = document.createDocumentFragment();
+  cards.forEach(c => frag.appendChild(c.card));
+  $cardsContainer.innerHTML = '';
+  $cardsContainer.appendChild(frag);
+
+  updateTotaisGerais();
+  updateStats();
+}
+
+    // ==== MODAIS ====
+    
+    function showWarningModal() {
+        $warningInactiveCount.textContent = totalInactiveItems;
+        
+        // Preenche lista de itens inativos
+        const inactiveItems = [];
+        document.querySelectorAll('tr.item-inativo').forEach(row => {
+            const desc = row.dataset.itemDesc || 'Item';
+            const qtd = row.dataset.itemQtd || '0';
+            const tamanho = row.dataset.itemTamanho || '';
+            const oc = row.dataset.oc || '';
+            inactiveItems.push(`OC ${oc} - ${formatItemInfo(desc, tamanho, qtd)}`);
+        });
+        
+        $warningItemList.innerHTML = inactiveItems.map(item => 
+            `<li>${item}</li>`
+        ).join('');
+        
+        $warningModal.classList.remove('hidden');
+    }
+
+    function closeWarningModal() {
+        $warningModal.classList.add('hidden');
+    }
+    
+    function toggleInactiveList() {
+        $warningItemList.classList.toggle('visible');
+    }
+
+    function showDeleteAllModal() {
+        // Coleta todos os itens inativos
+        const allInactiveItems = [];
+        
+        document.querySelectorAll('tr.item-inativo').forEach(row => {
+            const desc = row.dataset.itemDesc || 'Item';
+            const qtd = row.dataset.itemQtd || '0';
+            const tamanho = row.dataset.itemTamanho || '';
+            const oc = row.dataset.oc || '';
+            allInactiveItems.push({
+                uniqueId: row.dataset.uniqueId,
+                linha: parseInt(row.dataset.linha),
+                info: `OC ${oc} - ${formatItemInfo(desc, tamanho, qtd)}`
+            });
+        });
+        
+        console.log(`🗑️ Preparando exclusão em massa de ${allInactiveItems.length} itens`);
+        
+        // Preenche lista
+        $deleteAllList.innerHTML = allInactiveItems.map(item => 
+            `<li>✗ ${item.info}</li>`
+        ).join('');
+        
+        // Guarda dados
+        $deleteAllModal.dataset.items = JSON.stringify(allInactiveItems);
+        
+        // Mostra modal
+        closeWarningModal();
+        $deleteAllModal.classList.remove('hidden');
+    }
+    
+    function showExcluirGlobalModal() {
+        // Coleta apenas os itens MARCADOS para exclusão
+        const selectedItems = [];
+        
+        document.querySelectorAll('.item-checkbox:checked').forEach(checkbox => {
+            const row = checkbox.closest('tr');
+            const desc = row.dataset.itemDesc || 'Item';
+            const qtd = row.dataset.itemQtd || '0';
+            const tamanho = row.dataset.itemTamanho || '';
+            const oc = row.dataset.oc || '';
+            selectedItems.push({
+                uniqueId: row.dataset.uniqueId,
+                linha: parseInt(row.dataset.linha),
+                info: `OC ${oc} - ${formatItemInfo(desc, tamanho, qtd)}`
+            });
+        });
+        
+        if (selectedItems.length === 0) {
+            alert('Nenhum item selecionado para excluir.');
+            return;
+        }
+        
+        console.log(`🗑️ Preparando exclusão de ${selectedItems.length} itens selecionados`);
+        
+        // Preenche lista
+        $deleteAllList.innerHTML = selectedItems.map(item => 
+            `<li>✗ ${item.info}</li>`
+        ).join('');
+        
+        // Guarda dados
+        $deleteAllModal.dataset.items = JSON.stringify(selectedItems);
+        
+        // Mostra modal
+        $deleteAllModal.classList.remove('hidden');
+    }
+
+    function hideDeleteAllModal() {
+        $deleteAllModal.classList.add('hidden');
+    }
+
+    function confirmDeleteAll() {
+        const items = JSON.parse($deleteAllModal.dataset.items || '[]');
+        
+        if (items.length === 0) {
+            alert('Nenhum item para excluir.');
+            hideDeleteAllModal();
+            return;
+        }
+        
+        console.log(`🗑️ Confirmando exclusão de ${items.length} itens...`);
+        
+        hideDeleteAllModal();
+        $loader.classList.remove('hidden');
+        $loadingText.textContent = 'Excluindo itens...';
+        
+        google.script.run
+            .withSuccessHandler(result => {
+                console.log('✅ Resultado da exclusão em massa:', result);
+                $loader.classList.add('hidden');
+                
+                if (result.success) {
+                    // Remove itens da visualização
+                    items.forEach(item => {
+                        const row = document.getElementById(`item-linha-${item.linha}`);
+                        if (row) {
+                            row.remove();
+                        }
+                    });
+                    
+                    // Remove cards vazios
+                    document.querySelectorAll('.card').forEach(card => {
+                        const rows = card.querySelectorAll('.item-table tbody tr');
+                        if (rows.length === 0) {
+                            card.remove();
+                        }
+                    });
+                    
+                    hideDeleteAllModal();
+                    showSuccessModal(`${result.processados} item(ns) excluído(s) com sucesso!`);
+                    updateStats();
+                    updateInactiveRowsList();
+                    updateInactiveCount();
+                    reorderCards();
+                } else {
+                    alert('Erro ao excluir itens: ' + (result.error || 'Erro desconhecido'));
+                }
+            })
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao excluir:', error);
+                alert('Falha ao excluir itens: ' + error.message);
+                $loader.classList.add('hidden');
+            })
+            .excluirMultiplosItens(items);
+    }
+
+    // ==== MODAL DE CONFIRMAÇÃO DE FATURAMENTO ====
+    function showConfirmModal() {
+        const allInactiveRows = document.querySelectorAll('tr.item-inativo');
+        const itemsToFaturar = [];
+        const itemsToExcluir = [];
+        
+        allInactiveRows.forEach(row => {
+            const checkbox = row.querySelector('.item-checkbox');
+            const desc = row.dataset.itemDesc || 'Item';
+            const qtd = row.dataset.itemQtd || '0';
+            const tamanho = row.dataset.itemTamanho || '';
+            const itemInfo = formatItemInfo(desc, tamanho, qtd);
+            
+            if (checkbox && checkbox.checked) {
+                itemsToFaturar.push({
+                    uniqueId: row.dataset.uniqueId,
+                    linha: parseInt(row.dataset.linha),
+                    info: itemInfo
+                });
+            } else {
+                itemsToExcluir.push({
+                    uniqueId: row.dataset.uniqueId,
+                    linha: parseInt(row.dataset.linha),
+                    info: itemInfo
+                });
+            }
+        });
+        
+        $modalFaturarList.innerHTML = itemsToFaturar.map(item => 
+            `<li>✓ ${item.info}</li>`
+        ).join('');
+        
+        $modalExcluirList.innerHTML = itemsToExcluir.map(item => 
+            `<li>✗ ${item.info}</li>`
+        ).join('');
+        
+        $confirmModal.classList.remove('hidden');
+        
+        $confirmModal.dataset.faturar = JSON.stringify(itemsToFaturar);
+        $confirmModal.dataset.excluir = JSON.stringify(itemsToExcluir);
+    }
+
+    function hideConfirmModal() {
+        $confirmModal.classList.add('hidden');
+    }
+
+    function confirmFaturamento() {
+        const itemsToFaturar = JSON.parse($confirmModal.dataset.faturar || '[]');
+        const itemsToExcluir = JSON.parse($confirmModal.dataset.excluir || '[]');
+        const cardIds = new Set();
+        
+        hideConfirmModal();
+        
+        console.log(`💳 Faturando ${itemsToFaturar.length} itens e excluindo ${itemsToExcluir.length} itens`);
+        
+        $btnFaturarGlobal.disabled = true;
+        $btnFaturarGlobal.textContent = 'Processando...';
+        
+        google.script.run
+            .withSuccessHandler(resultFaturar => {
+                console.log('✅ Resultado do faturamento:', resultFaturar);
+                
+                if (itemsToExcluir.length > 0) {
+                    google.script.run
+                        .withSuccessHandler(resultExcluir => {
+                            console.log('✅ Resultado da exclusão:', resultExcluir);
+                            
+                            itemsToFaturar.forEach(item => {
+                                const row = document.getElementById(`item-linha-${item.linha}`);
+                                if (row) {
+                                    row.classList.remove('item-inativo');
+                                    row.classList.add('item-faturado');
+                                    const checkbox = row.querySelector('.item-checkbox');
+                                    if (checkbox) {
+                                        checkbox.closest('td').innerHTML = '';
+                                    }
+                                    cardIds.add(row.dataset.oc);
+                                }
+                            });
+                            
+                            itemsToExcluir.forEach(item => {
+                                const row = document.getElementById(`item-linha-${item.linha}`);
+                                if (row) {
+                                    row.remove();
+                                }
+                            });
+                            
+                            // Atualiza botões Finalizado com base em inativos restantes
+                            cardIds.forEach(ocId => {
+                                const cardIdClean = "card-" + String(ocId).replace(/[^a-zA-Z0-9-]/g, '');
+                                const card = document.getElementById(cardIdClean);
+                                if (card) {
+                                    // Verifica se ainda há inativos no card
+                                    const hasInactives = card.querySelectorAll('.item-inativo').length > 0;
+                                    
+                                    // Atualiza botões Finalizado
+                                    card.querySelectorAll('.btn-finalizar').forEach(btn => {
+                                        btn.disabled = hasInactives;
+                                        btn.title = hasInactives ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
+                                    });
+                                    
+                                    // Adiciona botão para itens recém faturados
+                                    itemsToFaturar.forEach(item => {
+                                        const row = document.getElementById(`item-linha-${item.linha}`);
+                                        if (row && row.dataset.oc === ocId) {
+                                            const acoesCell = row.querySelector('td:last-child');
+                                            if (acoesCell && !acoesCell.querySelector('.btn-finalizar')) {
+                                                const disabled = hasInactives ? 'disabled' : '';
+                                                const title = hasInactives ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
+                                                acoesCell.innerHTML = `<button class="btn-finalizar" ${disabled} title="${title}" onclick="handleFinalizar('${item.uniqueId}', ${item.linha}, '${cardIdClean}')">Finalizado</button>`;
+                                            }
+                                        }
+                                    });
+                                    
+                                    card.classList.add('has-pending-faturados');
+                                    if (!card.querySelector('.card-message')) {
+                                        const header = card.querySelector('.card-header');
+                                        const message = document.createElement('div');
+                                        message.className = 'card-message';
+                                        message.textContent = 'ITEM FATURADO AGUARDANDO FINALIZAR';
+                                        header.after(message);
+                                    }
+                                    
+                                    // NOVO: Recalcula totais do card
+                                    const ocInfo = FILTERED_OCS_INFO.find(oc => oc.ordCompra === ocId);
+                                    if (ocInfo) {
+                                        const itemResponse = ALL_OCS_ITEMS[ocId];
+                                        if (itemResponse && itemResponse.ok) {
+                                            const items = itemResponse.items.filter(item => item.Status !== 'Excluido');
+                                            const totaisCard = calcularTotais(items);
+                                            
+                                            // Atualiza o totalizador do card
+                                            const cardTotals = card.querySelector('.card-totals');
+                                            if (cardTotals) {
+                                                let totalsHtml = '';
+                                                if (totaisCard.metros > 0) {
+                                                    totalsHtml += `<div class="card-total-item">
+                                                        <span class="card-total-label">Metros:</span>
+                                                        <span class="card-total-value">${fmtInt(totaisCard.metros)}</span>
+                                                    </div>`;
+                                                }
+                                                if (totaisCard.pares > 0) {
+                                                    totalsHtml += `<div class="card-total-item">
+                                                        <span class="card-total-label">Pares:</span>
+                                                        <span class="card-total-value">${fmtInt(totaisCard.pares)}</span>
+                                                    </div>`;
+                                                }
+                                                cardTotals.innerHTML = totalsHtml;
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                            
+                            hideConfirmModal();
+                            showSuccessModal('Itens faturados aguardando finalização na produção!');
+                            updateGlobalSelectedCount();
+                            updateInactiveRowsList();
+                            updateInactiveCount();
+                            reorderCards();
+                            $btnFaturarGlobal.disabled = false;
+                            $btnFaturarGlobal.textContent = 'Faturado sem finalizar';
+                            
+                        })
+                        .withFailureHandler(error => {
+                            console.error('❌ Erro ao excluir:', error);
+                            alert('Itens faturados com sucesso, mas erro ao excluir os não marcados.');
+                            $btnFaturarGlobal.disabled = false;
+                            $btnFaturarGlobal.textContent = 'Faturado sem finalizar';
+                        })
+                        .excluirMultiplosItens(itemsToExcluir);
+                } else {
+                    hideConfirmModal();
+                    showSuccessModal('Itens faturados aguardando finalização na produção!');
+                    updateGlobalSelectedCount();
+                    updateInactiveRowsList();
+                    updateInactiveCount();
+                    reorderCards();
+                    $btnFaturarGlobal.disabled = false;
+                    $btnFaturarGlobal.textContent = 'Faturado sem finalizar';
+                }
+            })
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao faturar:', error);
+                alert('Falha ao faturar itens: ' + error.message);
+                $btnFaturarGlobal.disabled = false;
+                $btnFaturarGlobal.textContent = 'Faturar';
+            })
+            .marcarMultiplosFaturados(itemsToFaturar);
+    }
+
+    function handleFinalizar(uniqueId, linha, cardId) {
+        if (!confirm('Finalizar este item?')) {
+            return;
+        }
+        
+        console.log(`✅ Finalizando item ${uniqueId} (linha ${linha})`);
+        
+        google.script.run
+            .withSuccessHandler(result => {
+                console.log('✅ Resultado da finalização:', result);
+                if (result.success) {
+                    const row = document.getElementById(`item-linha-${linha}`);
+                    if (row) {
+                        row.remove();
+                    }
+                    
+                    const card = document.getElementById(cardId);
+                    if (card) {
+                        const remainingRows = card.querySelectorAll('.item-table tbody tr').length;
+                        if (remainingRows === 0) {
+                            card.remove();
+                        } else {
+                            const remainingFaturados = card.querySelectorAll('.item-faturado').length;
+                            if (remainingFaturados === 0) {
+                                card.classList.remove('has-pending-faturados');
+                                const message = card.querySelector('.card-message');
+                                if (message) {
+                                    message.remove();
+                                }
+                            }
+                            
+                            // Atualiza estado dos botões Finalizado
+                            const hasInactives = card.querySelectorAll('.item-inativo').length > 0;
+                            card.querySelectorAll('.btn-finalizar').forEach(btn => {
+                                btn.disabled = hasInactives;
+                                btn.title = hasInactives ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
+                            });
+                        }
+                    }
+                    
+                    updateInactiveCount();
+                    reorderCards();
+                    alert('✅ Item finalizado!');
+                } else {
+                    alert('Erro ao finalizar item: ' + (result.error || 'Erro desconhecido'));
+                }
+            })
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao finalizar:', error);
+                alert('Falha ao finalizar item: ' + error.message);
+            })
+            .finalizarItem(uniqueId, linha);
+    }
+    
+    function showSuccessModal(message) {
+        $successMessage.textContent = message;
+        $successModal.classList.remove('hidden');
+    }
+    
+    function hideSuccessModal() {
+        $successModal.classList.add('hidden');
+    }
+
+    // ==== NAVEGAÇÃO POR TECLADO ====
+    function moveRowSelection(direction) {
+        if (allVisibleRows.length === 0) return;
+        
+        if (currentRowIndex >= 0 && currentRowIndex < allVisibleRows.length) {
+            allVisibleRows[currentRowIndex].classList.remove('keyboard-selected');
+        }
+        
+        if (direction > 0) {
+            currentRowIndex = (currentRowIndex + 1) % allVisibleRows.length;
+        } else {
+            currentRowIndex = currentRowIndex <= 0 ? allVisibleRows.length - 1 : currentRowIndex - 1;
+        }
+        
+        const currentRow = allVisibleRows[currentRowIndex];
+        currentRow.classList.add('keyboard-selected');
+        currentRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function clearRowSelection() {
+        allVisibleRows.forEach(row => row.classList.remove('keyboard-selected'));
+        currentRowIndex = -1;
+    }
+
+    function clearAllSelections() {
+        document.querySelectorAll('.item-checkbox:checked').forEach(cb => cb.checked = false);
+        updateGlobalSelectedCount();
+        allInactiveRows.forEach(row => row.classList.remove('keyboard-focus'));
+        currentKeyboardIndex = -1;
+    }
+
+    // ==== EVENT LISTENERS ====
+    
+    // Fechar autocomplete ao clicar fora
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.filter-wrapper')) {
+            hideAutocomplete();
+        }
+    });
+    
+    $filterStatus.addEventListener('change', aplicarFiltros);
+    $filterPrazo.addEventListener('change', aplicarFiltros);
+    $refreshButton.addEventListener('click', () => carregarListaOcs(true));
+    $btnFaturarGlobal.addEventListener('click', showConfirmModal);
+    $btnExcluirGlobal.addEventListener('click', showExcluirGlobalModal);
+    $modalConfirmBtn.addEventListener('click', confirmFaturamento);
+    $modalCancelBtn.addEventListener('click', hideConfirmModal);
+    
+    // Modal de aviso
+    $warningOkBtn.addEventListener('click', closeWarningModal);
+    $warningDeleteBtn.addEventListener('click', showDeleteAllModal);
+    
+    // Modal de exclusão em massa
+    $deleteAllConfirmBtn.addEventListener('click', confirmDeleteAll);
+    $deleteAllCancelBtn.addEventListener('click', hideDeleteAllModal);
+    
+    // Modal de sucesso
+    
+    // Keyboard navigation - ↑↓ entre itens (linhas)
+    document.addEventListener('keydown', (e) => {
+        if (!$confirmModal.classList.contains('hidden') || 
+            !$warningModal.classList.contains('hidden') || 
+            !$deleteAllModal.classList.contains('hidden') ||
+            !$successModal.classList.contains('hidden') ||
+            e.target.tagName === 'INPUT' ||
+            e.target.tagName === 'SELECT') return;
+        
+        switch(e.key) {
+            case 'ArrowDown':
+                e.preventDefault();
+                moveRowSelection(1);
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                moveRowSelection(-1);
+                break;
+            case 'Escape':
+                e.preventDefault();
+                clearRowSelection();
+                break;
+        }
+    });
+
+    // ==== INICIALIZAÇÃO ====
+    document.addEventListener('DOMContentLoaded', carregarListaOcs); 
+
+  </script>
+</body>
+</html>
