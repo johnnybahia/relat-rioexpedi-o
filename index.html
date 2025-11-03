@@ -152,6 +152,61 @@
     .keyboard-hint { position: fixed; bottom: 1rem; right: 1rem; background: #1f2937; color: white; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.75rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); z-index: 1500; opacity: 0.9; }
     .keyboard-hint.hidden { display: none; }
     .keyboard-hint kbd { background: #374151; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: monospace; margin: 0 0.25rem; }
+
+    /* Barra de Progresso */
+    .progress-bar-container { width: 120px; height: 20px; background-color: #e5e7eb; border-radius: 10px; overflow: hidden; position: relative; border: 1px solid #d1d5db; }
+    .progress-bar-fill { height: 100%; transition: width 0.3s ease, background-color 0.3s ease; border-radius: 10px 0 0 10px; }
+    .progress-bar-fill.full { border-radius: 10px; }
+    .progress-bar-fill.verde { background: linear-gradient(90deg, #22c55e, #16a34a); }
+    .progress-bar-fill.amarelo { background: linear-gradient(90deg, #eab308, #ca8a04); }
+    .progress-bar-fill.laranja { background: linear-gradient(90deg, #f97316, #ea580c); }
+    .progress-bar-fill.vermelho { background: linear-gradient(90deg, #ef4444, #dc2626); }
+    .progress-text { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 0.625rem; font-weight: 700; color: #1f2937; z-index: 1; text-shadow: 0 0 3px rgba(255,255,255,0.8); }
+
+    /* Botão de baixa parcial */
+    .btn-baixa { padding: 4px 10px; background-color: #3b82f6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.7rem; font-weight: 500; transition: background-color 0.2s; margin-right: 4px; }
+    .btn-baixa:hover { background-color: #2563eb; }
+    .btn-baixa:disabled { background-color: #9ca3af; cursor: not-allowed; opacity: 0.6; }
+
+    /* Modal de Baixa Parcial */
+    .modal-baixa-info { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background-color: #f9fafb; border-radius: 0.5rem; margin-bottom: 1rem; }
+    .modal-baixa-qtds { display: flex; gap: 1.5rem; align-items: center; font-size: 0.875rem; }
+    .modal-baixa-qtd-item { display: flex; flex-direction: column; }
+    .modal-baixa-qtd-label { color: #6b7280; font-size: 0.75rem; font-weight: 600; }
+    .modal-baixa-qtd-value { color: #1f2937; font-size: 1.25rem; font-weight: 700; }
+    .modal-baixa-progress { flex: 1; max-width: 300px; }
+
+    .historico-section { margin-top: 1.5rem; }
+    .historico-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .historico-header h3 { margin: 0; font-size: 0.875rem; font-weight: 600; color: #374151; }
+    .historico-count { font-size: 0.75rem; color: #6b7280; background-color: #f3f4f6; padding: 0.25rem 0.5rem; border-radius: 0.25rem; }
+
+    .historico-list { max-height: 200px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 0.5rem; background-color: #fff; }
+    .historico-item { padding: 0.75rem 1rem; border-bottom: 1px solid #f3f4f6; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; }
+    .historico-item:last-child { border-bottom: none; }
+    .historico-item.ultima { background-color: #eff6ff; border-left: 3px solid #3b82f6; }
+    .historico-item-info { display: flex; gap: 1rem; align-items: center; }
+    .historico-item-qtd { font-weight: 700; color: #ef4444; font-size: 0.9rem; }
+    .historico-item-data { color: #6b7280; font-size: 0.7rem; }
+    .historico-item-actions { display: flex; gap: 0.5rem; }
+    .btn-editar-baixa { padding: 0.25rem 0.5rem; background-color: #f59e0b; color: white; border: none; border-radius: 0.25rem; cursor: pointer; font-size: 0.7rem; font-weight: 500; transition: background-color 0.2s; }
+    .btn-editar-baixa:hover { background-color: #d97706; }
+
+    .nova-baixa-section { margin-top: 1.5rem; padding: 1rem; background-color: #f0fdf4; border: 2px dashed #22c55e; border-radius: 0.5rem; }
+    .nova-baixa-section h3 { margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: #166534; }
+    .nova-baixa-input-group { display: flex; gap: 0.75rem; align-items: flex-end; }
+    .nova-baixa-input-wrapper { flex: 1; }
+    .nova-baixa-input-wrapper label { display: block; font-size: 0.75rem; font-weight: 600; color: #374151; margin-bottom: 0.25rem; }
+    .nova-baixa-input { width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem; }
+    .nova-baixa-hint { margin-top: 0.5rem; font-size: 0.7rem; color: #6b7280; text-align: center; }
+    .nova-baixa-hint strong { color: #374151; }
+
+    .editar-baixa-form { padding: 1rem; background-color: #fef3c7; border: 2px solid #f59e0b; border-radius: 0.5rem; margin-top: 1rem; }
+    .editar-baixa-form h4 { margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: #92400e; }
+    .editar-baixa-info { font-size: 0.75rem; color: #78350f; margin-bottom: 0.75rem; }
+    .editar-baixa-exemplos { font-size: 0.7rem; color: #6b7280; margin-top: 0.5rem; padding: 0.5rem; background-color: #fffbeb; border-radius: 0.25rem; }
+    .editar-baixa-exemplos ul { margin: 0.25rem 0; padding-left: 1.5rem; }
+    .editar-baixa-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
   </style>
 </head>
 <body>
@@ -315,6 +370,92 @@
 </div>
   </div>
 
+  <!-- Modal de Baixa Parcial -->
+  <div id="baixaModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>📦 Baixa Parcial</h2>
+      </div>
+      <div class="modal-body">
+        <!-- Info do item -->
+        <div class="modal-baixa-info">
+          <div class="modal-baixa-qtds">
+            <div class="modal-baixa-qtd-item">
+              <span class="modal-baixa-qtd-label">QTD. ORIGINAL</span>
+              <span id="baixa-qtd-original" class="modal-baixa-qtd-value">200</span>
+            </div>
+            <div style="font-size: 1.5rem; color: #d1d5db;">→</div>
+            <div class="modal-baixa-qtd-item">
+              <span class="modal-baixa-qtd-label">QTD. ABERTA</span>
+              <span id="baixa-qtd-aberta" class="modal-baixa-qtd-value">85</span>
+            </div>
+          </div>
+          <div class="modal-baixa-progress">
+            <div class="progress-bar-container">
+              <div id="baixa-progress-bar" class="progress-bar-fill verde" style="width: 75%"></div>
+              <div id="baixa-progress-text" class="progress-text">75%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Descrição do item -->
+        <p id="baixa-item-desc" style="font-size: 0.875rem; color: #6b7280; text-align: center; margin-bottom: 1.5rem;"></p>
+
+        <!-- Histórico -->
+        <div id="historico-section" class="historico-section" style="display: none;">
+          <div class="historico-header">
+            <h3>📋 Histórico de Baixas</h3>
+            <span id="historico-count" class="historico-count">0 registros</span>
+          </div>
+          <div id="historico-list" class="historico-list"></div>
+        </div>
+
+        <!-- Formulário de edição (oculto inicialmente) -->
+        <div id="editar-baixa-form" class="editar-baixa-form" style="display: none;">
+          <h4>✏️ Editar Última Baixa</h4>
+          <div class="editar-baixa-info">
+            Baixa atual: <strong id="editar-baixa-atual">-20</strong>
+          </div>
+          <div class="nova-baixa-input-wrapper">
+            <label>Nova quantidade:</label>
+            <input type="text" id="editar-baixa-input" class="nova-baixa-input" placeholder="Ex: 30 ou +10">
+          </div>
+          <div class="editar-baixa-exemplos">
+            <strong>Exemplos:</strong>
+            <ul>
+              <li><code>30</code> → altera para baixa de 30</li>
+              <li><code>+10</code> → reverte 10 unidades (ficará -10)</li>
+              <li><code>5</code> → altera para baixa de 5</li>
+            </ul>
+          </div>
+          <div class="editar-baixa-actions">
+            <button id="salvar-edicao-btn" class="modal-btn modal-btn-confirm">Salvar</button>
+            <button id="cancelar-edicao-btn" class="modal-btn modal-btn-cancel">Cancelar</button>
+          </div>
+        </div>
+
+        <!-- Nova baixa -->
+        <div id="nova-baixa-section" class="nova-baixa-section">
+          <h3>➕ Nova Baixa</h3>
+          <div class="nova-baixa-input-group">
+            <div class="nova-baixa-input-wrapper">
+              <label>Quantidade (máx: <span id="baixa-max-qtd">85</span>):</label>
+              <input type="text" id="nova-baixa-input" class="nova-baixa-input" placeholder="Digite a quantidade">
+            </div>
+          </div>
+          <div class="nova-baixa-hint">
+            💡 Digite apenas o número para dar baixa<br>
+            Use <strong>+10</strong> para aumentar (reverter)
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="baixa-cancel-btn" class="modal-btn modal-btn-cancel">Fechar</button>
+        <button id="baixa-confirm-btn" class="modal-btn modal-btn-confirm">Adicionar Baixa</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Keyboard Hint -->
   <div id="keyboard-hint" class="keyboard-hint hidden">
     Use <kbd>↑</kbd> <kbd>↓</kbd> para navegar e <kbd>Espaço</kbd> para selecionar
@@ -327,7 +468,8 @@
     let ALL_OCS_ITEMS = {};
     let appMeta = {};
     let totalInactiveItems = 0;
-    
+    let warningModalShown = false; // Flag para controlar exibição do modal de aviso
+
     // Navegação por teclado
     let allInactiveRows = [];
     let currentKeyboardIndex = -1;
@@ -383,8 +525,32 @@
     
     const $successModal = document.getElementById('successModal');
     const $successMessage = document.getElementById('success-message');
-    
+
     const $keyboardHint = document.getElementById('keyboard-hint');
+
+    // Modal de Baixa Parcial
+    const $baixaModal = document.getElementById('baixaModal');
+    const $baixaQtdOriginal = document.getElementById('baixa-qtd-original');
+    const $baixaQtdAberta = document.getElementById('baixa-qtd-aberta');
+    const $baixaProgressBar = document.getElementById('baixa-progress-bar');
+    const $baixaProgressText = document.getElementById('baixa-progress-text');
+    const $baixaItemDesc = document.getElementById('baixa-item-desc');
+    const $historicoSection = document.getElementById('historico-section');
+    const $historicoCount = document.getElementById('historico-count');
+    const $historicoList = document.getElementById('historico-list');
+    const $editarBaixaForm = document.getElementById('editar-baixa-form');
+    const $editarBaixaAtual = document.getElementById('editar-baixa-atual');
+    const $editarBaixaInput = document.getElementById('editar-baixa-input');
+    const $salvarEdicaoBtn = document.getElementById('salvar-edicao-btn');
+    const $cancelarEdicaoBtn = document.getElementById('cancelar-edicao-btn');
+    const $novaBaixaSection = document.getElementById('nova-baixa-section');
+    const $novaBaixaInput = document.getElementById('nova-baixa-input');
+    const $baixaMaxQtd = document.getElementById('baixa-max-qtd');
+    const $baixaConfirmBtn = document.getElementById('baixa-confirm-btn');
+    const $baixaCancelBtn = document.getElementById('baixa-cancel-btn');
+
+    // Dados do item atual no modal de baixa
+    let currentBaixaItem = null;
     
     // ==== FUNÇÕES AUXILIARES ====
 
@@ -639,7 +805,10 @@
         console.log("🚀 SISTEMA UNIFICADO v19.0 - Carregando TUDO em 1 chamada...");
         $loader.classList.remove('hidden');
         $loadingText.textContent = isRefresh ? 'Atualizando...' : 'Carregando dados...';
-        
+
+        // Reset da flag de modal de aviso em refresh/carregamento completo
+        warningModalShown = false;
+
         const cacheBuster = Date.now(); // Cache buster
         
         google.script.run
@@ -842,9 +1011,11 @@ ALL_OCS_ITEMS = itemsObj;
   updateVisibleRows();
   updateTotaisGerais();
 
-  if (totalInactiveItems > 0) {
+  // Só mostra modal de aviso se ainda não foi mostrado nesta sessão
+  if (totalInactiveItems > 0 && !warningModalShown) {
     console.log(`⚠️ ${totalInactiveItems} itens inativos - mostrando modal`);
     showWarningModal();
+    warningModalShown = true; // Marca como mostrado
   }
 }
 
@@ -941,19 +1112,25 @@ ALL_OCS_ITEMS = itemsObj;
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
                             ${hasInactiveItems ? '<th class="checkbox-cell"></th>' : ''}
                             <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
-                            <th>Tamanho</th><th>Qtd.</th><th class="status-prazo">Prazo</th>
+                            <th>Tamanho</th><th>Qtd. Original</th><th>Qtd. Aberta</th><th>Progresso</th><th class="status-prazo">Prazo</th>
                             <th>Dt. Entrega</th>
                             <th>Ações</th></tr></thead><tbody>`;
             
             items.forEach(item => {
-                if (!item) return; 
+                if (!item) return;
                 const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
-                const itemId = `item-linha-${item.planilhaLinha}`; 
+                const itemId = `item-linha-${item.planilhaLinha}`;
                 const isInactive = item.Status === 'Inativo';
                 const isFaturado = item.Status === 'Faturado';
-                
+
+                const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
+                const qtdAberta = item['QTD. ABERTA'] || 0;
+                const percentRestante = qtdOriginal > 0 ? Math.round((qtdAberta / qtdOriginal) * 100) : 0;
+                const progressColor = percentRestante >= 70 ? 'verde' : (percentRestante >= 30 ? 'amarelo' : (percentRestante >= 10 ? 'laranja' : 'vermelho'));
+                const progressFull = percentRestante === 100 ? ' full' : '';
+
                 bodyHtml += `<tr id="${itemId}" class="${itemStatusClass}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
-                
+
                 if (hasInactiveItems) {
                     if (isInactive) {
                         bodyHtml += `<td class="checkbox-cell"><input type="checkbox" class="item-checkbox" onchange="updateGlobalSelectedCount()"></td>`;
@@ -961,25 +1138,35 @@ ALL_OCS_ITEMS = itemsObj;
                         bodyHtml += `<td class="checkbox-cell"></td>`;
                     }
                 }
-                
+
                 bodyHtml += `
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
                         <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
                         <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
                         <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
-                        <td class="nowrap">${fmtInt(item['QTD. ABERTA'])}</td>
+                        <td class="nowrap">${fmtInt(qtdOriginal)}</td>
+                        <td class="nowrap">${fmtInt(qtdAberta)}</td>
+                        <td class="nowrap">
+                            <div class="progress-bar-container">
+                                <div class="progress-bar-fill ${progressColor}${progressFull}" style="width: ${percentRestante}%"></div>
+                                <div class="progress-text">${percentRestante}%</div>
+                            </div>
+                        </td>
                         <td class="status-prazo nowrap">${item.PRAZO ?? 'N/A'}</td>
                         <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
                         <td class="nowrap">`;
-                
-                if (isFaturado) {
+
+                // Botão de Baixa Parcial (para itens Ativos) + Botão Finalizado (para itens Faturados)
+                if (!isFaturado && !isInactive) {
+                    bodyHtml += `<button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
+                } else if (isFaturado) {
                     const disabled = hasInactiveItems ? 'disabled' : '';
                     const title = hasInactiveItems ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
                     bodyHtml += `<button class="btn-finalizar" ${disabled} title="${title}" onclick="handleFinalizar('${item.uniqueId}', ${item.planilhaLinha}, '${cardId}')">Finalizado</button>`;
                 } else {
                     bodyHtml += '-';
                 }
-                
+
                 bodyHtml += `</td></tr>`;
             });
             bodyHtml += `</tbody></table></div>`;
@@ -1300,19 +1487,19 @@ ALL_OCS_ITEMS = itemsObj;
     function confirmFaturamento() {
         const itemsToFaturar = JSON.parse($confirmModal.dataset.faturar || '[]');
         const itemsToExcluir = JSON.parse($confirmModal.dataset.excluir || '[]');
-        const cardIds = new Set();
-        
+        let cardIds = new Set(); // Declarado aqui para ser acessível em ambos os blocos
+
         hideConfirmModal();
-        
+
         console.log(`💳 Faturando ${itemsToFaturar.length} itens e excluindo ${itemsToExcluir.length} itens`);
-        
+
         $btnFaturarGlobal.disabled = true;
         $btnFaturarGlobal.textContent = 'Processando...';
-        
+
         google.script.run
             .withSuccessHandler(resultFaturar => {
                 console.log('✅ Resultado do faturamento:', resultFaturar);
-                
+
                 if (itemsToExcluir.length > 0) {
                     google.script.run
                         .withSuccessHandler(resultExcluir => {
@@ -1328,6 +1515,17 @@ ALL_OCS_ITEMS = itemsObj;
                                         checkbox.closest('td').innerHTML = '';
                                     }
                                     cardIds.add(row.dataset.oc);
+
+                                    // Atualiza os dados subjacentes em ALL_OCS_ITEMS
+                                    const ocId = row.dataset.oc;
+                                    const uniqueId = row.dataset.uniqueId;
+                                    if (ALL_OCS_ITEMS[ocId] && ALL_OCS_ITEMS[ocId].items) {
+                                        const itemData = ALL_OCS_ITEMS[ocId].items.find(i => i.uniqueId === uniqueId);
+                                        if (itemData) {
+                                            itemData.Status = 'Faturado';
+                                            console.log(`✅ Status atualizado em memória: ${uniqueId} → Faturado`);
+                                        }
+                                    }
                                 }
                             });
                             
@@ -1406,11 +1604,19 @@ ALL_OCS_ITEMS = itemsObj;
                             });
                             
                             hideConfirmModal();
-                            showSuccessModal('Itens faturados aguardando finalização na produção!');
+
+                            // Atualiza contadores (mas não mostra modal novamente)
                             updateGlobalSelectedCount();
                             updateInactiveRowsList();
                             updateInactiveCount();
                             reorderCards();
+
+                            // Fecha modal de warning se estiver aberto
+                            closeWarningModal();
+
+                            // Mostra sucesso
+                            showSuccessModal('Itens faturados aguardando finalização na produção!');
+
                             $btnFaturarGlobal.disabled = false;
                             $btnFaturarGlobal.textContent = 'Faturado sem finalizar';
                             
@@ -1423,12 +1629,80 @@ ALL_OCS_ITEMS = itemsObj;
                         })
                         .excluirMultiplosItens(itemsToExcluir);
                 } else {
+                    // Só faturamento, sem exclusão
+                    itemsToFaturar.forEach(item => {
+                        const row = document.getElementById(`item-linha-${item.linha}`);
+                        if (row) {
+                            row.classList.remove('item-inativo');
+                            row.classList.add('item-faturado');
+                            const checkbox = row.querySelector('.item-checkbox');
+                            if (checkbox) {
+                                checkbox.closest('td').innerHTML = '';
+                            }
+                            cardIds.add(row.dataset.oc);
+
+                            // Atualiza os dados subjacentes em ALL_OCS_ITEMS
+                            const ocId = row.dataset.oc;
+                            const uniqueId = row.dataset.uniqueId;
+                            if (ALL_OCS_ITEMS[ocId] && ALL_OCS_ITEMS[ocId].items) {
+                                const itemData = ALL_OCS_ITEMS[ocId].items.find(i => i.uniqueId === uniqueId);
+                                if (itemData) {
+                                    itemData.Status = 'Faturado';
+                                    console.log(`✅ Status atualizado em memória: ${uniqueId} → Faturado`);
+                                }
+                            }
+                        }
+                    });
+
+                    // Atualiza botões e visual dos cards
+                    cardIds.forEach(ocId => {
+                        const cardIdClean = "card-" + String(ocId).replace(/[^a-zA-Z0-9-]/g, '');
+                        const card = document.getElementById(cardIdClean);
+                        if (card) {
+                            const hasInactives = card.querySelectorAll('.item-inativo').length > 0;
+
+                            card.querySelectorAll('.btn-finalizar').forEach(btn => {
+                                btn.disabled = hasInactives;
+                                btn.title = hasInactives ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
+                            });
+
+                            itemsToFaturar.forEach(item => {
+                                const row = document.getElementById(`item-linha-${item.linha}`);
+                                if (row && row.dataset.oc === ocId) {
+                                    const acoesCell = row.querySelector('td:last-child');
+                                    if (acoesCell && !acoesCell.querySelector('.btn-finalizar')) {
+                                        const disabled = hasInactives ? 'disabled' : '';
+                                        const title = hasInactives ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
+                                        acoesCell.innerHTML = `<button class="btn-finalizar" ${disabled} title="${title}" onclick="handleFinalizar('${item.uniqueId}', ${item.linha}, '${cardIdClean}')">Finalizado</button>`;
+                                    }
+                                }
+                            });
+
+                            card.classList.add('has-pending-faturados');
+                            if (!card.querySelector('.card-message')) {
+                                const header = card.querySelector('.card-header');
+                                const message = document.createElement('div');
+                                message.className = 'card-message';
+                                message.textContent = 'ITEM FATURADO AGUARDANDO FINALIZAR';
+                                header.after(message);
+                            }
+                        }
+                    });
+
                     hideConfirmModal();
-                    showSuccessModal('Itens faturados aguardando finalização na produção!');
+
+                    // Atualiza contadores (mas não mostra modal novamente)
                     updateGlobalSelectedCount();
                     updateInactiveRowsList();
                     updateInactiveCount();
                     reorderCards();
+
+                    // Fecha modal de warning se estiver aberto
+                    closeWarningModal();
+
+                    // Mostra sucesso
+                    showSuccessModal('Itens faturados aguardando finalização na produção!');
+
                     $btnFaturarGlobal.disabled = false;
                     $btnFaturarGlobal.textContent = 'Faturado sem finalizar';
                 }
@@ -1442,13 +1716,18 @@ ALL_OCS_ITEMS = itemsObj;
             .marcarMultiplosFaturados(itemsToFaturar);
     }
 
+    function handleBaixa(item) {
+        console.log('📦 Abrindo modal de baixa para:', item);
+        showBaixaModal(item);
+    }
+
     function handleFinalizar(uniqueId, linha, cardId) {
         if (!confirm('Finalizar este item?')) {
             return;
         }
-        
+
         console.log(`✅ Finalizando item ${uniqueId} (linha ${linha})`);
-        
+
         google.script.run
             .withSuccessHandler(result => {
                 console.log('✅ Resultado da finalização:', result);
@@ -1503,6 +1782,350 @@ ALL_OCS_ITEMS = itemsObj;
     
     function hideSuccessModal() {
         $successModal.classList.add('hidden');
+    }
+
+    // ==== MODAL DE BAIXA PARCIAL ====
+
+    function getProgressColor(percentRestante) {
+        if (percentRestante >= 70) return 'verde';
+        if (percentRestante >= 30) return 'amarelo';
+        if (percentRestante >= 10) return 'laranja';
+        return 'vermelho';
+    }
+
+    function updateProgressBar(qtdOriginal, qtdAberta) {
+        const percentRestante = qtdOriginal > 0 ? Math.round((qtdAberta / qtdOriginal) * 100) : 0;
+        const color = getProgressColor(percentRestante);
+
+        $baixaProgressBar.style.width = percentRestante + '%';
+        $baixaProgressBar.className = 'progress-bar-fill ' + color + (percentRestante === 100 ? ' full' : '');
+        $baixaProgressText.textContent = percentRestante + '%';
+    }
+
+    function showBaixaModal(item) {
+        currentBaixaItem = item;
+
+        const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
+        const qtdAberta = item['QTD. ABERTA'] || 0;
+        const desc = item['DESCRIÇÃO'] || 'N/A';
+        const tamanho = item.TAMANHO || '';
+        const unidade = getUnidade(tamanho);
+
+        $baixaQtdOriginal.textContent = fmtInt(qtdOriginal);
+        $baixaQtdAberta.textContent = fmtInt(qtdAberta);
+        $baixaMaxQtd.textContent = fmtInt(qtdAberta);
+        $baixaItemDesc.textContent = formatItemInfo(desc, tamanho, qtdAberta);
+
+        updateProgressBar(qtdOriginal, qtdAberta);
+
+        // Limpa input
+        $novaBaixaInput.value = '';
+        $editarBaixaForm.style.display = 'none';
+
+        // Carrega histórico
+        carregarHistorico(item.uniqueId);
+
+        $baixaModal.classList.remove('hidden');
+    }
+
+    function hideBaixaModal() {
+        $baixaModal.classList.add('hidden');
+        currentBaixaItem = null;
+    }
+
+    function carregarHistorico(uniqueId) {
+        console.log(`📋 Carregando histórico para ${uniqueId}`);
+
+        google.script.run
+            .withSuccessHandler(result => {
+                console.log('✅ Histórico recebido:', result);
+                console.log('   - Success:', result.success);
+                console.log('   - Histórico length:', result.historico ? result.historico.length : 0);
+                console.log('   - Histórico data:', result.historico);
+
+                if (result.success && result.historico && result.historico.length > 0) {
+                    console.log('   → Renderizando histórico...');
+                    renderizarHistorico(result.historico);
+                    $historicoSection.style.display = 'block';
+                    console.log('   → Histórico exibido!');
+                } else {
+                    console.log('   → Sem histórico para exibir');
+                    $historicoSection.style.display = 'none';
+                }
+            })
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao carregar histórico:', error);
+                $historicoSection.style.display = 'none';
+            })
+            .obterHistoricoBaixas(uniqueId);
+    }
+
+    function renderizarHistorico(historico) {
+        $historicoCount.textContent = `${historico.length} registro${historico.length !== 1 ? 's' : ''}`;
+
+        let html = '';
+        historico.forEach((h, index) => {
+            const isUltima = index === historico.length - 1;
+            const className = isUltima ? 'historico-item ultima' : 'historico-item';
+
+            html += `
+                <div class="${className}">
+                    <div class="historico-item-info">
+                        <span class="historico-item-qtd">-${fmtInt(h.qtdBaixada)}</span>
+                        <span class="historico-item-data">${h.dataHoraFormatada || ''}</span>
+                    </div>
+                    ${isUltima ? '<div class="historico-item-actions"><button class="btn-editar-baixa" onclick="mostrarEdicaoBaixa(' + h.qtdBaixada + ')">✏️ Editar</button></div>' : ''}
+                </div>
+            `;
+        });
+
+        $historicoList.innerHTML = html;
+    }
+
+    function mostrarEdicaoBaixa(qtdBaixadaAtual) {
+        $editarBaixaAtual.textContent = '-' + fmtInt(qtdBaixadaAtual);
+        $editarBaixaInput.value = '';
+        $editarBaixaForm.style.display = 'block';
+        $novaBaixaSection.style.display = 'none';
+        $editarBaixaInput.focus();
+    }
+
+    function esconderEdicaoBaixa() {
+        $editarBaixaForm.style.display = 'none';
+        $novaBaixaSection.style.display = 'block';
+    }
+
+    function salvarEdicaoBaixa() {
+        if (!currentBaixaItem) {
+            alert('Erro: Item não encontrado');
+            return;
+        }
+
+        const input = $editarBaixaInput.value.trim();
+        if (!input) {
+            alert('Digite uma quantidade válida');
+            return;
+        }
+
+        let novaQtdBaixada;
+
+        if (input.startsWith('+')) {
+            // Reverter: +10 significa adicionar 10 à quantidade aberta
+            const reverter = parseInt(input.substring(1), 10);
+            if (isNaN(reverter) || reverter <= 0) {
+                alert('Quantidade inválida para reverter');
+                return;
+            }
+
+            const qtdBaixadaAtual = parseInt($editarBaixaAtual.textContent.replace('-', '').replace(/\./g, ''), 10);
+            novaQtdBaixada = qtdBaixadaAtual - reverter;
+
+            if (novaQtdBaixada < 0) {
+                alert('Não é possível reverter mais do que foi baixado');
+                return;
+            }
+        } else {
+            // Substituir quantidade
+            novaQtdBaixada = parseInt(input, 10);
+            if (isNaN(novaQtdBaixada) || novaQtdBaixada <= 0) {
+                alert('Digite uma quantidade válida');
+                return;
+            }
+        }
+
+        console.log(`✏️ Editando última baixa: ${currentBaixaItem.uniqueId} → ${novaQtdBaixada}`);
+
+        $salvarEdicaoBtn.disabled = true;
+        $salvarEdicaoBtn.textContent = 'Salvando...';
+
+        google.script.run
+            .withSuccessHandler(result => {
+                console.log('✅ Edição salva:', result);
+
+                if (result.success) {
+                    // Atualiza a quantidade aberta no item
+                    currentBaixaItem['QTD. ABERTA'] = result.novaQtdRestante;
+
+                    // Atualiza modal
+                    $baixaQtdAberta.textContent = fmtInt(result.novaQtdRestante);
+                    $baixaMaxQtd.textContent = fmtInt(result.novaQtdRestante);
+                    updateProgressBar(currentBaixaItem['QTD. ORIGINAL'], result.novaQtdRestante);
+
+                    // Atualiza a linha na tabela
+                    const row = document.getElementById(`item-linha-${currentBaixaItem.planilhaLinha}`);
+                    if (row) {
+                        const cells = row.querySelectorAll('td');
+                        const hasCheckbox = cells[0] && cells[0].querySelector('.item-checkbox');
+                        const offset = hasCheckbox ? 1 : 0;
+
+                        // Coluna QTD. ABERTA: Cartela(0), Cód(1), Desc(2), Tam(3), Original(4), Aberta(5)
+                        const qtdAbertaCell = cells[5 + offset];
+                        if (qtdAbertaCell) {
+                            qtdAbertaCell.textContent = fmtInt(result.novaQtdRestante);
+                        }
+
+                        // Coluna Progresso: índice 6 + offset
+                        const progressCell = cells[6 + offset];
+                        if (progressCell) {
+                            const qtdOriginal = currentBaixaItem['QTD. ORIGINAL'] || currentBaixaItem['QTD. ABERTA'] || 0;
+                            const percentRestante = qtdOriginal > 0 ? Math.round((result.novaQtdRestante / qtdOriginal) * 100) : 0;
+                            const progressColor = percentRestante >= 70 ? 'verde' : (percentRestante >= 30 ? 'amarelo' : (percentRestante >= 10 ? 'laranja' : 'vermelho'));
+                            const progressFull = percentRestante === 100 ? ' full' : '';
+
+                            progressCell.innerHTML = `
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-fill ${progressColor}${progressFull}" style="width: ${percentRestante}%"></div>
+                                    <div class="progress-text">${percentRestante}%</div>
+                                </div>
+                            `;
+                        }
+                    }
+
+                    // Atualiza totalizadores gerais
+                    updateTotaisGerais();
+
+                    // Recarrega histórico
+                    carregarHistorico(currentBaixaItem.uniqueId);
+
+                    esconderEdicaoBaixa();
+                    alert('✅ Baixa editada com sucesso!');
+                } else {
+                    alert('Erro ao editar baixa: ' + (result.error || 'Erro desconhecido'));
+                }
+
+                $salvarEdicaoBtn.disabled = false;
+                $salvarEdicaoBtn.textContent = 'Salvar';
+            })
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao editar baixa:', error);
+                alert('Falha ao editar baixa: ' + error.message);
+                $salvarEdicaoBtn.disabled = false;
+                $salvarEdicaoBtn.textContent = 'Salvar';
+            })
+            .editarUltimaBaixa(currentBaixaItem.uniqueId, currentBaixaItem.planilhaLinha, novaQtdBaixada);
+    }
+
+    function aplicarNovaBaixa() {
+        if (!currentBaixaItem) {
+            alert('Erro: Item não encontrado');
+            return;
+        }
+
+        const input = $novaBaixaInput.value.trim();
+        if (!input) {
+            alert('Digite uma quantidade');
+            return;
+        }
+
+        let qtdBaixa;
+
+        if (input.startsWith('+')) {
+            // Aumentar: +10 significa adicionar 10 à quantidade aberta (reverter baixa)
+            const aumentar = parseInt(input.substring(1), 10);
+            if (isNaN(aumentar) || aumentar <= 0) {
+                alert('Quantidade inválida');
+                return;
+            }
+
+            // Para aumentar, fazemos uma baixa negativa no backend
+            // Mas aqui vamos simular como se fosse uma edição da última baixa
+            alert('Para aumentar quantidade, use o botão "✏️ Editar" na última baixa do histórico');
+            return;
+        } else {
+            // Baixa normal
+            qtdBaixa = parseInt(input, 10);
+            if (isNaN(qtdBaixa) || qtdBaixa <= 0) {
+                alert('Digite uma quantidade válida');
+                return;
+            }
+
+            const qtdAberta = currentBaixaItem['QTD. ABERTA'] || 0;
+            if (qtdBaixa > qtdAberta) {
+                alert(`Quantidade de baixa (${qtdBaixa}) maior que disponível (${qtdAberta})`);
+                return;
+            }
+        }
+
+        console.log(`📦 Aplicando baixa: ${currentBaixaItem.uniqueId} → -${qtdBaixa}`);
+
+        $baixaConfirmBtn.disabled = true;
+        $baixaConfirmBtn.textContent = 'Processando...';
+
+        google.script.run
+            .withSuccessHandler(result => {
+                console.log('✅ Baixa aplicada:', result);
+
+                if (result.success) {
+                    // Atualiza item
+                    currentBaixaItem['QTD. ABERTA'] = result.novaQtd;
+
+                    // Atualiza modal
+                    $baixaQtdAberta.textContent = fmtInt(result.novaQtd);
+                    $baixaMaxQtd.textContent = fmtInt(result.novaQtd);
+                    updateProgressBar(currentBaixaItem['QTD. ORIGINAL'], result.novaQtd);
+
+                    // Recarrega histórico
+                    carregarHistorico(currentBaixaItem.uniqueId);
+
+                    // Limpa input
+                    $novaBaixaInput.value = '';
+
+                    if (result.zerou) {
+                        alert('✅ Baixa aplicada! Item zerado e marcado como Faturado.');
+                        hideBaixaModal();
+                        // Recarrega a página
+                        location.reload();
+                    } else {
+                        alert('✅ Baixa aplicada com sucesso!');
+
+                        // Atualiza a linha na tabela
+                        const row = document.getElementById(`item-linha-${currentBaixaItem.planilhaLinha}`);
+                        if (row) {
+                            // Atualiza QTD. ABERTA
+                            const cells = row.querySelectorAll('td');
+                            const hasCheckbox = cells[0] && cells[0].querySelector('.item-checkbox');
+                            const offset = hasCheckbox ? 1 : 0;
+
+                            // Coluna QTD. ABERTA: Cartela(0), Cód(1), Desc(2), Tam(3), Original(4), Aberta(5)
+                            const qtdAbertaCell = cells[5 + offset];
+                            if (qtdAbertaCell) {
+                                qtdAbertaCell.textContent = fmtInt(result.novaQtd);
+                            }
+
+                            // Coluna Progresso: índice 6 + offset
+                            const progressCell = cells[6 + offset];
+                            if (progressCell) {
+                                const qtdOriginal = currentBaixaItem['QTD. ORIGINAL'] || currentBaixaItem['QTD. ABERTA'] || 0;
+                                const percentRestante = qtdOriginal > 0 ? Math.round((result.novaQtd / qtdOriginal) * 100) : 0;
+                                const progressColor = percentRestante >= 70 ? 'verde' : (percentRestante >= 30 ? 'amarelo' : (percentRestante >= 10 ? 'laranja' : 'vermelho'));
+                                const progressFull = percentRestante === 100 ? ' full' : '';
+
+                                progressCell.innerHTML = `
+                                    <div class="progress-bar-container">
+                                        <div class="progress-bar-fill ${progressColor}${progressFull}" style="width: ${percentRestante}%"></div>
+                                        <div class="progress-text">${percentRestante}%</div>
+                                    </div>
+                                `;
+                            }
+                        }
+
+                        // Atualiza totalizadores gerais
+                        updateTotaisGerais();
+                    }
+                } else {
+                    alert('Erro ao aplicar baixa: ' + (result.error || 'Erro desconhecido'));
+                }
+
+                $baixaConfirmBtn.disabled = false;
+                $baixaConfirmBtn.textContent = 'Adicionar Baixa';
+            })
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao aplicar baixa:', error);
+                alert('Falha ao aplicar baixa: ' + error.message);
+                $baixaConfirmBtn.disabled = false;
+                $baixaConfirmBtn.textContent = 'Adicionar Baixa';
+            })
+            .aplicarBaixa(currentBaixaItem.uniqueId, currentBaixaItem.planilhaLinha, qtdBaixa);
     }
 
     // ==== NAVEGAÇÃO POR TECLADO ====
@@ -1562,7 +2185,13 @@ ALL_OCS_ITEMS = itemsObj;
     $deleteAllCancelBtn.addEventListener('click', hideDeleteAllModal);
     
     // Modal de sucesso
-    
+
+    // Modal de baixa parcial
+    $baixaConfirmBtn.addEventListener('click', aplicarNovaBaixa);
+    $baixaCancelBtn.addEventListener('click', hideBaixaModal);
+    $salvarEdicaoBtn.addEventListener('click', salvarEdicaoBaixa);
+    $cancelarEdicaoBtn.addEventListener('click', esconderEdicaoBaixa);
+
     // Keyboard navigation - ↑↓ entre itens (linhas)
     document.addEventListener('keydown', (e) => {
         if (!$confirmModal.classList.contains('hidden') || 
