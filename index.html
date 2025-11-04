@@ -2584,8 +2584,8 @@ ALL_OCS_ITEMS = itemsObj;
 
             itens.forEach(item => {
                 const qtdAberta = item['QTD. ABERTA'] || 0;
-                const dtRecebimento = item['DATA RECEB.'] || '';
-                const dtEntrega = item['DT. ENTREGA'] || '';
+                const dtRecebimento = formatarData(item['DATA RECEB.']);
+                const dtEntrega = formatarData(item['DT. ENTREGA']);
 
                 html += `
                     <tr>
