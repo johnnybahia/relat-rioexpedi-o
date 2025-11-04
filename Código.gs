@@ -28,10 +28,11 @@ const QTD_COL = 10;      // K
 const OS_COL = 11;       // L
 const DTREC_COL = 12;    // M
 const DTENT_COL = 13;    // N
-const PRAZO_COL = 14;    // O
+const PRAZO_COL = 14;    // O (na aba PEDIDOS)
 
 // Índices de colunas - ABA Relatorio_DB
-const STATUS_COL = 14;   // O
+// Status é sempre a coluna O (índice 14 no array, coluna 15 na planilha)
+const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
 
 // ====== BAIXAS PARCIAIS ======
 const BAIXAS_SHEET_NAME = "Baixas_Historico";
@@ -41,6 +42,25 @@ function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('index')
     .setTitle('Relatório de Pedidos v15.5')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// ====== FUNÇÃO DE TESTE ======
+function testarHistorico() {
+  Logger.clear();
+  Logger.log("=== TESTE DE HISTÓRICO ===\n");
+
+  const sheet = _getBaixasSheet_();
+  const lastRow = sheet.getLastRow();
+
+  Logger.log(`Total de linhas na planilha: ${lastRow}`);
+
+  if (lastRow >= 2) {
+    const data = sheet.getRange(2, 1, Math.min(10, lastRow - 1), sheet.getLastColumn()).getValues();
+    Logger.log("\nPrimeiros registros:");
+    data.forEach((row, idx) => {
+      Logger.log(`${idx + 2}: ID="${row[0]}" | Qtd=${row[2]} | Data=${row[1]}`);
+    });
+  }
 }
 
 // ====== FUNÇÕES AUXILIARES ======
@@ -99,75 +119,168 @@ function _getBaixasSheet_() {
 
 function registrarBaixa(uniqueId, qtdBaixada, qtdRestante) {
   try {
+    Logger.log(`📦 Registrando baixa para ID: "${uniqueId}"`);
     const sheet = _getBaixasSheet_();
     const now = new Date();
     const usuario = Session.getActiveUser().getEmail() || 'Sistema';
 
-    // Verifica se já existe histórico para este item
+    const numCols = sheet.getLastColumn();
+
+    // LÊ O CABEÇALHO para saber a ordem das colunas
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    Logger.log(`   Cabeçalho: ${headers.join(', ')}`);
+
+    // Mapeia índices
+    const colMap = {};
+    headers.forEach((h, i) => {
+      colMap[String(h).trim()] = i;
+    });
+
+    // Verifica se já existe histórico para calcular QTD_ORIGINAL
     const lastRow = sheet.getLastRow();
-    let qtdOriginal = qtdRestante + qtdBaixada; // Valor padrão: primeira baixa
+    let qtdOriginal = qtdRestante + qtdBaixada; // Padrão: primeira baixa
 
     if (lastRow >= 2) {
-      const numCols = sheet.getLastColumn();
       const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-      const primeiraEntrada = data.find(row => row[0] === uniqueId);
+      const primeiraEntrada = data.find(row => String(row[0]).trim() === String(uniqueId).trim());
 
-      if (primeiraEntrada && primeiraEntrada[4] !== undefined && primeiraEntrada[4] !== '') {
-        // Já existe histórico - usa QTD_ORIGINAL da primeira entrada
-        qtdOriginal = _toNumber_(primeiraEntrada[4]); // Coluna QTD_ORIGINAL (index 4)
+      if (primeiraEntrada && colMap['QTD_ORIGINAL'] !== undefined) {
+        const qtdOrigPlanilha = primeiraEntrada[colMap['QTD_ORIGINAL']];
+        if (qtdOrigPlanilha !== undefined && qtdOrigPlanilha !== '') {
+          qtdOriginal = _toNumber_(qtdOrigPlanilha);
+          Logger.log(`   ✓ Histórico existente, QTD_ORIGINAL: ${qtdOriginal}`);
+        }
       }
     }
 
-    const novaLinha = [
-      uniqueId,
-      now,
-      qtdBaixada,
-      qtdRestante,
-      qtdOriginal,
-      usuario
-    ];
+    // Cria array na ORDEM DO CABEÇALHO
+    const novaLinha = new Array(numCols).fill('');
+    novaLinha[colMap['ID_ITEM']] = uniqueId;
+    novaLinha[colMap['DATA_HORA']] = now;
+    novaLinha[colMap['QTD_BAIXADA']] = qtdBaixada;
+    novaLinha[colMap['QTD_RESTANTE']] = qtdRestante;
+    novaLinha[colMap['QTD_ORIGINAL']] = qtdOriginal;
+    novaLinha[colMap['USUARIO']] = usuario;
+
+    Logger.log(`   Salvando: [${novaLinha.join(', ')}]`);
 
     sheet.appendRow(novaLinha);
-    Logger.log(`📦 Baixa registrada: ${uniqueId} | -${qtdBaixada} | Restante: ${qtdRestante} | Original: ${qtdOriginal}`);
+    SpreadsheetApp.flush();
+    Logger.log(`✅ Baixa registrada na linha ${sheet.getLastRow()}`);
 
-    // Limpa cache de quantidades
     _qtdOriginalCache_ = null;
 
     return { success: true, timestamp: now.toISOString() };
   } catch (e) {
     Logger.log(`❌ Erro ao registrar baixa: ${e.message}`);
+    Logger.log(`   Stack: ${e.stack}`);
     return { success: false, error: e.message };
   }
 }
 
 function obterHistoricoBaixas(uniqueId) {
+  // VERSÃO ULTRA-DEFENSIVA - Lê cabeçalho dinamicamente
+  Logger.log(`📋 [INICIO] obterHistoricoBaixas("${uniqueId}")`);
+
   try {
+    if (!uniqueId) {
+      Logger.log('⚠️ ID vazio, retornando array vazio');
+      return { success: true, historico: [] };
+    }
+
     const sheet = _getBaixasSheet_();
+    if (!sheet) {
+      Logger.log('❌ Aba não encontrada, retornando array vazio');
+      return { success: true, historico: [] };
+    }
+
     const lastRow = sheet.getLastRow();
+    Logger.log(`   Última linha: ${lastRow}`);
 
     if (lastRow < 2) {
+      Logger.log('⚠️ Sem dados, retornando array vazio');
       return { success: true, historico: [] };
     }
 
     const numCols = sheet.getLastColumn();
-    const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-    const historico = data
-      .filter(row => row[0] === uniqueId)
-      .map(row => ({
-        idItem: row[0],
-        dataHora: row[1],
-        dataHoraFormatada: _fmtBRDateTime_(row[1]),
-        qtdBaixada: row[2],
-        qtdRestante: row[3],
-        qtdOriginal: row[4] !== undefined ? row[4] : null,
-        usuario: row[5] || row[4] // Compatibilidade com registros antigos
-      }));
 
-    Logger.log(`📋 Histórico recuperado para ${uniqueId}: ${historico.length} registros`);
-    return { success: true, historico: historico };
+    // LÊ O CABEÇALHO para mapear as colunas corretamente
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    Logger.log(`   Cabeçalho: ${headers.join(', ')}`);
+
+    // Mapeia índices das colunas
+    const colMap = {};
+    headers.forEach((h, i) => {
+      colMap[String(h).trim()] = i;
+    });
+
+    Logger.log(`   ID_ITEM=${colMap['ID_ITEM']}, USUARIO=${colMap['USUARIO']}, QTD_ORIGINAL=${colMap['QTD_ORIGINAL']}`);
+
+    // Lê os dados
+    const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+    Logger.log(`   Leu ${data.length} linhas`);
+
+    const idBusca = String(uniqueId).trim();
+    const historico = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const idPlanilha = String(row[colMap['ID_ITEM']] || '').trim();
+
+      if (idPlanilha === idBusca) {
+        Logger.log(`   ✓ Match linha ${i + 2}`);
+
+        // Lê cada coluna pelo nome (não pela posição)
+        const dataHora = row[colMap['DATA_HORA']];
+        const dataFormatada = dataHora ? _fmtBRDateTime_(dataHora) : '';
+
+        const qtdBaixada = _toNumber_(row[colMap['QTD_BAIXADA']]);
+        const qtdRestante = _toNumber_(row[colMap['QTD_RESTANTE']]);
+
+        // QTD_ORIGINAL e USUARIO podem estar em qualquer ordem
+        const qtdOriginal = colMap['QTD_ORIGINAL'] !== undefined ?
+          _toNumber_(row[colMap['QTD_ORIGINAL']]) : 0;
+
+        const usuario = colMap['USUARIO'] !== undefined ?
+          String(row[colMap['USUARIO']] || 'Sistema') : 'Sistema';
+
+        Logger.log(`      -> Qtd: ${qtdBaixada}, Usuario: "${usuario}", Original: ${qtdOriginal}`);
+
+        historico.push({
+          idItem: String(row[colMap['ID_ITEM']] || ''),
+          dataHora: dataFormatada,
+          dataHoraFormatada: dataFormatada,
+          qtdBaixada: Number(qtdBaixada),
+          qtdRestante: Number(qtdRestante),
+          qtdOriginal: Number(qtdOriginal),
+          usuario: usuario
+        });
+      }
+    }
+
+    Logger.log(`📋 Encontrados: ${historico.length} registros`);
+
+    const resultado = {
+      success: true,
+      historico: historico
+    };
+
+    // Testa serialização
+    try {
+      const teste = JSON.stringify(resultado);
+      Logger.log(`✅ Serialização OK (${teste.length} chars)`);
+    } catch (jsonErr) {
+      Logger.log(`❌ ERRO na serialização: ${jsonErr.message}`);
+      return { success: true, historico: [] };
+    }
+
+    Logger.log('📤 [FIM] Retornando resultado');
+    return resultado;
+
   } catch (e) {
-    Logger.log(`❌ Erro ao obter histórico: ${e.message}`);
-    return { success: false, error: e.message, historico: [] };
+    Logger.log(`❌ ERRO FATAL: ${e.message}`);
+    Logger.log(`   Stack: ${e.stack}`);
+    return { success: false, error: String(e.message), historico: [] };
   }
 }
 
@@ -181,13 +294,21 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada) {
     }
 
     const numCols = sheet.getLastColumn();
+
+    // Lê cabeçalho
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap = {};
+    headers.forEach((h, i) => {
+      colMap[String(h).trim()] = i;
+    });
+
     const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
     let ultimaLinha = -1;
 
     // Encontra a última baixa deste item
     for (let i = data.length - 1; i >= 0; i--) {
-      if (data[i][0] === uniqueId) {
-        ultimaLinha = i + 2; // +2 porque começa da linha 2 e array é 0-indexed
+      if (String(data[i][colMap['ID_ITEM']]).trim() === String(uniqueId).trim()) {
+        ultimaLinha = i + 2;
         break;
       }
     }
@@ -197,40 +318,42 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada) {
     }
 
     const linhaAtual = sheet.getRange(ultimaLinha, 1, 1, numCols).getValues()[0];
-    const qtdRestanteAnterior = linhaAtual[3];
-    const qtdBaixadaAnterior = linhaAtual[2];
+    const qtdRestanteAnterior = _toNumber_(linhaAtual[colMap['QTD_RESTANTE']]);
+    const qtdBaixadaAnterior = _toNumber_(linhaAtual[colMap['QTD_BAIXADA']]);
 
     // Calcula nova quantidade restante
     const diferenca = novaQtdBaixada - qtdBaixadaAnterior;
     const novaQtdRestante = qtdRestanteAnterior - diferenca;
 
+    Logger.log(`✏️ Editando baixa: ${qtdBaixadaAnterior} → ${novaQtdBaixada}, Restante: ${novaQtdRestante}`);
+
     if (novaQtdRestante < 0) {
       throw new Error('Quantidade restante não pode ser negativa');
     }
 
-    // Atualiza o histórico
-    sheet.getRange(ultimaLinha, 3).setValue(novaQtdBaixada);
-    sheet.getRange(ultimaLinha, 4).setValue(novaQtdRestante);
-    sheet.getRange(ultimaLinha, 2).setValue(new Date()); // Atualiza timestamp
+    // Atualiza o histórico usando índices do cabeçalho
+    sheet.getRange(ultimaLinha, colMap['QTD_BAIXADA'] + 1).setValue(novaQtdBaixada);
+    sheet.getRange(ultimaLinha, colMap['QTD_RESTANTE'] + 1).setValue(novaQtdRestante);
+    sheet.getRange(ultimaLinha, colMap['DATA_HORA'] + 1).setValue(new Date());
 
     // Atualiza a QTD. ABERTA na planilha Relatorio_DB
     const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
     if (dbSheet && planilhaLinha) {
-      const headers = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
-      const colMap = _getColumnIndexes_(headers);
-      const qtdCol = colMap['QTD. ABERTA'];
+      const dbHeaders = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
+      const dbColMap = _getColumnIndexes_(dbHeaders);
+      const qtdCol = dbColMap['QTD. ABERTA'];
 
       if (qtdCol !== undefined) {
         dbSheet.getRange(planilhaLinha, qtdCol + 1).setValue(novaQtdRestante);
-        Logger.log(`✅ QTD. ABERTA atualizada na linha ${planilhaLinha}: ${novaQtdRestante}`);
+        Logger.log(`✅ QTD. ABERTA atualizada: ${novaQtdRestante}`);
       }
     }
 
-    // Limpa cache de quantidades
+    SpreadsheetApp.flush();
     _qtdOriginalCache_ = null;
     limparCache();
 
-    Logger.log(`✏️ Última baixa editada: ${uniqueId} | Nova qtd: ${novaQtdBaixada} | Restante: ${novaQtdRestante}`);
+    Logger.log(`✅ Edição concluída: ${uniqueId} | Qtd: ${novaQtdBaixada} | Restante: ${novaQtdRestante}`);
 
     return {
       success: true,
@@ -264,11 +387,11 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa) {
       throw new Error("Coluna 'QTD. ABERTA' não encontrada");
     }
 
-    // Lê quantidade atual (colMap retorna 0-indexed, getRange usa 1-indexed)
+    // Lê quantidade atual
     const qtdAtual = sheet.getRange(linhaNum, qtdCol + 1).getValue();
     const qtdAtualNum = _toNumber_(qtdAtual);
 
-    Logger.log(`📊 Leitura: Linha ${linhaNum}, Coluna ${qtdCol + 1}, Valor: ${qtdAtual}, Convertido: ${qtdAtualNum}`);
+    Logger.log(`📊 Aplicando baixa - Linha: ${linhaNum}, Qtd Atual: ${qtdAtualNum}, Baixa: ${qtdBaixa}`);
 
     // Valida
     if (qtdBaixa > qtdAtualNum) {
@@ -290,8 +413,9 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa) {
       Logger.log(`✅ Item ${uniqueId} zerado e marcado como Faturado`);
     }
 
+    SpreadsheetApp.flush();
     limparCache();
-    Logger.log(`📦 Baixa aplicada: ${uniqueId} | -${qtdBaixa} | Restante: ${novaQtd}`);
+    Logger.log(`✅ Baixa aplicada: ${uniqueId} | -${qtdBaixa} | Nova Qtd: ${novaQtd}`);
 
     return {
       success: true,
@@ -319,13 +443,21 @@ function _buildQtdOriginalCache_() {
     }
 
     const numCols = sheet.getLastColumn();
+
+    // Lê cabeçalho
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap = {};
+    headers.forEach((h, i) => {
+      colMap[String(h).trim()] = i;
+    });
+
     const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
     const cache = {};
 
     // Para cada item, pega a QTD_ORIGINAL da primeira entrada
     data.forEach(row => {
-      const id = row[0];
-      const qtdOriginal = row[4]; // Coluna QTD_ORIGINAL
+      const id = row[colMap['ID_ITEM']];
+      const qtdOriginal = row[colMap['QTD_ORIGINAL']];
 
       if (!cache[id] && qtdOriginal !== undefined && qtdOriginal !== '') {
         cache[id] = _toNumber_(qtdOriginal);
@@ -457,18 +589,30 @@ function sincronizarDados() {
 
     const fonteMap = new Map();
     let semId = 0;
+    let semCartela = 0;
 
     fonteData.forEach((row, idx) => {
       const id = row[ID_COL];
+      const cartela = row[CARTELA_COL];
+
+      // Ignora registros sem dados na coluna CARTELA
+      if (!cartela || String(cartela).trim() === '') {
+        semCartela++;
+        return;
+      }
+
       if (id && String(id).trim()) {
-        fonteMap.set(String(id), row);
+        const idStr = String(id).trim();
+        fonteMap.set(idStr, row);
+        Logger.log(`   ✓ PEDIDOS: ID="${idStr}", CARTELA="${cartela}"`);
       } else {
         semId++;
       }
     });
 
-    Logger.log(`   ${fonteMap.size} itens com ID`);
+    Logger.log(`   ${fonteMap.size} itens com ID e CARTELA`);
     if (semId > 0) Logger.log(`   ⚠️ ${semId} sem ID - insira IDs manualmente na coluna A`);
+    if (semCartela > 0) Logger.log(`   ⚠️ ${semCartela} sem CARTELA - ignorados`);
     
     // 2) LER Relatorio_DB
     Logger.log("\n📖 2. LENDO Relatorio_DB");
@@ -476,6 +620,8 @@ function sincronizarDados() {
     let dbData = [];
 
     if (dbRows > 0) {
+      // Lê 15 colunas: A-O (ID até Status)
+      // Status está na coluna O (índice 14 do array)
       dbData = dbSheet.getRange(2, 1, dbRows, 15).getValues();
     }
 
@@ -483,10 +629,12 @@ function sincronizarDados() {
     const statusCount = { Ativo: 0, Inativo: 0, Faturado: 0, Excluido: 0 };
 
     dbData.forEach((row, idx) => {
-      const id = row[ID_COL];
+      const id = row[ID_COL];  // Coluna A (índice 0)
       if (id && String(id).trim()) {
-        dbMap.set(String(id), { row: row, linha: idx + 2 });
-        const st = row[STATUS_COL];
+        const idStr = String(id).trim();
+        dbMap.set(idStr, { row: row, linha: idx + 2 });
+        const st = row[STATUS_COL];  // Coluna O (índice 14)
+        Logger.log(`   ✓ Relatorio_DB: ID="${idStr}", Status="${st}", Linha=${idx + 2}`);
         if (st === 'Ativo') statusCount.Ativo++;
         else if (st === 'Inativo') statusCount.Inativo++;
         else if (st === 'Faturado') statusCount.Faturado++;
@@ -505,12 +653,15 @@ function sincronizarDados() {
     let marcaInativos = [];
     
     for (let [id, dbItem] of dbMap.entries()) {
-      const statusAtual = dbItem.row[STATUS_COL];
+      const statusAtual = dbItem.row[STATUS_COL];  // Coluna O (índice 14)
       if (statusAtual === "Excluido") continue;
-      
+
       if (fonteMap.has(id)) {
+        Logger.log(`   🔄 Match encontrado: ID="${id}" existe em PEDIDOS e Relatorio_DB`);
         const fonteRow = fonteMap.get(id);
-        
+
+        // Array de 15 elementos (índices 0-14)
+        // Última posição (14) é o Status na coluna O
         const novaLinha = [
           fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
           fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
@@ -518,29 +669,39 @@ function sincronizarDados() {
           fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
           fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   ""
         ];
-        
+
         let mudou = false;
+        // Compara as 14 primeiras colunas (0-13), excluindo Status
         for (let i = 0; i < STATUS_COL; i++) {
           let dbVal = (dbItem.row[i] instanceof Date) ? dbItem.row[i].toISOString() : dbItem.row[i];
           let novoVal = (novaLinha[i] instanceof Date) ? novaLinha[i].toISOString() : novaLinha[i];
           if (dbVal != novoVal) { mudou = true; break; }
         }
-        
+
         if (mudou || statusAtual === "Inativo") {
           const novoStatus = (statusAtual === "Faturado") ? "Faturado" : "Ativo";
-          novaLinha[STATUS_COL] = novoStatus;
+          novaLinha[STATUS_COL] = novoStatus;  // Coluna O (índice 14)
+          Logger.log(`   📝 Update: ID="${id}" Linha=${dbItem.linha} Status: ${statusAtual} → ${novoStatus}`);
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus });
         }
       } else {
+        Logger.log(`   ❌ ID="${id}" existe em Relatorio_DB mas NÃO encontrado em PEDIDOS`);
+        Logger.log(`      Status atual: "${statusAtual}", Linha: ${dbItem.linha}`);
+        Logger.log(`      Verificar: tem CARTELA preenchida em PEDIDOS?`);
         if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
+          Logger.log(`   ⚠️ Será marcado como Inativo`);
           marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual });
+        } else {
+          Logger.log(`   ℹ️ Não será alterado (já é ${statusAtual})`);
         }
       }
       
       fonteMap.delete(id);
     }
     
+    // Novos itens que estão em PEDIDOS mas não em Relatorio_DB
     for (let [id, fonteRow] of fonteMap.entries()) {
+      // Array de 15 elementos, Status (índice 14) = "Ativo"
       const novaLinha = [
         fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
         fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
@@ -570,6 +731,8 @@ function sincronizarDados() {
     }
     if (marcaInativos.length > 0) {
       marcaInativos.forEach(m => {
+        // STATUS_COL = 14 (índice do array)
+        // +1 porque getRange usa índice baseado em 1, então coluna O = 15
         dbSheet.getRange(m.linha, STATUS_COL + 1, 1, 1).setValue("Inativo");
         Logger.log(`   ⚠️ Linha ${m.linha}: ${m.de} → Inativo (ID: ${m.id})`);
       });
@@ -972,3 +1135,4 @@ function finalizarMultiplosItens(items) {
   });
   return { success: fail === 0, processados: ok, falhas: fail, results };
 }
+
