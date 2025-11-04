@@ -2412,9 +2412,9 @@ ALL_OCS_ITEMS = itemsObj;
             // Filtrar por Marfim (CM/MM estão na coluna TAMANHO)
             let itensFiltrados = ocData.items;
             if (marfimFilter === 'cm') {
-                itensFiltrados = ocData.items.filter(item => item.TAMANHO && item.TAMANHO.startsWith('CM'));
+                itensFiltrados = ocData.items.filter(item => item.TAMANHO && item.TAMANHO.toUpperCase().includes('CM'));
             } else if (marfimFilter === 'mm') {
-                itensFiltrados = ocData.items.filter(item => item.TAMANHO && item.TAMANHO.startsWith('MM'));
+                itensFiltrados = ocData.items.filter(item => item.TAMANHO && item.TAMANHO.toUpperCase().includes('MM'));
             }
 
             if (itensFiltrados.length === 0) return;
@@ -2536,9 +2536,9 @@ ALL_OCS_ITEMS = itemsObj;
             // Filtrar itens por Marfim (CM/MM estão na coluna TAMANHO)
             let itens = ocData.items;
             if (marfimFilter === 'cm') {
-                itens = itens.filter(item => item.TAMANHO && item.TAMANHO.startsWith('CM'));
+                itens = itens.filter(item => item.TAMANHO && item.TAMANHO.toUpperCase().includes('CM'));
             } else if (marfimFilter === 'mm') {
-                itens = itens.filter(item => item.TAMANHO && item.TAMANHO.startsWith('MM'));
+                itens = itens.filter(item => item.TAMANHO && item.TAMANHO.toUpperCase().includes('MM'));
             }
 
             console.log('Itens após filtro Marfim:', itens.length);
