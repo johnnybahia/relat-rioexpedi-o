@@ -207,6 +207,10 @@
     .editar-baixa-exemplos { font-size: 0.7rem; color: #6b7280; margin-top: 0.5rem; padding: 0.5rem; background-color: #fffbeb; border-radius: 0.25rem; }
     .editar-baixa-exemplos ul { margin: 0.25rem 0; padding-left: 1.5rem; }
     .editar-baixa-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+
+    /* Botão de Relatório de Produção */
+    #btn-relatorio-producao:hover { background: #047857; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
+    #btn-relatorio-producao:active { transform: translateY(0); }
   </style>
 </head>
 <body>
@@ -249,7 +253,7 @@
         </div>
         <select id="filter-status" class="filter-select">
           <option value="all">Todos os Status</option>
-          <option value="with-checkboxes">Com Itens Inativos</option>
+          <option value="with-checkboxes">Pendentes de confirmação de faturamento</option>
           <option value="pending-faturados">Com Itens Faturados</option>
         </select>
         <select id="filter-prazo" class="filter-select">
@@ -260,7 +264,14 @@
           <option value="atrasados-em-prazo">Atrasados + No Prazo Limite</option>
         </select>
       </div>
-      
+
+      <!-- Botão Relatório de Produção -->
+      <div style="margin: 1rem 0; text-align: center;">
+        <button id="btn-relatorio-producao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #059669; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+          📄 Imprimir Relatório de Produção
+        </button>
+      </div>
+
       <!-- NOVO: Totalizadores Gerais -->
       <div class="totals-wrapper">
         <div class="total-item">
@@ -290,17 +301,17 @@
   <div id="warningModal" class="modal-overlay hidden">
     <div class="modal-content">
       <div class="modal-header warning">
-        <h2>⚠️ Atenção: Itens Inativos Encontrados</h2>
+        <h2>⚠️ Atenção: Existem Itens já faturados abaixo!</h2>
       </div>
       <div class="modal-body">
         <p class="modal-message warning">
-          Existem <strong><span id="warning-inactive-count">0</span></strong> itens inativos que precisam ser faturados ou excluídos.
+          Existem <strong><span id="warning-inactive-count">0</span></strong> Itens Faturados que precisam ser marcados como faturado sem finalizar ou excluídos.
         </p>
         <p style="text-align: center; color: #6b7280; font-size: 0.875rem;">
   Selecione os itens usando as caixas de seleção e use os botões "Faturado sem finalizar" ou "Excluir" no topo da página.
-</p>        
+</p>
         <div class="collapsible-section">
-          <button class="toggle-list-btn" onclick="toggleInactiveList()">Ver Lista de Itens Inativos</button>
+          <button class="toggle-list-btn" onclick="toggleInactiveList()">Ver Lista de Itens Faturados</button>
           <ul id="warning-item-list" class="modal-item-list collapsible-list"></ul>
         </div>
       </div>
@@ -452,6 +463,68 @@
       <div class="modal-footer">
         <button id="baixa-cancel-btn" class="modal-btn modal-btn-cancel">Fechar</button>
         <button id="baixa-confirm-btn" class="modal-btn modal-btn-confirm">Adicionar Baixa</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Relatório de Produção -->
+  <div id="relatorioModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h2>📄 Relatório de Produção</h2>
+      </div>
+      <div class="modal-body">
+        <!-- Filtro de Marfim -->
+        <div style="margin-bottom: 1.5rem; padding: 1rem; background: #f3f4f6; border-radius: 8px;">
+          <h3 style="margin: 0 0 0.75rem 0; font-size: 1rem; color: #374151;">Filtrar por Marfim:</h3>
+          <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="radio" name="marfim-filter" value="all" checked>
+              <span>Todos (CM + MM)</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="radio" name="marfim-filter" value="cm">
+              <span>Apenas CM</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+              <input type="radio" name="marfim-filter" value="mm">
+              <span>Apenas MM</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Campo de busca -->
+        <div style="margin-bottom: 1rem;">
+          <input
+            type="text"
+            id="busca-ocs-relatorio"
+            placeholder="🔍 Buscar OC ou Cliente..."
+            style="width: 100%; padding: 0.75rem; border: 2px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; transition: border-color 0.2s;"
+            autocomplete="off"
+          >
+        </div>
+
+        <!-- Ações de seleção -->
+        <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; justify-content: space-between; align-items: center;">
+          <div style="display: flex; gap: 0.75rem;">
+            <button id="selecionar-todas-ocs" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;">
+              ✓ Selecionar Todas
+            </button>
+            <button id="limpar-selecao-ocs" style="padding: 0.5rem 1rem; background: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;">
+              ✗ Limpar Seleção
+            </button>
+          </div>
+          <span id="contador-ocs-selecionadas" style="font-weight: 600; color: #059669;">0 OCs selecionadas</span>
+        </div>
+
+        <!-- Lista de OCs -->
+        <div id="lista-ocs-relatorio" style="max-height: 400px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.5rem;">
+          <!-- Será preenchido dinamicamente -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="relatorio-cancel-btn" class="modal-btn modal-btn-cancel">Cancelar</button>
+        <button id="relatorio-gerar-btn" class="modal-btn modal-btn-confirm">Gerar Relatório</button>
       </div>
     </div>
   </div>
@@ -1112,8 +1185,8 @@ ALL_OCS_ITEMS = itemsObj;
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
                             ${hasInactiveItems ? '<th class="checkbox-cell"></th>' : ''}
                             <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
-                            <th>Tamanho</th><th>Qtd. Original</th><th>Qtd. Aberta</th><th>Progresso</th><th class="status-prazo">Prazo</th>
-                            <th>Dt. Entrega</th>
+                            <th>Tamanho</th><th>Qtd. Aberta</th><th>OS</th><th>Progresso</th>
+                            <th>Dt. Recebimento</th><th>Dt. Entrega</th><th class="status-prazo">Prazo</th>
                             <th>Ações</th></tr></thead><tbody>`;
             
             items.forEach(item => {
@@ -1144,16 +1217,17 @@ ALL_OCS_ITEMS = itemsObj;
                         <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
                         <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
                         <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
-                        <td class="nowrap">${fmtInt(qtdOriginal)}</td>
                         <td class="nowrap">${fmtInt(qtdAberta)}</td>
+                        <td class="nowrap">${item['CÓD. OS'] ?? 'N/A'}</td>
                         <td class="nowrap">
                             <div class="progress-bar-container">
                                 <div class="progress-bar-fill ${progressColor}${progressFull}" style="width: ${percentRestante}%"></div>
                                 <div class="progress-text">${percentRestante}%</div>
                             </div>
                         </td>
-                        <td class="status-prazo nowrap">${item.PRAZO ?? 'N/A'}</td>
+                        <td class="nowrap">${formatarData(item['DATA RECEB.'])}</td>
                         <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
+                        <td class="status-prazo nowrap">${item.PRAZO ?? 'N/A'}</td>
                         <td class="nowrap">`;
 
                 // Botão de Baixa Parcial (para itens Ativos) + Botão Finalizado (para itens Faturados)
@@ -1838,30 +1912,50 @@ ALL_OCS_ITEMS = itemsObj;
 
         google.script.run
             .withSuccessHandler(result => {
-                console.log('✅ Histórico recebido:', result);
+                console.log('✅ Histórico recebido (RAW):', result);
+                console.log('   - Tipo:', typeof result);
+                console.log('   - É null?', result === null);
+                console.log('   - É undefined?', result === undefined);
+
+                // Sempre mostra a seção de histórico
+                $historicoSection.style.display = 'block';
+
+                // Proteção contra null/undefined
+                if (!result) {
+                    console.warn('⚠️ Resultado null ou undefined! Exibindo histórico vazio.');
+                    renderizarHistorico([]);
+                    return;
+                }
+
                 console.log('   - Success:', result.success);
                 console.log('   - Histórico length:', result.historico ? result.historico.length : 0);
                 console.log('   - Histórico data:', result.historico);
 
-                if (result.success && result.historico && result.historico.length > 0) {
+                if (result.success && result.historico) {
                     console.log('   → Renderizando histórico...');
                     renderizarHistorico(result.historico);
-                    $historicoSection.style.display = 'block';
                     console.log('   → Histórico exibido!');
                 } else {
-                    console.log('   → Sem histórico para exibir');
-                    $historicoSection.style.display = 'none';
+                    console.log('   → Erro ao carregar histórico ou histórico vazio');
+                    renderizarHistorico([]);
                 }
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao carregar histórico:', error);
-                $historicoSection.style.display = 'none';
+                // Ainda mostra a seção, mas vazia
+                $historicoSection.style.display = 'block';
+                renderizarHistorico([]);
             })
             .obterHistoricoBaixas(uniqueId);
     }
 
     function renderizarHistorico(historico) {
         $historicoCount.textContent = `${historico.length} registro${historico.length !== 1 ? 's' : ''}`;
+
+        if (!historico || historico.length === 0) {
+            $historicoList.innerHTML = '<div style="padding: 1rem; text-align: center; color: #9ca3af; font-size: 0.875rem;">Nenhuma baixa registrada ainda</div>';
+            return;
+        }
 
         let html = '';
         historico.forEach((h, index) => {
@@ -1874,7 +1968,7 @@ ALL_OCS_ITEMS = itemsObj;
                         <span class="historico-item-qtd">-${fmtInt(h.qtdBaixada)}</span>
                         <span class="historico-item-data">${h.dataHoraFormatada || ''}</span>
                     </div>
-                    ${isUltima ? '<div class="historico-item-actions"><button class="btn-editar-baixa" onclick="mostrarEdicaoBaixa(' + h.qtdBaixada + ')">✏️ Editar</button></div>' : ''}
+                    ${isUltima ? `<div class="historico-item-actions"><button class="btn-editar-baixa" onclick="window.mostrarEdicaoBaixa(${h.qtdBaixada})">✏️ Editar</button></div>` : ''}
                 </div>
             `;
         });
@@ -1889,6 +1983,9 @@ ALL_OCS_ITEMS = itemsObj;
         $novaBaixaSection.style.display = 'none';
         $editarBaixaInput.focus();
     }
+
+    // Expõe a função globalmente para uso no onclick
+    window.mostrarEdicaoBaixa = mostrarEdicaoBaixa;
 
     function esconderEdicaoBaixa() {
         $editarBaixaForm.style.display = 'none';
@@ -2027,9 +2124,8 @@ ALL_OCS_ITEMS = itemsObj;
                 return;
             }
 
-            // Para aumentar, fazemos uma baixa negativa no backend
-            // Mas aqui vamos simular como se fosse uma edição da última baixa
-            alert('Para aumentar quantidade, use o botão "✏️ Editar" na última baixa do histórico');
+            // Para aumentar, usamos o botão Editar no histórico
+            alert('⚠️ Para reverter/aumentar quantidade:\n\n1. Veja o "📋 Histórico de Baixas" acima\n2. Clique no botão "✏️ Editar" da última baixa\n3. Digite +' + aumentar + ' para reverter\n\nSe não houver histórico, faça uma baixa primeiro.');
             return;
         } else {
             // Baixa normal
@@ -2056,6 +2152,7 @@ ALL_OCS_ITEMS = itemsObj;
                 console.log('✅ Baixa aplicada:', result);
 
                 if (result.success) {
+                    console.log('✅ Baixa aplicada com sucesso! Recarregando histórico...');
                     // Atualiza item
                     currentBaixaItem['QTD. ABERTA'] = result.novaQtd;
 
@@ -2065,6 +2162,7 @@ ALL_OCS_ITEMS = itemsObj;
                     updateProgressBar(currentBaixaItem['QTD. ORIGINAL'], result.novaQtd);
 
                     // Recarrega histórico
+                    console.log(`🔄 Chamando carregarHistorico("${currentBaixaItem.uniqueId}")`);
                     carregarHistorico(currentBaixaItem.uniqueId);
 
                     // Limpa input
@@ -2217,9 +2315,321 @@ ALL_OCS_ITEMS = itemsObj;
         }
     });
 
+    // ==== RELATÓRIO DE PRODUÇÃO ====
+    const $relatorioModal = document.getElementById('relatorioModal');
+    const $btnRelatorioProducao = document.getElementById('btn-relatorio-producao');
+    const $listaOcsRelatorio = document.getElementById('lista-ocs-relatorio');
+    const $selecionarTodasOcs = document.getElementById('selecionar-todas-ocs');
+    const $limparSelecaoOcs = document.getElementById('limpar-selecao-ocs');
+    const $contadorOcsSelecionadas = document.getElementById('contador-ocs-selecionadas');
+    const $relatorioCancelBtn = document.getElementById('relatorio-cancel-btn');
+    const $relatorioGerarBtn = document.getElementById('relatorio-gerar-btn');
+
+    let ocsSelecionadas = new Set();
+
+    // Abrir modal de relatório
+    $btnRelatorioProducao.addEventListener('click', function() {
+        abrirModalRelatorio();
+    });
+
+    // Fechar modal
+    $relatorioCancelBtn.addEventListener('click', function() {
+        $relatorioModal.classList.add('hidden');
+        ocsSelecionadas.clear();
+    });
+
+    // Selecionar todas
+    $selecionarTodasOcs.addEventListener('click', function() {
+        const checkboxes = $listaOcsRelatorio.querySelectorAll('input[type="checkbox"]:not(:disabled)');
+        checkboxes.forEach(cb => {
+            cb.checked = true;
+            ocsSelecionadas.add(cb.value);
+        });
+        atualizarContadorOcs();
+    });
+
+    // Limpar seleção
+    $limparSelecaoOcs.addEventListener('click', function() {
+        const checkboxes = $listaOcsRelatorio.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = false);
+        ocsSelecionadas.clear();
+        atualizarContadorOcs();
+    });
+
+    // Gerar relatório
+    $relatorioGerarBtn.addEventListener('click', function() {
+        if (ocsSelecionadas.size === 0) {
+            alert('Selecione ao menos uma Ordem de Compra para gerar o relatório.');
+            return;
+        }
+        gerarRelatorioProducao();
+    });
+
+    // Filtro de Marfim
+    document.querySelectorAll('input[name="marfim-filter"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            popularListaOcsRelatorio();
+        });
+    });
+
+    // Busca de OCs no modal
+    const $buscaOcsRelatorio = document.getElementById('busca-ocs-relatorio');
+    $buscaOcsRelatorio.addEventListener('input', function() {
+        filtrarListaOcsRelatorio(this.value);
+    });
+
+    function abrirModalRelatorio() {
+        popularListaOcsRelatorio();
+        $relatorioModal.classList.remove('hidden');
+        $buscaOcsRelatorio.value = '';
+        $buscaOcsRelatorio.focus();
+    }
+
+    function filtrarListaOcsRelatorio(termo) {
+        const busca = termo.toLowerCase().trim();
+        const items = $listaOcsRelatorio.querySelectorAll('.oc-item-relatorio');
+
+        items.forEach(item => {
+            const texto = item.textContent.toLowerCase();
+            if (texto.includes(busca)) {
+                item.style.display = '';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+    }
+
+    function popularListaOcsRelatorio() {
+        const marfimFilter = document.querySelector('input[name="marfim-filter"]:checked').value;
+        ocsSelecionadas.clear();
+
+        let html = '';
+
+        FILTERED_OCS_INFO.forEach(oc => {
+            const ocData = ALL_OCS_ITEMS[oc.ordCompra];
+            if (!ocData || !ocData.items) return;
+
+            // Filtrar por Marfim (CM/MM estão na coluna TAMANHO)
+            let itensFiltrados = ocData.items;
+            if (marfimFilter === 'cm') {
+                itensFiltrados = ocData.items.filter(item => item.TAMANHO && item.TAMANHO.startsWith('CM'));
+            } else if (marfimFilter === 'mm') {
+                itensFiltrados = ocData.items.filter(item => item.TAMANHO && item.TAMANHO.startsWith('MM'));
+            }
+
+            if (itensFiltrados.length === 0) return;
+
+            // Verificar se tem itens inativos ou faturados
+            const temInativos = ocData.items.some(item => item.Status === 'Inativo');
+            const temFaturados = ocData.items.some(item => item.Status === 'Faturado');
+
+            let avisos = '';
+            let estilo = '';
+
+            if (temFaturados) {
+                avisos += ' <span style="color: #dc2626; font-weight: 600;">⚠️ Tem Faturados</span>';
+                estilo = 'background: #fef2f2; border-left: 4px solid #dc2626;';
+            }
+            if (temInativos) {
+                avisos += ' <span style="color: #ea580c; font-weight: 600;">⚠️ Tem Inativos</span>';
+            }
+
+            html += `
+                <div class="oc-item-relatorio" style="padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 0.5rem; ${estilo}">
+                    <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
+                        <input type="checkbox" value="${oc.ordCompra}" class="oc-checkbox" style="width: 18px; height: 18px; cursor: pointer;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; color: #111827;">
+                                OC: ${oc.ordCompra} - ${ocData.cliente || ''}
+                            </div>
+                            <div style="font-size: 0.875rem; color: #6b7280;">
+                                ${itensFiltrados.length} ${itensFiltrados.length === 1 ? 'item' : 'itens'}${avisos}
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            `;
+        });
+
+        if (html === '') {
+            html = '<div style="text-align: center; padding: 2rem; color: #6b7280;">Nenhuma OC disponível com o filtro selecionado.</div>';
+        }
+
+        $listaOcsRelatorio.innerHTML = html;
+
+        // Adicionar event listeners aos checkboxes
+        $listaOcsRelatorio.querySelectorAll('.oc-checkbox').forEach(cb => {
+            cb.addEventListener('change', function() {
+                if (this.checked) {
+                    ocsSelecionadas.add(this.value);
+                } else {
+                    ocsSelecionadas.delete(this.value);
+                }
+                atualizarContadorOcs();
+            });
+        });
+
+        atualizarContadorOcs();
+    }
+
+    function atualizarContadorOcs() {
+        $contadorOcsSelecionadas.textContent = `${ocsSelecionadas.size} ${ocsSelecionadas.size === 1 ? 'OC selecionada' : 'OCs selecionadas'}`;
+    }
+
+    function gerarRelatorioProducao() {
+        const marfimFilter = document.querySelector('input[name="marfim-filter"]:checked').value;
+
+        // Criar janela de impressão
+        const printWindow = window.open('', '_blank');
+
+        let html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Relatório de Produção</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
+                h1 { text-align: center; margin-bottom: 10px; font-size: 20px; }
+                .info { text-align: center; margin-bottom: 20px; color: #666; font-size: 11px; }
+                .oc-section { page-break-inside: avoid; margin-bottom: 30px; }
+                .oc-header { background: #f3f4f6; padding: 10px; border: 2px solid #d1d5db; margin-bottom: 10px; }
+                .oc-header.faturado-pending { background: #fef2f2; border-color: #dc2626; }
+                .oc-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; }
+                .oc-avisos { color: #dc2626; font-weight: bold; font-size: 11px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+                th { background: #374151; color: white; padding: 8px 4px; text-align: left; font-size: 10px; border: 1px solid #111; }
+                td { padding: 6px 4px; border: 1px solid #ddd; font-size: 10px; }
+                tr:nth-child(even) { background: #f9fafb; }
+                .status-Ativo { color: #059669; font-weight: bold; }
+                .status-Inativo { color: #ea580c; font-weight: bold; }
+                .status-Faturado { color: #dc2626; font-weight: bold; }
+                @media print {
+                    body { padding: 10px; }
+                    .oc-section { page-break-inside: avoid; }
+                }
+            </style>
+        </head>
+        <body>
+            <h1>📄 Relatório de Produção</h1>
+            <div class="info">
+                Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}<br>
+                Filtro de Marfim: ${marfimFilter === 'all' ? 'Todos (CM + MM)' : marfimFilter === 'cm' ? 'Apenas CM' : 'Apenas MM'}
+            </div>
+        `;
+
+        // Processar cada OC selecionada
+        ocsSelecionadas.forEach(ocNum => {
+            const ocData = ALL_OCS_ITEMS[ocNum];
+            if (!ocData || !ocData.items) {
+                console.log('OC sem dados:', ocNum);
+                return;
+            }
+
+            // Buscar nome do cliente
+            const ocInfo = ALL_OCS_INFO.find(oc => oc.ordCompra === ocNum);
+            const nomeCliente = ocInfo ? ocInfo.cliente : '';
+
+            console.log('OC:', ocNum, 'Cliente:', nomeCliente, 'Itens:', ocData.items.length);
+
+            // Filtrar itens por Marfim (CM/MM estão na coluna TAMANHO)
+            let itens = ocData.items;
+            if (marfimFilter === 'cm') {
+                itens = itens.filter(item => item.TAMANHO && item.TAMANHO.startsWith('CM'));
+            } else if (marfimFilter === 'mm') {
+                itens = itens.filter(item => item.TAMANHO && item.TAMANHO.startsWith('MM'));
+            }
+
+            console.log('Itens após filtro Marfim:', itens.length);
+            if (itens.length > 0) {
+                console.log('Primeiro item:', itens[0]);
+            }
+
+            if (itens.length === 0) {
+                console.log('OC', ocNum, 'não tem itens após filtro');
+                return;
+            }
+
+            // Verificar avisos
+            const temInativos = ocData.items.some(item => item.Status === 'Inativo');
+            const temFaturados = ocData.items.some(item => item.Status === 'Faturado');
+
+            let avisos = [];
+            if (temFaturados) avisos.push('⚠️ Contém itens Faturados');
+            if (temInativos) avisos.push('⚠️ Contém itens Inativos');
+
+            html += `
+                <div class="oc-section">
+                    <div class="oc-header ${temFaturados ? 'faturado-pending' : ''}">
+                        <div class="oc-title">OC: ${ocNum} - ${nomeCliente}</div>
+                        ${avisos.length > 0 ? `<div class="oc-avisos">${avisos.join(' | ')}</div>` : ''}
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Cartela</th>
+                                <th>Cód. Cliente</th>
+                                <th>Descrição</th>
+                                <th>Tamanho</th>
+                                <th>Qtd. Aberta</th>
+                                <th>OS</th>
+                                <th>Dt. Recebimento</th>
+                                <th>Dt. Entrega</th>
+                                <th>Prazo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            itens.forEach(item => {
+                const qtdAberta = item['QTD. ABERTA'] || 0;
+                const dtRecebimento = item['DATA RECEB.'] || '';
+                const dtEntrega = item['DT. ENTREGA'] || '';
+
+                html += `
+                    <tr>
+                        <td>${item.CARTELA || ''}</td>
+                        <td>${item['CÓD. CLIENTE'] || ''}</td>
+                        <td>${item.DESCRIÇÃO || ''}</td>
+                        <td>${item.TAMANHO || ''}</td>
+                        <td>${qtdAberta}</td>
+                        <td>${item['CÓD. OS'] || ''}</td>
+                        <td>${dtRecebimento}</td>
+                        <td>${dtEntrega}</td>
+                        <td>${item.PRAZO || ''}</td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        });
+
+        html += `
+        </body>
+        </html>
+        `;
+
+        printWindow.document.write(html);
+        printWindow.document.close();
+
+        // Aguardar carregamento e imprimir
+        setTimeout(() => {
+            printWindow.print();
+        }, 250);
+
+        // Fechar modal
+        $relatorioModal.classList.add('hidden');
+    }
+
     // ==== INICIALIZAÇÃO ====
     document.addEventListener('DOMContentLoaded', carregarListaOcs); 
 
   </script>
 </body>
 </html>
+
