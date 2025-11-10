@@ -906,6 +906,12 @@ if (response.ordCompras) {
   response.ordCompras.forEach(oc => {
     const key = oc.ordCompra || oc.ordCompraId;
     itemsObj[key] = { ok: true, items: oc.items || [] };
+
+    // Debug: Mostrar campos disponíveis no primeiro item da primeira OC
+    if (oc.items && oc.items.length > 0 && Object.keys(itemsObj).length === 1) {
+      console.log('📋 Campos disponíveis nos itens:', Object.keys(oc.items[0]));
+      console.log('📋 Primeiro item completo:', oc.items[0]);
+    }
   });
 }
 ALL_OCS_ITEMS = itemsObj;
@@ -2519,22 +2525,51 @@ ALL_OCS_ITEMS = itemsObj;
             </div>
         `;
 
-        // Processar cada OC selecionada
+        // MESMA ORDENAÇÃO DOS CARDS: preparar array com metadados
+        const ocsParaRelatorio = [];
+
         ocsSelecionadas.forEach(ocNum => {
             const ocData = ALL_OCS_ITEMS[ocNum];
-            if (!ocData || !ocData.items) {
-                console.log('OC sem dados:', ocNum);
-                return;
-            }
+            if (!ocData || !ocData.items) return;
 
-            // Buscar nome do cliente
             const ocInfo = ALL_OCS_INFO.find(oc => oc.ordCompra === ocNum);
-            const nomeCliente = ocInfo ? ocInfo.cliente : '';
+            const items = ocData.items.filter(i => i.Status !== 'Excluido');
 
-            console.log('OC:', ocNum, 'Cliente:', nomeCliente, 'Itens:', ocData.items.length);
+            if (items.length === 0) return;
 
-            // Filtrar itens por Marfim (CM/MM estão na coluna TAMANHO)
-            let itens = ocData.items;
+            // Calcular metadados (mesma lógica dos cards)
+            const hasInativos = items.some(i => i.Status === 'Inativo');
+            const hasFaturados = items.some(i => i.Status === 'Faturado');
+            const prazoMin = calcularPrazoMinimo(items);
+            const prazoKey = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
+            const groupRank = hasInativos ? 0 : (hasFaturados ? 1 : 2);
+
+            ocsParaRelatorio.push({
+                ocNum,
+                ocData,
+                ocInfo,
+                nomeCliente: ocInfo ? ocInfo.cliente : '',
+                items,
+                groupRank,
+                prazoKey,
+                ocKey: String(ocNum)
+            });
+        });
+
+        // ORDENAR igual aos cards: grupo → prazo → OC
+        ocsParaRelatorio.sort((a, b) => {
+            if (a.groupRank !== b.groupRank) return a.groupRank - b.groupRank;
+            if (a.prazoKey !== b.prazoKey) return a.prazoKey - b.prazoKey;
+            return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
+        });
+
+        // Processar cada OC na ordem correta
+        ocsParaRelatorio.forEach(({ ocNum, ocData, ocInfo, nomeCliente, items: allItems }) => {
+
+            console.log('OC:', ocNum, 'Cliente:', nomeCliente, 'Itens:', allItems.length);
+
+            // Aplicar filtro de Marfim (itens já vêm sem Excluido)
+            let itens = allItems;
             if (marfimFilter === 'cm') {
                 itens = itens.filter(item => item.TAMANHO && item.TAMANHO.toUpperCase().includes('CM'));
             } else if (marfimFilter === 'mm') {
@@ -2543,7 +2578,19 @@ ALL_OCS_ITEMS = itemsObj;
 
             console.log('Itens após filtro Marfim:', itens.length);
             if (itens.length > 0) {
-                console.log('Primeiro item:', itens[0]);
+                console.log('📋 Primeiros 3 itens que serão impressos:');
+                itens.slice(0, 3).forEach((item, i) => {
+                    console.log(`  Item ${i+1}:`, {
+                        CARTELA: item.CARTELA,
+                        'CÓD. CLIENTE': item['CÓD. CLIENTE'],
+                        DESCRIÇÃO: item.DESCRIÇÃO?.substring(0, 30),
+                        TAMANHO: item.TAMANHO,
+                        'CÓD. OS': item['CÓD. OS'],
+                        'PRAZO': item.PRAZO,
+                        'DATA RECEB.': item['DATA RECEB.'],
+                        'DT. ENTREGA': item['DT. ENTREGA']
+                    });
+                });
             }
 
             if (itens.length === 0) {
@@ -2582,10 +2629,23 @@ ALL_OCS_ITEMS = itemsObj;
                         <tbody>
             `;
 
-            itens.forEach(item => {
+            itens.forEach((item, idx) => {
                 const qtdAberta = item['QTD. ABERTA'] || 0;
                 const dtRecebimento = formatarData(item['DATA RECEB.']);
                 const dtEntrega = formatarData(item['DT. ENTREGA']);
+
+                // MESMA LÓGICA DOS CARDS - usar ?? (nullish coalescing)
+                const prazo = item.PRAZO ?? 'N/A';
+                const codOS = item['CÓD. OS'] ?? 'N/A';
+
+                // Log para debug apenas se N/A (dados realmente ausentes)
+                if (prazo === 'N/A' || codOS === 'N/A') {
+                    console.log(`⚠️ Item ${idx} da OC ${ocNum} - Dado ausente na planilha:`, {
+                        CARTELA: item.CARTELA,
+                        'PRAZO': item.PRAZO,
+                        'CÓD. OS': item['CÓD. OS']
+                    });
+                }
 
                 html += `
                     <tr>
@@ -2594,10 +2654,10 @@ ALL_OCS_ITEMS = itemsObj;
                         <td>${item.DESCRIÇÃO || ''}</td>
                         <td>${item.TAMANHO || ''}</td>
                         <td>${qtdAberta}</td>
-                        <td>${item['CÓD. OS'] || ''}</td>
+                        <td>${codOS}</td>
                         <td>${dtRecebimento}</td>
                         <td>${dtEntrega}</td>
-                        <td>${item.PRAZO || ''}</td>
+                        <td>${prazo}</td>
                     </tr>
                 `;
             });
