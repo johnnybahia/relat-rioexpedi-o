@@ -3,7 +3,7 @@
 <head>
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Relatório de Pedidos (v20.0 COMPATÍVEL - Backend v15.5)</title>
+  <title>Relatório Inteligente de Pedidos (v2.5.7 - Backend v15.5)</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background-color: #f0f2f5; margin: 0; padding: 10px; }
     #loader { display: flex; flex-direction: column; align-items: center; justify-content: center; position: fixed; inset: 0; background-color: rgba(255,255,255,0.9); z-index: 1000; }
@@ -163,6 +163,11 @@
     .progress-bar-fill.vermelho { background: linear-gradient(90deg, #ef4444, #dc2626); }
     .progress-text { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 0.625rem; font-weight: 700; color: #1f2937; z-index: 1; text-shadow: 0 0 3px rgba(255,255,255,0.8); }
 
+    /* Botão de etiqueta */
+    .btn-etiqueta { padding: 4px 8px; background-color: #8b5cf6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: background-color 0.2s; margin-right: 4px; }
+    .btn-etiqueta:hover { background-color: #7c3aed; }
+    .btn-etiqueta:disabled { background-color: #9ca3af; cursor: not-allowed; opacity: 0.6; }
+
     /* Botão de baixa parcial */
     .btn-baixa { padding: 4px 10px; background-color: #3b82f6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.7rem; font-weight: 500; transition: background-color 0.2s; margin-right: 4px; }
     .btn-baixa:hover { background-color: #2563eb; }
@@ -211,6 +216,10 @@
     /* Botão de Relatório de Produção */
     #btn-relatorio-producao:hover { background: #047857; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
     #btn-relatorio-producao:active { transform: translateY(0); }
+
+    /* Botão de Etiqueta NF */
+    #btn-etiqueta-nf:hover { background: #6d28d9; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
+    #btn-etiqueta-nf:active { transform: translateY(0); }
   </style>
 </head>
 <body>
@@ -224,7 +233,13 @@
   <div class="container">
     <!-- Header -->
     <div class="header">
-      <h1>Relatório de Pedidos</h1>
+      <div style="display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 0.5rem;">
+        <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="height: 60px; width: auto;" onerror="this.style.display='none'">
+        <h1 style="margin: 0;">Relatório Inteligente de Pedidos</h1>
+      </div>
+      <div style="text-align: center; margin-top: -0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #6b7280;">
+        <div>Autor: Johnny | Versão: 2.5.7 (10/11/2025)</div>
+      </div>
       <div class="header-meta">
         <div id="updated-at">Carregando...</div>
         <div id="stats"></div>
@@ -241,7 +256,7 @@
       <!-- Ações Globais -->
       <div class="global-actions">
         <button id="btn-faturar-global" class="btn-global-action btn-faturar-global" disabled>Faturado sem finalizar</button>
-        <button id="btn-excluir-global" class="btn-global-action btn-excluir-global" disabled>Excluir</button>
+        <button id="btn-excluir-global" class="btn-global-action btn-excluir-global" disabled>Excluir itens não marcados</button>
         <span id="selected-count" class="selected-count">0 itens selecionados</span>
       </div>
 
@@ -263,12 +278,36 @@
           <option value="a-vencer">A Vencer</option>
           <option value="atrasados-em-prazo">Atrasados + No Prazo Limite</option>
         </select>
+
+        <!-- Filtro de Tipo (Metros/Pares) -->
+        <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: white; border-radius: 6px; border: 1px solid #d1d5db;">
+          <span style="font-size: 0.875rem; font-weight: 600; color: #374151; margin-right: 0.25rem;">Tipo:</span>
+          <label style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; font-size: 0.875rem;">
+            <input type="radio" name="filter-tipo" value="all" checked style="cursor: pointer;">
+            <span>Tudo</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; font-size: 0.875rem;">
+            <input type="radio" name="filter-tipo" value="metros" style="cursor: pointer;">
+            <span>Metros (MM)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; font-size: 0.875rem;">
+            <input type="radio" name="filter-tipo" value="pares" style="cursor: pointer;">
+            <span>Pares (CM)</span>
+          </label>
+        </div>
       </div>
 
       <!-- Botão Relatório de Produção -->
       <div style="margin: 1rem 0; text-align: center;">
         <button id="btn-relatorio-producao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #059669; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
           📄 Imprimir Relatório de Produção
+        </button>
+      </div>
+
+      <!-- Botão Etiqueta NF -->
+      <div style="margin: 1rem 0; text-align: center;">
+        <button id="btn-etiqueta-nf" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #7c3aed; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+          🏷️ Imprimir Etiqueta NF
         </button>
       </div>
 
@@ -317,7 +356,6 @@
       </div>
       <div class="modal-footer">
         <button id="warning-ok-btn" class="modal-btn modal-btn-cancel">Entendi</button>
-        <button id="warning-delete-btn" class="modal-btn modal-btn-danger">Excluir Todos</button>
       </div>
     </div>
   </div>
@@ -467,6 +505,62 @@
     </div>
   </div>
 
+  <!-- Modal de Etiquetas -->
+  <div id="etiquetaModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 700px;">
+      <div class="modal-header">
+        <h2>🏷️ Gerar Etiquetas</h2>
+      </div>
+      <div class="modal-body">
+        <!-- Informações do Item -->
+        <div style="background: #f3f4f6; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+          <div style="font-weight: 600; margin-bottom: 0.5rem; font-size: 0.95rem;" id="etiqueta-item-info">Item: -</div>
+          <div style="color: #6b7280; font-size: 0.875rem;">
+            <span>Quantidade Original: <strong id="etiqueta-qtd-original">0</strong></span>
+          </div>
+        </div>
+
+        <!-- Lista de Etiquetas -->
+        <div style="margin-bottom: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <h3 style="margin: 0; font-size: 0.95rem; color: #374151;">Etiquetas:</h3>
+            <button id="btn-adicionar-etiqueta" style="padding: 0.5rem 1rem; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">
+              + Adicionar Etiqueta
+            </button>
+          </div>
+
+          <!-- Contador -->
+          <div style="background: #fef3c7; border: 2px solid #f59e0b; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; text-align: center;">
+            <span style="font-weight: 600; color: #92400e;">
+              Total alocado: <span id="etiqueta-total-alocado">0</span> / <span id="etiqueta-total-disponivel">0</span>
+            </span>
+          </div>
+
+          <!-- Container de Etiquetas -->
+          <div id="etiquetas-lista" style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem;">
+            <!-- Etiquetas serão inseridas aqui -->
+          </div>
+        </div>
+
+        <!-- Observações -->
+        <div style="margin-bottom: 1rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem; color: #374151;">
+            Observações (aparece em todas as etiquetas):
+          </label>
+          <textarea id="etiqueta-obs"
+            rows="3"
+            placeholder="Digite observações que aparecerão em todas as etiquetas..."
+            style="width: 100%; padding: 0.75rem; border: 2px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; font-family: inherit; resize: vertical;"
+          ></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="etiqueta-cancel-btn" class="modal-btn modal-btn-cancel">Cancelar</button>
+        <button id="etiqueta-gerar-btn" class="modal-btn modal-btn-confirm">🖨️ Gerar PDF</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal de Relatório de Produção -->
   <div id="relatorioModal" class="modal-overlay hidden">
     <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
@@ -529,6 +623,65 @@
     </div>
   </div>
 
+  <!-- Modal de Etiqueta NF -->
+  <div id="nfModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h2>🏷️ Etiqueta de Nota Fiscal</h2>
+      </div>
+      <div class="modal-body">
+        <!-- Número da NF -->
+        <div style="margin-bottom: 1.5rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.95rem; color: #374151;">
+            Número da Nota Fiscal:
+          </label>
+          <input
+            type="text"
+            id="nf-numero"
+            placeholder="Ex: 12345"
+            style="width: 100%; padding: 0.75rem; border: 2px solid #d1d5db; border-radius: 6px; font-size: 1rem; transition: border-color 0.2s;"
+            autocomplete="off"
+          >
+        </div>
+
+        <!-- Quantidade de Volumes -->
+        <div style="margin-bottom: 1.5rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.95rem; color: #374151;">
+            Quantidade de Volumes:
+          </label>
+          <input
+            type="number"
+            id="nf-volumes"
+            placeholder="Ex: 10"
+            min="1"
+            max="999"
+            style="width: 100%; padding: 0.75rem; border: 2px solid #d1d5db; border-radius: 6px; font-size: 1rem; transition: border-color 0.2s;"
+            autocomplete="off"
+          >
+        </div>
+
+        <!-- Cliente -->
+        <div style="margin-bottom: 1rem; position: relative;">
+          <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.95rem; color: #374151;">
+            Cliente:
+          </label>
+          <input
+            type="text"
+            id="nf-cliente"
+            placeholder="Digite o nome do cliente..."
+            style="width: 100%; padding: 0.75rem; border: 2px solid #d1d5db; border-radius: 6px; font-size: 1rem; transition: border-color 0.2s;"
+            autocomplete="off"
+          >
+          <div id="nf-cliente-autocomplete" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 2px solid #d1d5db; border-top: none; border-radius: 0 0 6px 6px; max-height: 200px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="nf-cancel-btn" class="modal-btn modal-btn-cancel">Cancelar</button>
+        <button id="nf-gerar-btn" class="modal-btn modal-btn-confirm">🖨️ Gerar Etiquetas</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Keyboard Hint -->
   <div id="keyboard-hint" class="keyboard-hint hidden">
     Use <kbd>↑</kbd> <kbd>↓</kbd> para navegar e <kbd>Espaço</kbd> para selecionar
@@ -583,7 +736,6 @@
     const $warningInactiveCount = document.getElementById('warning-inactive-count');
     const $warningItemList = document.getElementById('warning-item-list');
     const $warningOkBtn = document.getElementById('warning-ok-btn');
-    const $warningDeleteBtn = document.getElementById('warning-delete-btn');
     
     const $confirmModal = document.getElementById('confirmModal');
     const $modalFaturarList = document.getElementById('modal-faturar-list');
@@ -624,7 +776,26 @@
 
     // Dados do item atual no modal de baixa
     let currentBaixaItem = null;
-    
+
+    // Modal de Etiquetas
+    const $etiquetaModal = document.getElementById('etiquetaModal');
+    const $etiquetaItemInfo = document.getElementById('etiqueta-item-info');
+    const $etiquetaQtdOriginal = document.getElementById('etiqueta-qtd-original');
+    const $etiquetaTotalAlocado = document.getElementById('etiqueta-total-alocado');
+    const $etiquetaTotalDisponivel = document.getElementById('etiqueta-total-disponivel');
+    const $etiquetasLista = document.getElementById('etiquetas-lista');
+    const $btnAdicionarEtiqueta = document.getElementById('btn-adicionar-etiqueta');
+    const $etiquetaObs = document.getElementById('etiqueta-obs');
+    const $etiquetaCancelBtn = document.getElementById('etiqueta-cancel-btn');
+    const $etiquetaGerarBtn = document.getElementById('etiqueta-gerar-btn');
+
+    // Dados do item atual no modal de etiquetas
+    let currentEtiquetaItem = null;
+    let currentEtiquetaOC = '';
+    let currentEtiquetaCliente = '';
+    let etiquetas = [];
+    let etiquetaIdCounter = 0;
+
     // ==== FUNÇÕES AUXILIARES ====
 
     function show(el, visible) {
@@ -966,7 +1137,8 @@ ALL_OCS_ITEMS = itemsObj;
         const searchTerm = _normSearch_($searchOC.value);
         const statusFilter = $filterStatus.value;
         const prazoFilter = $filterPrazo.value;
-        
+        const tipoFilter = document.querySelector('input[name="filter-tipo"]:checked')?.value || 'all';
+
         let filtered = [...ALL_OCS_INFO];
         
         if (searchTerm) {
@@ -998,7 +1170,7 @@ ALL_OCS_ITEMS = itemsObj;
                 if (!ocData || !ocData.items) return false;
                 const prazoMin = calcularPrazoMinimo(ocData.items);
                 if (prazoMin === null) return false;
-                
+
                 switch(prazoFilter) {
                     case 'atrasados':
                         return prazoMin < 0;
@@ -1013,7 +1185,26 @@ ALL_OCS_ITEMS = itemsObj;
                 }
             });
         }
-        
+
+        // Filtro de tipo (METROS/PARES)
+        if (tipoFilter !== 'all') {
+            filtered = filtered.filter(oc => {
+                const ocData = ALL_OCS_ITEMS[oc.ordCompra];
+                if (!ocData || !ocData.items) return false;
+
+                // Verifica se a OC tem pelo menos um item do tipo selecionado
+                return ocData.items.some(item => {
+                    const tamanho = (item.TAMANHO || '').toUpperCase();
+                    if (tipoFilter === 'metros') {
+                        return tamanho.includes('MM');
+                    } else if (tipoFilter === 'pares') {
+                        return tamanho.includes('CM');
+                    }
+                    return true;
+                });
+            });
+        }
+
         FILTERED_OCS_INFO = filtered;
         $cardsContainer.innerHTML = '';
         console.log(`🔍 Filtros aplicados. OCs filtradas: ${FILTERED_OCS_INFO.length}`);
@@ -1035,12 +1226,27 @@ ALL_OCS_ITEMS = itemsObj;
 
   const cards = [];
   totalInactiveItems = 0;
+  const tipoFilter = document.querySelector('input[name="filter-tipo"]:checked')?.value || 'all';
 
   FILTERED_OCS_INFO.forEach(ocInfo => {
     const ocData = ALL_OCS_ITEMS[ocInfo.ordCompra];
     if (!ocData || !ocData.items || ocData.items.length === 0) return;
 
-    const items = ocData.items.filter(i => i.Status !== 'Excluido');
+    let items = ocData.items.filter(i => i.Status !== 'Excluido');
+
+    // Aplicar filtro de tipo (METROS/PARES) aos itens
+    if (tipoFilter !== 'all') {
+      items = items.filter(item => {
+        const tamanho = (item.TAMANHO || '').toUpperCase();
+        if (tipoFilter === 'metros') {
+          return tamanho.includes('MM');
+        } else if (tipoFilter === 'pares') {
+          return tamanho.includes('CM');
+        }
+        return true;
+      });
+    }
+
     if (items.length === 0) return;
 
     const hasInativos   = items.some(i => i.Status === 'Inativo');
@@ -1191,7 +1397,7 @@ ALL_OCS_ITEMS = itemsObj;
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
                             ${hasInactiveItems ? '<th class="checkbox-cell"></th>' : ''}
                             <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
-                            <th>Tamanho</th><th>Qtd. Aberta</th><th>OS</th><th>Progresso</th>
+                            <th>Tamanho</th><th>Qtd. Original</th><th>Qtd. Aberta</th><th>OS</th>
                             <th>Dt. Recebimento</th><th>Dt. Entrega</th><th class="status-prazo">Prazo</th>
                             <th>Ações</th></tr></thead><tbody>`;
             
@@ -1204,9 +1410,6 @@ ALL_OCS_ITEMS = itemsObj;
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
-                const percentRestante = qtdOriginal > 0 ? Math.round((qtdAberta / qtdOriginal) * 100) : 0;
-                const progressColor = percentRestante >= 70 ? 'verde' : (percentRestante >= 30 ? 'amarelo' : (percentRestante >= 10 ? 'laranja' : 'vermelho'));
-                const progressFull = percentRestante === 100 ? ' full' : '';
 
                 bodyHtml += `<tr id="${itemId}" class="${itemStatusClass}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
 
@@ -1223,28 +1426,24 @@ ALL_OCS_ITEMS = itemsObj;
                         <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
                         <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
                         <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
+                        <td class="nowrap">${fmtInt(qtdOriginal)}</td>
                         <td class="nowrap">${fmtInt(qtdAberta)}</td>
                         <td class="nowrap">${item['CÓD. OS'] ?? 'N/A'}</td>
-                        <td class="nowrap">
-                            <div class="progress-bar-container">
-                                <div class="progress-bar-fill ${progressColor}${progressFull}" style="width: ${percentRestante}%"></div>
-                                <div class="progress-text">${percentRestante}%</div>
-                            </div>
-                        </td>
                         <td class="nowrap">${formatarData(item['DATA RECEB.'])}</td>
                         <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
                         <td class="status-prazo nowrap">${item.PRAZO ?? 'N/A'}</td>
                         <td class="nowrap">`;
 
+                // Botão de Etiqueta (para todos os itens)
+                bodyHtml += `<button class="btn-etiqueta" onclick='handleEtiqueta(${JSON.stringify(item).replace(/'/g, "&apos;")}, "${ocInfo.ordCompra}", "${ocInfo.cliente}")' title="Gerar etiquetas para este item">🏷️</button>`;
+
                 // Botão de Baixa Parcial (para itens Ativos) + Botão Finalizado (para itens Faturados)
                 if (!isFaturado && !isInactive) {
-                    bodyHtml += `<button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
+                    bodyHtml += ` <button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
                 } else if (isFaturado) {
                     const disabled = hasInactiveItems ? 'disabled' : '';
                     const title = hasInactiveItems ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
-                    bodyHtml += `<button class="btn-finalizar" ${disabled} title="${title}" onclick="handleFinalizar('${item.uniqueId}', ${item.planilhaLinha}, '${cardId}')">Finalizado</button>`;
-                } else {
-                    bodyHtml += '-';
+                    bodyHtml += ` <button class="btn-finalizar" ${disabled} title="${title}" onclick="handleFinalizar('${item.uniqueId}', ${item.planilhaLinha}, '${cardId}')">Finalizado</button>`;
                 }
 
                 bodyHtml += `</td></tr>`;
@@ -1299,11 +1498,24 @@ ALL_OCS_ITEMS = itemsObj;
     function updateGlobalSelectedCount() {
         const checkboxes = document.querySelectorAll('.item-checkbox:checked');
         const count = checkboxes.length;
-        
+
+        // Conta quantos itens inativos NÃO estão marcados
+        const allInactiveRows = document.querySelectorAll('tr.item-inativo');
+        let unmarkedCount = 0;
+        allInactiveRows.forEach(row => {
+            const checkbox = row.querySelector('.item-checkbox');
+            if (checkbox && !checkbox.checked) {
+                unmarkedCount++;
+            }
+        });
+
         $selectedCount.textContent = `${count} item${count !== 1 ? 'ns' : ''} selecionado${count !== 1 ? 's' : ''}`;
-        
+
+        // Botão "Faturado sem finalizar" habilitado quando há itens selecionados
         $btnFaturarGlobal.disabled = count === 0;
-        $btnExcluirGlobal.disabled = count === 0;
+
+        // Botão "Excluir itens não marcados" habilitado quando há itens inativos NÃO marcados
+        $btnExcluirGlobal.disabled = unmarkedCount === 0;
     }
     
     function updateInactiveRowsList() {
@@ -1392,69 +1604,41 @@ ALL_OCS_ITEMS = itemsObj;
         $warningItemList.classList.toggle('visible');
     }
 
-    function showDeleteAllModal() {
-        // Coleta todos os itens inativos
-        const allInactiveItems = [];
-        
-        document.querySelectorAll('tr.item-inativo').forEach(row => {
-            const desc = row.dataset.itemDesc || 'Item';
-            const qtd = row.dataset.itemQtd || '0';
-            const tamanho = row.dataset.itemTamanho || '';
-            const oc = row.dataset.oc || '';
-            allInactiveItems.push({
-                uniqueId: row.dataset.uniqueId,
-                linha: parseInt(row.dataset.linha),
-                info: `OC ${oc} - ${formatItemInfo(desc, tamanho, qtd)}`
-            });
-        });
-        
-        console.log(`🗑️ Preparando exclusão em massa de ${allInactiveItems.length} itens`);
-        
-        // Preenche lista
-        $deleteAllList.innerHTML = allInactiveItems.map(item => 
-            `<li>✗ ${item.info}</li>`
-        ).join('');
-        
-        // Guarda dados
-        $deleteAllModal.dataset.items = JSON.stringify(allInactiveItems);
-        
-        // Mostra modal
-        closeWarningModal();
-        $deleteAllModal.classList.remove('hidden');
-    }
-    
     function showExcluirGlobalModal() {
-        // Coleta apenas os itens MARCADOS para exclusão
-        const selectedItems = [];
-        
-        document.querySelectorAll('.item-checkbox:checked').forEach(checkbox => {
-            const row = checkbox.closest('tr');
-            const desc = row.dataset.itemDesc || 'Item';
-            const qtd = row.dataset.itemQtd || '0';
-            const tamanho = row.dataset.itemTamanho || '';
-            const oc = row.dataset.oc || '';
-            selectedItems.push({
-                uniqueId: row.dataset.uniqueId,
-                linha: parseInt(row.dataset.linha),
-                info: `OC ${oc} - ${formatItemInfo(desc, tamanho, qtd)}`
-            });
+        // Coleta apenas os itens inativos NÃO MARCADOS para exclusão
+        const unmarkedItems = [];
+
+        document.querySelectorAll('tr.item-inativo').forEach(row => {
+            const checkbox = row.querySelector('.item-checkbox');
+            // Se o checkbox não está marcado, adiciona à lista
+            if (checkbox && !checkbox.checked) {
+                const desc = row.dataset.itemDesc || 'Item';
+                const qtd = row.dataset.itemQtd || '0';
+                const tamanho = row.dataset.itemTamanho || '';
+                const oc = row.dataset.oc || '';
+                unmarkedItems.push({
+                    uniqueId: row.dataset.uniqueId,
+                    linha: parseInt(row.dataset.linha),
+                    info: `OC ${oc} - ${formatItemInfo(desc, tamanho, qtd)}`
+                });
+            }
         });
-        
-        if (selectedItems.length === 0) {
-            alert('Nenhum item selecionado para excluir.');
+
+        if (unmarkedItems.length === 0) {
+            alert('Nenhum item inativo não marcado para excluir.');
             return;
         }
-        
-        console.log(`🗑️ Preparando exclusão de ${selectedItems.length} itens selecionados`);
-        
+
+        console.log(`🗑️ Preparando exclusão de ${unmarkedItems.length} itens inativos não marcados`);
+
         // Preenche lista
-        $deleteAllList.innerHTML = selectedItems.map(item => 
+        $deleteAllList.innerHTML = unmarkedItems.map(item =>
             `<li>✗ ${item.info}</li>`
         ).join('');
-        
+
         // Guarda dados
-        $deleteAllModal.dataset.items = JSON.stringify(selectedItems);
-        
+        $deleteAllModal.dataset.items = JSON.stringify(unmarkedItems);
+
         // Mostra modal
         $deleteAllModal.classList.remove('hidden');
     }
@@ -1463,26 +1647,26 @@ ALL_OCS_ITEMS = itemsObj;
         $deleteAllModal.classList.add('hidden');
     }
 
-    function confirmDeleteAll() {
+    function confirmExcluirNaoMarcados() {
         const items = JSON.parse($deleteAllModal.dataset.items || '[]');
-        
+
         if (items.length === 0) {
             alert('Nenhum item para excluir.');
             hideDeleteAllModal();
             return;
         }
-        
-        console.log(`🗑️ Confirmando exclusão de ${items.length} itens...`);
-        
+
+        console.log(`🗑️ Confirmando exclusão de ${items.length} itens não marcados...`);
+
         hideDeleteAllModal();
         $loader.classList.remove('hidden');
         $loadingText.textContent = 'Excluindo itens...';
-        
+
         google.script.run
             .withSuccessHandler(result => {
-                console.log('✅ Resultado da exclusão em massa:', result);
+                console.log('✅ Resultado da exclusão:', result);
                 $loader.classList.add('hidden');
-                
+
                 if (result.success) {
                     // Remove itens da visualização
                     items.forEach(item => {
@@ -1491,7 +1675,7 @@ ALL_OCS_ITEMS = itemsObj;
                             row.remove();
                         }
                     });
-                    
+
                     // Remove cards vazios
                     document.querySelectorAll('.card').forEach(card => {
                         const rows = card.querySelectorAll('.item-table tbody tr');
@@ -1499,7 +1683,7 @@ ALL_OCS_ITEMS = itemsObj;
                             card.remove();
                         }
                     });
-                    
+
                     hideDeleteAllModal();
                     showSuccessModal(`${result.processados} item(ns) excluído(s) com sucesso!`);
                     updateStats();
@@ -2274,18 +2458,23 @@ ALL_OCS_ITEMS = itemsObj;
     
     $filterStatus.addEventListener('change', aplicarFiltros);
     $filterPrazo.addEventListener('change', aplicarFiltros);
+
+    // Filtro de tipo (METROS/PARES)
+    document.querySelectorAll('input[name="filter-tipo"]').forEach(radio => {
+        radio.addEventListener('change', aplicarFiltros);
+    });
+
     $refreshButton.addEventListener('click', () => carregarListaOcs(true));
     $btnFaturarGlobal.addEventListener('click', showConfirmModal);
     $btnExcluirGlobal.addEventListener('click', showExcluirGlobalModal);
     $modalConfirmBtn.addEventListener('click', confirmFaturamento);
     $modalCancelBtn.addEventListener('click', hideConfirmModal);
-    
+
     // Modal de aviso
     $warningOkBtn.addEventListener('click', closeWarningModal);
-    $warningDeleteBtn.addEventListener('click', showDeleteAllModal);
-    
+
     // Modal de exclusão em massa
-    $deleteAllConfirmBtn.addEventListener('click', confirmDeleteAll);
+    $deleteAllConfirmBtn.addEventListener('click', confirmExcluirNaoMarcados);
     $deleteAllCancelBtn.addEventListener('click', hideDeleteAllModal);
     
     // Modal de sucesso
@@ -2295,6 +2484,11 @@ ALL_OCS_ITEMS = itemsObj;
     $baixaCancelBtn.addEventListener('click', hideBaixaModal);
     $salvarEdicaoBtn.addEventListener('click', salvarEdicaoBaixa);
     $cancelarEdicaoBtn.addEventListener('click', esconderEdicaoBaixa);
+
+    // Modal de etiquetas
+    $btnAdicionarEtiqueta.addEventListener('click', adicionarEtiqueta);
+    $etiquetaCancelBtn.addEventListener('click', fecharModalEtiquetas);
+    $etiquetaGerarBtn.addEventListener('click', gerarPDFEtiquetas);
 
     // Keyboard navigation - ↑↓ entre itens (linhas)
     document.addEventListener('keydown', (e) => {
@@ -2320,6 +2514,345 @@ ALL_OCS_ITEMS = itemsObj;
                 break;
         }
     });
+
+    // ==== MODAL DE ETIQUETAS ====
+
+    function handleEtiqueta(item, oc, cliente) {
+        console.log('🏷️ Abrindo modal de etiquetas para:', item);
+
+        currentEtiquetaItem = item;
+        currentEtiquetaOC = oc;
+        currentEtiquetaCliente = cliente;
+        etiquetas = [];
+        etiquetaIdCounter = 0;
+
+        // Preenche informações do item
+        const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
+        $etiquetaItemInfo.textContent = `Item: ${item.DESCRIÇÃO || 'N/A'} - Tamanho: ${item.TAMANHO || 'N/A'}`;
+        $etiquetaQtdOriginal.textContent = fmtInt(qtdOriginal);
+        $etiquetaTotalDisponivel.textContent = fmtInt(qtdOriginal);
+
+        // Limpa observações
+        $etiquetaObs.value = '';
+
+        // Adiciona primeira etiqueta automaticamente
+        adicionarEtiqueta();
+
+        // Mostra modal
+        $etiquetaModal.classList.remove('hidden');
+    }
+
+    function adicionarEtiqueta() {
+        const qtdOriginal = currentEtiquetaItem['QTD. ORIGINAL'] || currentEtiquetaItem['QTD. ABERTA'] || 0;
+        const totalAlocado = etiquetas.reduce((sum, e) => sum + (parseInt(e.quantidade) || 0), 0);
+        const disponivel = qtdOriginal - totalAlocado;
+
+        if (disponivel <= 0) {
+            alert('Toda a quantidade já foi alocada em etiquetas!');
+            return;
+        }
+
+        const id = ++etiquetaIdCounter;
+        etiquetas.push({
+            id: id,
+            quantidade: Math.min(disponivel, qtdOriginal)
+        });
+
+        renderizarEtiquetas();
+        atualizarContadores();
+    }
+
+    function removerEtiqueta(id) {
+        etiquetas = etiquetas.filter(e => e.id !== id);
+        renderizarEtiquetas();
+        atualizarContadores();
+    }
+
+    function atualizarQuantidadeEtiqueta(id, novaQtd) {
+        const etiqueta = etiquetas.find(e => e.id === id);
+        if (etiqueta) {
+            etiqueta.quantidade = parseInt(novaQtd) || 0;
+            atualizarContadores();
+        }
+    }
+
+    function atualizarContadores() {
+        const qtdOriginal = currentEtiquetaItem['QTD. ORIGINAL'] || currentEtiquetaItem['QTD. ABERTA'] || 0;
+        const totalAlocado = etiquetas.reduce((sum, e) => sum + (parseInt(e.quantidade) || 0), 0);
+
+        $etiquetaTotalAlocado.textContent = fmtInt(totalAlocado);
+
+        // Valida se excedeu
+        if (totalAlocado > qtdOriginal) {
+            $etiquetaTotalAlocado.style.color = '#dc2626';
+            $etiquetaGerarBtn.disabled = true;
+        } else {
+            $etiquetaTotalAlocado.style.color = '#059669';
+            $etiquetaGerarBtn.disabled = etiquetas.length === 0 || totalAlocado === 0;
+        }
+    }
+
+    function renderizarEtiquetas() {
+        if (etiquetas.length === 0) {
+            $etiquetasLista.innerHTML = '<div style="text-align: center; color: #6b7280; padding: 2rem;">Nenhuma etiqueta adicionada</div>';
+            return;
+        }
+
+        let html = '';
+        etiquetas.forEach((etiq, index) => {
+            html += `
+                <div style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border: 2px solid #e5e7eb; border-radius: 6px;">
+                    <div style="font-weight: 600; color: #374151; min-width: 80px;">Etiqueta ${index + 1}:</div>
+                    <input
+                        type="number"
+                        value="${etiq.quantidade}"
+                        min="1"
+                        onchange="atualizarQuantidadeEtiqueta(${etiq.id}, this.value)"
+                        style="flex: 1; padding: 0.5rem; border: 2px solid #d1d5db; border-radius: 4px; font-size: 0.875rem;"
+                        placeholder="Quantidade"
+                    />
+                    <button
+                        onclick="removerEtiqueta(${etiq.id})"
+                        style="padding: 0.5rem 0.75rem; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;"
+                        title="Remover etiqueta"
+                    >✕</button>
+                </div>
+            `;
+        });
+
+        $etiquetasLista.innerHTML = html;
+    }
+
+    function fecharModalEtiquetas() {
+        $etiquetaModal.classList.add('hidden');
+        currentEtiquetaItem = null;
+        currentEtiquetaOC = '';
+        currentEtiquetaCliente = '';
+        etiquetas = [];
+    }
+
+    function gerarPDFEtiquetas() {
+        if (!currentEtiquetaItem) {
+            alert('Erro: Item não encontrado');
+            return;
+        }
+
+        const qtdOriginal = currentEtiquetaItem['QTD. ORIGINAL'] || currentEtiquetaItem['QTD. ABERTA'] || 0;
+        const totalAlocado = etiquetas.reduce((sum, e) => sum + (parseInt(e.quantidade) || 0), 0);
+
+        if (totalAlocado > qtdOriginal) {
+            alert('A soma das quantidades excede a quantidade original do item!');
+            return;
+        }
+
+        if (etiquetas.length === 0 || totalAlocado === 0) {
+            alert('Adicione pelo menos uma etiqueta com quantidade válida!');
+            return;
+        }
+
+        console.log('🖨️ Gerando PDF com', etiquetas.length, 'etiquetas');
+
+        const observacoes = $etiquetaObs.value.trim();
+        const dataEmissao = new Date().toLocaleDateString('pt-BR');
+
+        // Criar janela de impressão
+        const printWindow = window.open('', '_blank');
+
+        let html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Etiquetas - ${currentEtiquetaItem.DESCRIÇÃO}</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                @page {
+                    size: 100mm 50mm;
+                    margin: 0;
+                }
+                body {
+                    font-family: Arial, sans-serif;
+                    font-size: 8px;
+                    font-weight: bold;
+                }
+                .etiqueta {
+                    width: 100mm;
+                    height: 50mm;
+                    padding: 2mm;
+                    page-break-after: always;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                    border: 1px solid #000;
+                }
+                .etiqueta:last-child {
+                    page-break-after: auto;
+                }
+                .dados {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                }
+                .linha {
+                    margin-bottom: 1.5mm;
+                    line-height: 1.3;
+                    font-size: 13px;
+                }
+                .label {
+                    margin-right: 1mm;
+                }
+                .cliente-titulo {
+                    font-size: 13px;
+                    text-align: center;
+                    margin: 0 0 2mm 0;
+                    border-bottom: 2px solid #000;
+                    padding-bottom: 1mm;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8mm;
+                }
+                .etiqueta-numero {
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+                .etiqueta-par {
+                    font-size: 10px;
+                    font-weight: bold;
+                    background: #000;
+                    color: #fff;
+                    padding: 1mm 2mm;
+                    border-radius: 2mm;
+                    margin-left: 2mm;
+                }
+                .obs {
+                    margin-top: 1.5mm;
+                    font-size: 10px;
+                    line-height: 1.2;
+                }
+                .footer {
+                    border-top: 1px solid #000;
+                    padding-top: 1mm;
+                    font-size: 6.5px;
+                    line-height: 1.2;
+                    display: flex;
+                    align-items: center;
+                    gap: 2mm;
+                }
+                .footer-logo {
+                    max-width: 25mm;
+                    max-height: 8mm;
+                    flex-shrink: 0;
+                }
+                .footer-text {
+                    flex: 1;
+                }
+                @media print {
+                    body { margin: 0; }
+                    .etiqueta { border: none; }
+                }
+            </style>
+        </head>
+        <body>
+        `;
+
+        // Gerar DUAS etiquetas para cada item
+        const totalEtiquetas = etiquetas.length;
+        etiquetas.forEach((etiq, index) => {
+            const numeroEtiqueta = index + 1;
+            const letraPar = String.fromCharCode(65 + index); // A=65, B=66, C=67...
+            // ETIQUETA 1: Cliente + Cód. Cliente + Cód. OS + Quantidade + Data
+            html += `
+            <div class="etiqueta">
+                <div class="dados">
+                    <div class="cliente-titulo">
+                        <span class="etiqueta-numero">${numeroEtiqueta}/${totalEtiquetas}</span>
+                        <span>${currentEtiquetaCliente}</span>
+                        <span class="etiqueta-par">PAR ${letraPar}</span>
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">Cód. Cliente:</span>${currentEtiquetaItem['CÓD. CLIENTE'] || 'N/A'}
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">Cód. OS:</span>${currentEtiquetaItem['CÓD. OS'] || 'N/A'}
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">Quantidade:</span>${fmtInt(etiq.quantidade)}
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">Data:</span>${dataEmissao}
+                    </div>
+                </div>
+                <div class="footer">
+                    <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
+                    <div class="footer-text">
+                        <div><strong>MARFIM IND. TÊXTIL DO CEARÁ LTDA.</strong></div>
+                        <div>Av. José Amora de Sá, 1086 - Autódromo, Eusébio - CE</div>
+                        <div>CNPJ: 19.542.918/0001-90</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ETIQUETA 2: Cliente + OC + Descrição/Tamanho + Observações + Data -->
+            <div class="etiqueta">
+                <div class="dados">
+                    <div class="cliente-titulo">
+                        <span class="etiqueta-numero">${numeroEtiqueta}/${totalEtiquetas}</span>
+                        <span>${currentEtiquetaCliente}</span>
+                        <span class="etiqueta-par">PAR ${letraPar}</span>
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">OC:</span>${currentEtiquetaOC}
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">Descrição:</span>${currentEtiquetaItem.DESCRIÇÃO || 'N/A'}
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">Tamanho:</span>${currentEtiquetaItem.TAMANHO || 'N/A'}
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">Data:</span>${dataEmissao}
+                    </div>
+
+                    ${observacoes ? `<div class="obs"><span class="label">Obs:</span> ${observacoes}</div>` : ''}
+                </div>
+                <div class="footer">
+                    <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
+                    <div class="footer-text">
+                        <div><strong>MARFIM IND. TÊXTIL DO CEARÁ LTDA.</strong></div>
+                        <div>Av. José Amora de Sá, 1086 - Autódromo, Eusébio - CE</div>
+                        <div>CNPJ: 19.542.918/0001-90</div>
+                    </div>
+                </div>
+            </div>
+            `;
+        });
+
+        html += `
+        </body>
+        </html>
+        `;
+
+        printWindow.document.write(html);
+        printWindow.document.close();
+
+        // Aguardar carregamento e imprimir
+        setTimeout(() => {
+            printWindow.print();
+        }, 500);
+
+        // Fechar modal
+        fecharModalEtiquetas();
+    }
 
     // ==== RELATÓRIO DE PRODUÇÃO ====
     const $relatorioModal = document.getElementById('relatorioModal');
@@ -2496,33 +3029,66 @@ ALL_OCS_ITEMS = itemsObj;
             <title>Relatório de Produção</title>
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
-                h1 { text-align: center; margin-bottom: 10px; font-size: 20px; }
-                .info { text-align: center; margin-bottom: 20px; color: #666; font-size: 11px; }
-                .oc-section { page-break-inside: avoid; margin-bottom: 30px; }
-                .oc-header { background: #f3f4f6; padding: 10px; border: 2px solid #d1d5db; margin-bottom: 10px; }
+                body {
+                    font-family: Arial, sans-serif;
+                    font-size: 12px;
+                    orphans: 3;
+                    widows: 3;
+                }
+                h1 {
+                    text-align: center;
+                    margin: 0 0 5px 0;
+                    padding: 10px 0 0 0;
+                    font-size: 16px;
+                }
+                .info {
+                    text-align: center;
+                    margin: 0 0 10px 0;
+                    color: #666;
+                    font-size: 9px;
+                    line-height: 1.3;
+                }
+                .oc-section { page-break-inside: avoid; margin-bottom: 20px; }
+                .oc-header { background: #f3f4f6; padding: 8px; border: 2px solid #d1d5db; margin-bottom: 8px; }
                 .oc-header.faturado-pending { background: #fef2f2; border-color: #dc2626; }
-                .oc-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; }
-                .oc-avisos { color: #dc2626; font-weight: bold; font-size: 11px; }
-                table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-                th { background: #374151; color: white; padding: 8px 4px; text-align: left; font-size: 10px; border: 1px solid #111; }
-                td { padding: 6px 4px; border: 1px solid #ddd; font-size: 10px; }
+                .oc-title { font-size: 13px; font-weight: bold; margin-bottom: 4px; }
+                .oc-avisos { color: #dc2626; font-weight: bold; font-size: 10px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+                th { background: #374151; color: white; padding: 6px 3px; text-align: left; font-size: 9px; border: 1px solid #111; }
+                td { padding: 5px 3px; border: 1px solid #ddd; font-size: 9px; }
                 tr:nth-child(even) { background: #f9fafb; }
                 .status-Ativo { color: #059669; font-weight: bold; }
                 .status-Inativo { color: #ea580c; font-weight: bold; }
                 .status-Faturado { color: #dc2626; font-weight: bold; }
                 @media print {
-                    body { padding: 10px; }
-                    .oc-section { page-break-inside: avoid; }
+                    @page {
+                        size: A4;
+                        margin: 0.8cm;
+                    }
+                    body {
+                        margin: 0;
+                        padding: 0;
+                    }
+                    h1 {
+                        page-break-after: avoid;
+                        page-break-inside: avoid;
+                    }
+                    .info {
+                        page-break-after: avoid;
+                        page-break-inside: avoid;
+                    }
+                    .oc-section {
+                        page-break-inside: avoid;
+                    }
+                    .oc-section:first-of-type {
+                        page-break-before: avoid;
+                    }
                 }
             </style>
         </head>
         <body>
             <h1>📄 Relatório de Produção</h1>
-            <div class="info">
-                Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}<br>
-                Filtro de Marfim: ${marfimFilter === 'all' ? 'Todos (CM + MM)' : marfimFilter === 'cm' ? 'Apenas CM' : 'Apenas MM'}
-            </div>
+            <div class="info">Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}<br>Filtro de Marfim: ${marfimFilter === 'all' ? 'Todos (CM + MM)' : marfimFilter === 'cm' ? 'Apenas CM' : 'Apenas MM'}</div>
         `;
 
         // MESMA ORDENAÇÃO DOS CARDS: preparar array com metadados
@@ -2684,6 +3250,284 @@ ALL_OCS_ITEMS = itemsObj;
 
         // Fechar modal
         $relatorioModal.classList.add('hidden');
+    }
+
+    // ==== ETIQUETA NF ====
+    const $btnEtiquetaNF = document.getElementById('btn-etiqueta-nf');
+    const $nfModal = document.getElementById('nfModal');
+    const $nfNumero = document.getElementById('nf-numero');
+    const $nfVolumes = document.getElementById('nf-volumes');
+    const $nfCliente = document.getElementById('nf-cliente');
+    const $nfClienteAutocomplete = document.getElementById('nf-cliente-autocomplete');
+    const $nfCancelBtn = document.getElementById('nf-cancel-btn');
+    const $nfGerarBtn = document.getElementById('nf-gerar-btn');
+
+    let nfClientesList = [];
+
+    // Abrir modal de etiqueta NF
+    $btnEtiquetaNF.addEventListener('click', function() {
+        $nfModal.classList.remove('hidden');
+        $nfNumero.value = '';
+        $nfVolumes.value = '';
+        $nfCliente.value = '';
+        $nfClienteAutocomplete.style.display = 'none';
+
+        // Carrega lista de clientes únicos
+        const clientes = new Set();
+        ALL_OCS_INFO.forEach(oc => {
+            if (oc.cliente && oc.cliente.trim() !== 'SEM CLIENTE') {
+                clientes.add(oc.cliente.trim());
+            }
+        });
+        nfClientesList = Array.from(clientes).sort();
+
+        $nfNumero.focus();
+    });
+
+    // Fechar modal
+    $nfCancelBtn.addEventListener('click', function() {
+        $nfModal.classList.add('hidden');
+        $nfClienteAutocomplete.style.display = 'none';
+    });
+
+    // Autocomplete de cliente
+    $nfCliente.addEventListener('input', function() {
+        const busca = this.value.trim().toLowerCase();
+
+        if (busca.length < 2) {
+            $nfClienteAutocomplete.style.display = 'none';
+            return;
+        }
+
+        const matches = nfClientesList.filter(cliente =>
+            cliente.toLowerCase().includes(busca)
+        ).slice(0, 10);
+
+        if (matches.length === 0) {
+            $nfClienteAutocomplete.style.display = 'none';
+            return;
+        }
+
+        let html = '';
+        matches.forEach(cliente => {
+            html += `<div style="padding: 0.75rem; cursor: pointer; border-bottom: 1px solid #e5e7eb; transition: background 0.15s;"
+                          onmouseover="this.style.background='#f3f4f6'"
+                          onmouseout="this.style.background='white'"
+                          onclick="document.getElementById('nf-cliente').value='${cliente.replace(/'/g, "\\'")}'; document.getElementById('nf-cliente-autocomplete').style.display='none';">
+                        ${cliente}
+                     </div>`;
+        });
+
+        $nfClienteAutocomplete.innerHTML = html;
+        $nfClienteAutocomplete.style.display = 'block';
+    });
+
+    // Fechar autocomplete ao clicar fora
+    document.addEventListener('click', function(e) {
+        if (e.target !== $nfCliente && e.target !== $nfClienteAutocomplete) {
+            $nfClienteAutocomplete.style.display = 'none';
+        }
+    });
+
+    // Gerar etiquetas NF
+    $nfGerarBtn.addEventListener('click', function() {
+        const numeroNF = $nfNumero.value.trim();
+        const volumes = parseInt($nfVolumes.value);
+        const cliente = $nfCliente.value.trim();
+
+        if (!numeroNF) {
+            alert('Por favor, insira o número da Nota Fiscal.');
+            $nfNumero.focus();
+            return;
+        }
+
+        if (!volumes || volumes < 1 || volumes > 999) {
+            alert('Por favor, insira uma quantidade de volumes válida (1 a 999).');
+            $nfVolumes.focus();
+            return;
+        }
+
+        if (!cliente) {
+            alert('Por favor, insira o nome do cliente.');
+            $nfCliente.focus();
+            return;
+        }
+
+        gerarEtiquetasNF(numeroNF, volumes, cliente);
+    });
+
+    // Enter para gerar
+    $nfNumero.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            $nfVolumes.focus();
+        }
+    });
+
+    $nfVolumes.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            $nfCliente.focus();
+        }
+    });
+
+    $nfCliente.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            $nfClienteAutocomplete.style.display = 'none';
+            $nfGerarBtn.click();
+        }
+    });
+
+    function gerarEtiquetasNF(numeroNF, volumes, cliente) {
+        console.log('🖨️ Gerando', volumes * 2, 'etiquetas para NF:', numeroNF, 'Cliente:', cliente);
+
+        const printWindow = window.open('', '_blank');
+
+        let html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Etiquetas NF ${numeroNF} - ${cliente}</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                @page {
+                    size: 100mm 50mm;
+                    margin: 0;
+                }
+                body {
+                    font-family: Arial, sans-serif;
+                    font-size: 8px;
+                    font-weight: bold;
+                }
+                .etiqueta {
+                    width: 100mm;
+                    height: 50mm;
+                    padding: 2mm;
+                    page-break-after: always;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: space-between;
+                    border: 1px solid #000;
+                }
+                .etiqueta:last-child {
+                    page-break-after: auto;
+                }
+                .conteudo {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    gap: 3mm;
+                }
+                .nf-titulo {
+                    font-size: 16px;
+                    text-transform: uppercase;
+                    color: #374151;
+                    margin-bottom: 2mm;
+                }
+                .nf-numero {
+                    font-size: 32px;
+                    color: #000;
+                    font-weight: bold;
+                }
+                .volume-info {
+                    font-size: 24px;
+                    color: #000;
+                    margin-top: 2mm;
+                }
+                .cliente-nome {
+                    font-size: 28px;
+                    color: #000;
+                    font-weight: bold;
+                    text-align: center;
+                    line-height: 1.2;
+                    padding: 0 2mm;
+                    word-wrap: break-word;
+                    max-width: 90mm;
+                }
+                .footer {
+                    border-top: 1px solid #000;
+                    padding-top: 1mm;
+                    font-size: 6.5px;
+                    line-height: 1.2;
+                    display: flex;
+                    align-items: center;
+                    gap: 2mm;
+                }
+                .footer-logo {
+                    max-width: 25mm;
+                    max-height: 8mm;
+                    flex-shrink: 0;
+                }
+                .footer-text {
+                    flex: 1;
+                }
+                @media print {
+                    body { margin: 0; }
+                    .etiqueta { border: none; }
+                }
+            </style>
+        </head>
+        <body>
+        `;
+
+        // Gerar DUAS etiquetas para cada volume
+        for (let i = 1; i <= volumes; i++) {
+            // ETIQUETA 1: Número da NF + Volume
+            html += `
+            <div class="etiqueta">
+                <div class="conteudo">
+                    <div class="nf-titulo">Nota Fiscal</div>
+                    <div class="nf-numero">${numeroNF}</div>
+                    <div class="volume-info">Volume ${i}/${volumes}</div>
+                </div>
+                <div class="footer">
+                    <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
+                    <div class="footer-text">
+                        <div><strong>MARFIM IND. TÊXTIL DO CEARÁ LTDA.</strong></div>
+                        <div>Av. José Amora de Sá, 1086 - Autódromo, Eusébio - CE</div>
+                        <div>CNPJ: 19.542.918/0001-90</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ETIQUETA 2: Nome do Cliente + Volume -->
+            <div class="etiqueta">
+                <div class="conteudo">
+                    <div class="nf-titulo">Cliente</div>
+                    <div class="cliente-nome">${cliente}</div>
+                    <div class="volume-info">Volume ${i}/${volumes}</div>
+                </div>
+                <div class="footer">
+                    <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
+                    <div class="footer-text">
+                        <div><strong>MARFIM IND. TÊXTIL DO CEARÁ LTDA.</strong></div>
+                        <div>Av. José Amora de Sá, 1086 - Autódromo, Eusébio - CE</div>
+                        <div>CNPJ: 19.542.918/0001-90</div>
+                    </div>
+                </div>
+            </div>
+            `;
+        }
+
+        html += `
+        </body>
+        </html>
+        `;
+
+        printWindow.document.write(html);
+        printWindow.document.close();
+
+        // Aguardar carregamento e imprimir
+        setTimeout(() => {
+            printWindow.print();
+        }, 500);
+
+        // Fechar modal
+        $nfModal.classList.add('hidden');
     }
 
     // ==== INICIALIZAÇÃO ====
