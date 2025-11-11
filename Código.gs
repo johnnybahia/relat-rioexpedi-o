@@ -599,6 +599,9 @@ function sincronizarDados() {
       // Ignora registros sem dados na coluna CARTELA
       if (!cartela || String(cartela).trim() === '') {
         semCartela++;
+        if (id && String(id).trim()) {
+          Logger.log(`   ⚠️ Linha ${idx + FONTE_DATA_START_ROW}: ID="${String(id).trim()}" sem CARTELA - será ignorado`);
+        }
         return;
       }
 
@@ -608,13 +611,15 @@ function sincronizarDados() {
         Logger.log(`   ✓ PEDIDOS: ID="${idStr}", CARTELA="${cartela}"`);
       } else {
         semId++;
+        Logger.log(`   ⚠️ Linha ${idx + FONTE_DATA_START_ROW}: SEM ID mas tem CARTELA="${cartela}"`);
       }
     });
 
-    Logger.log(`   ${fonteMap.size} itens com ID e CARTELA`);
+    const totalFonte = fonteMap.size;
+    Logger.log(`   ${totalFonte} itens com ID e CARTELA`);
     if (semId > 0) Logger.log(`   ⚠️ ${semId} sem ID - insira IDs manualmente na coluna A`);
     if (semCartela > 0) Logger.log(`   ⚠️ ${semCartela} sem CARTELA - ignorados`);
-    
+
     // 2) LER Relatorio_DB
     Logger.log("\n📖 2. LENDO Relatorio_DB");
     const dbRows = dbSheet.getLastRow() - 1;
@@ -643,9 +648,10 @@ function sincronizarDados() {
       }
     });
 
-    Logger.log(`   ${dbMap.size} itens`);
+    const totalDB = dbMap.size;
+    Logger.log(`   ${totalDB} itens`);
     Logger.log(`   Status: ${statusCount.Ativo} Ativo, ${statusCount.Inativo} Inativo, ${statusCount.Faturado} Faturado, ${statusCount.Excluido} Excluido`);
-    
+
     // 3) PROCESSAR
     Logger.log("\n🔄 3. PROCESSANDO");
     
@@ -686,9 +692,9 @@ function sincronizarDados() {
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus });
         }
       } else {
-        Logger.log(`   ❌ ID="${id}" existe em Relatorio_DB mas NÃO encontrado em PEDIDOS`);
+        Logger.log(`   ❌ ID="${id}" existe em Relatorio_DB mas NÃO encontrado em PEDIDOS (com CARTELA preenchida)`);
         Logger.log(`      Status atual: "${statusAtual}", Linha: ${dbItem.linha}`);
-        Logger.log(`      Verificar: tem CARTELA preenchida em PEDIDOS?`);
+        Logger.log(`      Motivo: ID não existe em PEDIDOS OU existe mas sem CARTELA preenchida`);
         if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
           Logger.log(`   ⚠️ Será marcado como Inativo`);
           marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual });
@@ -702,6 +708,9 @@ function sincronizarDados() {
     
     // Novos itens que estão em PEDIDOS mas não em Relatorio_DB
     for (let [id, fonteRow] of fonteMap.entries()) {
+      Logger.log(`   🆕 Novo item: ID="${id}" está em PEDIDOS mas não em Relatorio_DB - será adicionado como Ativo`);
+      Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
+
       // Array de 15 elementos, Status (índice 14) = "Ativo"
       const novaLinha = [
         fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
@@ -748,6 +757,15 @@ function sincronizarDados() {
     const execTime = Date.now() - startTime;
     Logger.log("\n" + "=".repeat(70));
     Logger.log(`✅ SINCRONIZAÇÃO CONCLUÍDA (${execTime}ms)`);
+    Logger.log("=".repeat(70));
+    Logger.log("\n📊 RESUMO:");
+    Logger.log(`   • ${totalFonte} itens lidos de PEDIDOS (com ID + CARTELA)`);
+    Logger.log(`   • ${totalDB} itens lidos de Relatorio_DB`);
+    Logger.log(`   • ${novos.length} novos itens adicionados ao Relatorio_DB como Ativo`);
+    Logger.log(`   • ${updates.length} itens atualizados no Relatorio_DB`);
+    Logger.log(`   • ${marcaInativos.length} itens marcados como Inativo (não encontrados em PEDIDOS)`);
+    if (semId > 0) Logger.log(`   ⚠️ ${semId} linhas em PEDIDOS sem ID (ignoradas)`);
+    if (semCartela > 0) Logger.log(`   ⚠️ ${semCartela} linhas em PEDIDOS sem CARTELA (ignoradas)`);
     Logger.log("=".repeat(70));
     
   } catch (error) {
