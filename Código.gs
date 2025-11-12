@@ -34,6 +34,7 @@ const PRAZO_COL = 14;    // O (na aba PEDIDOS)
 // Índices de colunas - ABA Relatorio_DB
 // Status é sempre a coluna O (índice 14 no array, coluna 15 na planilha)
 const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
+const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova coluna para marcar itens para faturamento
 
 // ====== BAIXAS PARCIAIS ======
 const BAIXAS_SHEET_NAME = "Baixas_Historico";
@@ -626,9 +627,10 @@ function sincronizarDados() {
     let dbData = [];
 
     if (dbRows > 0) {
-      // Lê 15 colunas: A-O (ID até Status)
+      // Lê 16 colunas: A-P (ID até MARCAR_FATURAR)
       // Status está na coluna O (índice 14 do array)
-      dbData = dbSheet.getRange(2, 1, dbRows, 15).getValues();
+      // MARCAR_FATURAR está na coluna P (índice 15 do array)
+      dbData = dbSheet.getRange(2, 1, dbRows, 16).getValues();
     }
 
     const dbMap = new Map();
@@ -667,18 +669,20 @@ function sincronizarDados() {
         Logger.log(`   🔄 Match encontrado: ID="${id}" existe em PEDIDOS e Relatorio_DB`);
         const fonteRow = fonteMap.get(id);
 
-        // Array de 15 elementos (índices 0-14)
-        // Última posição (14) é o Status na coluna O
+        // Array de 16 elementos (índices 0-15)
+        // Posição 14 é Status na coluna O
+        // Posição 15 é MARCAR_FATURAR na coluna P
+        const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
         const novaLinha = [
           fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
           fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
           fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
           fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
-          fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   ""
+          fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
         ];
 
         let mudou = false;
-        // Compara as 14 primeiras colunas (0-13), excluindo Status
+        // Compara as 14 primeiras colunas (0-13), excluindo Status e MARCAR_FATURAR
         for (let i = 0; i < STATUS_COL; i++) {
           let dbVal = (dbItem.row[i] instanceof Date) ? dbItem.row[i].toISOString() : dbItem.row[i];
           let novoVal = (novaLinha[i] instanceof Date) ? novaLinha[i].toISOString() : novaLinha[i];
@@ -711,13 +715,13 @@ function sincronizarDados() {
       Logger.log(`   🆕 Novo item: ID="${id}" está em PEDIDOS mas não em Relatorio_DB - será adicionado como Ativo`);
       Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
 
-      // Array de 15 elementos, Status (índice 14) = "Ativo"
+      // Array de 16 elementos, Status (índice 14) = "Ativo", MARCAR_FATURAR (índice 15) = ""
       const novaLinha = [
         fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
         fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
         fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
         fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
-        fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo"
+        fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               ""
       ];
       novos.push(novaLinha);
     }
@@ -730,12 +734,12 @@ function sincronizarDados() {
     Logger.log("\n💾 4. APLICANDO");
     if (novos.length > 0) {
       const proxLinha = dbSheet.getLastRow() + 1;
-      dbSheet.getRange(proxLinha, 1, novos.length, 15).setValues(novos);
+      dbSheet.getRange(proxLinha, 1, novos.length, 16).setValues(novos);
       Logger.log(`   ✅ ${novos.length} novos adicionados`);
     }
     if (updates.length > 0) {
       updates.forEach(u => {
-        dbSheet.getRange(u.linha, 1, 1, 15).setValues([u.dados]);
+        dbSheet.getRange(u.linha, 1, 1, 16).setValues([u.dados]);
         Logger.log(`   ✅ Linha ${u.linha}: ${u.de} → ${u.para}`);
       });
     }
@@ -886,7 +890,8 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     'DT. ENTREGA': get('DT. ENTREGA', null),
     'DATA RECEB.': get('DATA RECEB.', null),
 
-    Status: getDisp('Status', 'Desconhecido')
+    Status: getDisp('Status', 'Desconhecido'),
+    MARCAR_FATURAR: getDisp('MARCAR_FATURAR', '') // Nova coluna para marcação de faturamento
   };
 
   if (!item.uniqueId) return null;
@@ -1153,4 +1158,158 @@ function finalizarMultiplosItens(items) {
     r.success ? ok++ : fail++;
   });
   return { success: fail === 0, processados: ok, falhas: fail, results };
+}
+
+// ====== FUNÇÕES PARA MARCAR ITENS PARA FATURAMENTO ======
+
+function marcarParaFaturar(uniqueId, planilhaLinha, marcar) {
+  try {
+    const sheet = SS.getSheetByName(DB_SHEET_NAME);
+    const linhaNum = Number(planilhaLinha);
+
+    if (!sheet) throw new Error("Aba DB não encontrada");
+    if (!isFinite(linhaNum) || linhaNum < 2 || linhaNum > sheet.getLastRow()) {
+      throw new Error(`Linha inválida: ${planilhaLinha}`);
+    }
+
+    // Lê cabeçalhos - força leitura de pelo menos 16 colunas (A-P)
+    const numCols = Math.max(sheet.getLastColumn(), 16);
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap = _getColumnIndexes_(headers);
+    let marcarCol = colMap['MARCAR_FATURAR'];
+
+    Logger.log(`📋 DEBUG marcarParaFaturar - Colunas lidas: ${numCols}, Headers: ${headers.length}`);
+    Logger.log(`📋 DEBUG - Coluna P1 contém: "${headers[15] || 'VAZIO'}"`);
+    Logger.log(`📋 DEBUG - MARCAR_FATURAR encontrada no índice: ${marcarCol}`);
+
+    if (marcarCol === undefined) {
+      Logger.log("⚠️ Coluna 'MARCAR_FATURAR' não encontrada - criando automaticamente...");
+
+      // Cria a coluna MARCAR_FATURAR no cabeçalho (coluna P = 16)
+      sheet.getRange(1, 16).setValue('MARCAR_FATURAR');
+      marcarCol = 15; // índice da coluna P (base 0)
+
+      Logger.log("✅ Coluna 'MARCAR_FATURAR' criada na coluna P");
+    }
+
+    // Marca ou desmarca
+    const valor = marcar ? "SIM" : "";
+    sheet.getRange(linhaNum, marcarCol + 1).setValue(valor);
+
+    SpreadsheetApp.flush();
+    limparCache();
+
+    Logger.log(`✓ ${uniqueId} → Marcado para faturar: ${marcar} (linha ${linhaNum})`);
+    return { success: true, id: uniqueId, linha: linhaNum, marcado: marcar };
+  } catch (e) {
+    Logger.log(`❌ marcarParaFaturar: ${e.message}`);
+    return { success: false, error: e.message, id: uniqueId || null, linha: planilhaLinha };
+  }
+}
+
+function obterItensMarcadosParaFaturar() {
+  Logger.log("🔍 INÍCIO obterItensMarcadosParaFaturar");
+
+  try {
+    const sheet = SS.getSheetByName(DB_SHEET_NAME);
+    if (!sheet) {
+      Logger.log("❌ Aba DB não encontrada");
+      return { success: false, error: "Aba DB não encontrada", items: [] };
+    }
+
+    const lastRow = sheet.getLastRow();
+    Logger.log(`📊 Total de linhas na planilha: ${lastRow}`);
+
+    if (lastRow < 2) {
+      Logger.log("⚠️ Planilha vazia (sem dados)");
+      return { success: true, items: [] };
+    }
+
+    // Força leitura de pelo menos 16 colunas (A-P)
+    const lastCol = Math.max(sheet.getLastColumn(), 16);
+    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 16)`);
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    Logger.log(`📋 Headers lidos: ${headers.length} colunas`);
+    Logger.log(`📋 Coluna P1 (índice 15) contém: "${headers[15] || 'VAZIO'}"`);
+
+    const colMap = _getColumnIndexes_(headers);
+    const marcarCol = colMap['MARCAR_FATURAR'];
+
+    Logger.log(`📋 MARCAR_FATURAR encontrada no índice: ${marcarCol}`);
+
+    if (marcarCol === undefined) {
+      Logger.log("⚠️ Coluna 'MARCAR_FATURAR' não encontrada - criando automaticamente...");
+
+      // Cria a coluna MARCAR_FATURAR no cabeçalho (coluna P = 16)
+      sheet.getRange(1, 16).setValue('MARCAR_FATURAR');
+      SpreadsheetApp.flush();
+
+      Logger.log("✅ Coluna 'MARCAR_FATURAR' criada na coluna P");
+
+      // Retorna lista vazia já que a coluna foi acabada de criar
+      return { success: true, items: [], message: 'Coluna MARCAR_FATURAR criada. Clique novamente no botão.' };
+    }
+
+    // Lê dados completos
+    const range = sheet.getRange(2, 1, lastRow - 1, lastCol);
+    const values = range.getValues();
+    const displayValues = range.getDisplayValues();
+
+    const itensMarcados = [];
+
+    values.forEach((row, idx) => {
+      const marcarFaturar = String(row[marcarCol] || '').trim().toUpperCase();
+
+      if (marcarFaturar === 'SIM') {
+        const displayRow = displayValues[idx];
+        const item = _rowToItem_(row, displayRow, colMap, idx);
+
+        if (item) {
+          // Calcula o saldo (soma das baixas)
+          const qtdOriginal = item['QTD. ORIGINAL'] || 0;
+          const qtdAberta = item['QTD. ABERTA'] || 0;
+          const saldo = qtdOriginal - qtdAberta; // Total baixado
+
+          // Serializa o item para JSON (converte Date objects para strings)
+          const itemSerializado = {
+            uniqueId: item.uniqueId,
+            planilhaLinha: item.planilhaLinha,
+            CARTELA: item.CARTELA,
+            'CÓD. CLIENTE': item['CÓD. CLIENTE'],
+            'DESCRIÇÃO': item['DESCRIÇÃO'],
+            'TAMANHO': item['TAMANHO'],
+            'CÓD. MARFIM': item['CÓD. MARFIM'],
+            'CÓD. OS': item['CÓD. OS'],
+            'ORD. COMPRA': item['ORD. COMPRA'],
+            CLIENTE: item.CLIENTE,
+            PEDIDO: item.PEDIDO,
+            'QTD. ABERTA': item['QTD. ABERTA'],
+            'QTD. ORIGINAL': item['QTD. ORIGINAL'],
+            'PRAZO': _fmtBR_(item['PRAZO']),              // Converte Date para string
+            'DT. ENTREGA': _fmtBR_(item['DT. ENTREGA']),  // Converte Date para string
+            'DATA RECEB.': _fmtBR_(item['DATA RECEB.']),  // Converte Date para string
+            Status: item.Status,
+            MARCAR_FATURAR: item.MARCAR_FATURAR,
+            SALDO: saldo
+          };
+
+          itensMarcados.push(itemSerializado);
+        }
+      }
+    });
+
+    Logger.log(`📋 Encontrados ${itensMarcados.length} itens marcados para faturar`);
+
+    // Retorna com JSON.parse(JSON.stringify()) para garantir tipos JSON puros
+    const result = { success: true, items: itensMarcados };
+    return JSON.parse(JSON.stringify(result));
+
+  } catch (e) {
+    Logger.log(`❌ ERRO obterItensMarcadosParaFaturar: ${e.message}`);
+    Logger.log(`❌ Stack: ${e.stack}`);
+    return { success: false, error: e.message || 'Erro desconhecido', items: [] };
+  } finally {
+    Logger.log("🏁 FIM obterItensMarcadosParaFaturar");
+  }
 }
