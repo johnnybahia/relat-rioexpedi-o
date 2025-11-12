@@ -91,8 +91,11 @@
     .item-table td.status-prazo { font-weight: 600; text-align: center; }
     .item-table tr.item-inativo { background-color: #f3f4f6; opacity: 0.85; }
     .item-table tr.item-faturado { background-color: #dcfce7; font-weight: 500; }
-    
+    .item-table tr.item-marcado-faturar { background-color: #90EE90 !important; font-weight: 600; }
+
     .item-table tr.keyboard-focus { outline: 3px solid #3b82f6; outline-offset: -3px; }
+    .item-table tbody tr { cursor: pointer; transition: background-color 0.15s; }
+    .item-table tbody tr:hover { background-color: #f9fafb; }
     
     .item-checkbox { width: 18px; height: 18px; cursor: pointer; margin: 0; }
     .checkbox-cell { width: 40px; text-align: center; }
@@ -153,20 +156,14 @@
     .keyboard-hint.hidden { display: none; }
     .keyboard-hint kbd { background: #374151; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: monospace; margin: 0 0.25rem; }
 
-    /* Barra de Progresso */
-    .progress-bar-container { width: 120px; height: 20px; background-color: #e5e7eb; border-radius: 10px; overflow: hidden; position: relative; border: 1px solid #d1d5db; }
-    .progress-bar-fill { height: 100%; transition: width 0.3s ease, background-color 0.3s ease; border-radius: 10px 0 0 10px; }
-    .progress-bar-fill.full { border-radius: 10px; }
-    .progress-bar-fill.verde { background: linear-gradient(90deg, #22c55e, #16a34a); }
-    .progress-bar-fill.amarelo { background: linear-gradient(90deg, #eab308, #ca8a04); }
-    .progress-bar-fill.laranja { background: linear-gradient(90deg, #f97316, #ea580c); }
-    .progress-bar-fill.vermelho { background: linear-gradient(90deg, #ef4444, #dc2626); }
-    .progress-text { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 0.625rem; font-weight: 700; color: #1f2937; z-index: 1; text-shadow: 0 0 3px rgba(255,255,255,0.8); }
-
     /* Botão de etiqueta */
     .btn-etiqueta { padding: 4px 8px; background-color: #8b5cf6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.9rem; font-weight: 500; transition: background-color 0.2s; margin-right: 4px; }
     .btn-etiqueta:hover { background-color: #7c3aed; }
     .btn-etiqueta:disabled { background-color: #9ca3af; cursor: not-allowed; opacity: 0.6; }
+
+    /* Checkbox para marcar faturar */
+    .checkbox-faturar { width: 20px; height: 20px; cursor: pointer; margin: 0; accent-color: #22c55e; }
+    .faturar-cell { text-align: center; width: 60px; }
 
     /* Botão de baixa parcial */
     .btn-baixa { padding: 4px 10px; background-color: #3b82f6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.7rem; font-weight: 500; transition: background-color 0.2s; margin-right: 4px; }
@@ -179,7 +176,6 @@
     .modal-baixa-qtd-item { display: flex; flex-direction: column; }
     .modal-baixa-qtd-label { color: #6b7280; font-size: 0.75rem; font-weight: 600; }
     .modal-baixa-qtd-value { color: #1f2937; font-size: 1.25rem; font-weight: 700; }
-    .modal-baixa-progress { flex: 1; max-width: 300px; }
 
     .historico-section { margin-top: 1.5rem; }
     .historico-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
@@ -297,10 +293,13 @@
         </div>
       </div>
 
-      <!-- Botão Relatório de Produção -->
-      <div style="margin: 1rem 0; text-align: center;">
+      <!-- Botões de Relatório -->
+      <div style="margin: 1rem 0; text-align: center; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
         <button id="btn-relatorio-producao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #059669; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
           📄 Imprimir Relatório de Produção
+        </button>
+        <button id="btn-relatorio-faturamento" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #10b981; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+          💰 Relatório para Faturamento
         </button>
       </div>
 
@@ -437,12 +436,6 @@
             <div class="modal-baixa-qtd-item">
               <span class="modal-baixa-qtd-label">QTD. ABERTA</span>
               <span id="baixa-qtd-aberta" class="modal-baixa-qtd-value">85</span>
-            </div>
-          </div>
-          <div class="modal-baixa-progress">
-            <div class="progress-bar-container">
-              <div id="baixa-progress-bar" class="progress-bar-fill verde" style="width: 75%"></div>
-              <div id="baixa-progress-text" class="progress-text">75%</div>
             </div>
           </div>
         </div>
@@ -757,8 +750,6 @@
     const $baixaModal = document.getElementById('baixaModal');
     const $baixaQtdOriginal = document.getElementById('baixa-qtd-original');
     const $baixaQtdAberta = document.getElementById('baixa-qtd-aberta');
-    const $baixaProgressBar = document.getElementById('baixa-progress-bar');
-    const $baixaProgressText = document.getElementById('baixa-progress-text');
     const $baixaItemDesc = document.getElementById('baixa-item-desc');
     const $historicoSection = document.getElementById('historico-section');
     const $historicoCount = document.getElementById('historico-count');
@@ -1407,11 +1398,14 @@ ALL_OCS_ITEMS = itemsObj;
                 const itemId = `item-linha-${item.planilhaLinha}`;
                 const isInactive = item.Status === 'Inativo';
                 const isFaturado = item.Status === 'Faturado';
+                const isMarcadoFaturar = item.MARCAR_FATURAR && String(item.MARCAR_FATURAR).toUpperCase() === 'SIM';
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
 
-                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
+                // Adiciona classe para destacar linha em verde se marcado para faturar
+                const classeMarcado = isMarcadoFaturar ? 'item-marcado-faturar' : '';
+                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
 
                 if (hasInactiveItems) {
                     if (isInactive) {
@@ -1437,9 +1431,13 @@ ALL_OCS_ITEMS = itemsObj;
                 // Botão de Etiqueta (para todos os itens)
                 bodyHtml += `<button class="btn-etiqueta" onclick='handleEtiqueta(${JSON.stringify(item).replace(/'/g, "&apos;")}, "${ocInfo.ordCompra}", "${ocInfo.cliente}")' title="Gerar etiquetas para este item">🏷️</button>`;
 
-                // Botão de Baixa Parcial (para itens Ativos) + Botão Finalizado (para itens Faturados)
+                // Botão de Baixa Parcial (para itens Ativos, mesmo que marcados para faturar)
                 if (!isFaturado && !isInactive) {
                     bodyHtml += ` <button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
+
+                    // Checkbox FATURAR ao lado direito do botão Baixa
+                    const checkedAttr = isMarcadoFaturar ? 'checked' : '';
+                    bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="Marcar para faturamento">`;
                 } else if (isFaturado) {
                     const disabled = hasInactiveItems ? 'disabled' : '';
                     const title = hasInactiveItems ? 'Marque os itens inativos como faturados primeiro' : 'Finalizar item';
@@ -1528,6 +1526,33 @@ ALL_OCS_ITEMS = itemsObj;
         allVisibleRows = Array.from(document.querySelectorAll('.item-table tbody tr'));
         currentRowIndex = -1;
         console.log(`📋 Lista de linhas visíveis atualizada: ${allVisibleRows.length} itens`);
+
+        // Adiciona event listeners de clique nas linhas
+        attachRowClickListeners();
+    }
+
+    // Função para adicionar listeners de clique nas linhas
+    function attachRowClickListeners() {
+        allVisibleRows.forEach((row, index) => {
+            row.addEventListener('click', (e) => {
+                // Ignora cliques em inputs, buttons e links
+                if (e.target.tagName === 'INPUT' ||
+                    e.target.tagName === 'BUTTON' ||
+                    e.target.tagName === 'A' ||
+                    e.target.closest('button')) {
+                    return;
+                }
+
+                // Remove seleção anterior
+                allVisibleRows.forEach(r => r.classList.remove('keyboard-selected'));
+
+                // Seleciona nova linha
+                row.classList.add('keyboard-selected');
+                currentRowIndex = index;
+
+                console.log(`🖱️ Linha ${index} selecionada via clique`);
+            });
+        });
     }
     
     function updateInactiveCount() {
@@ -2038,6 +2063,44 @@ ALL_OCS_ITEMS = itemsObj;
             })
             .finalizarItem(uniqueId, linha);
     }
+
+    // ==== FUNÇÃO PARA MARCAR/DESMARCAR ITEM PARA FATURAMENTO ====
+    function handleMarcarFaturar(uniqueId, linha, marcar) {
+        console.log(`${marcar ? '✓' : '✗'} Marcando item para faturar: ${uniqueId} (linha ${linha})`);
+
+        google.script.run
+            .withSuccessHandler(result => {
+                console.log('✓ Resultado da marcação:', result);
+                if (result.success) {
+                    const row = document.getElementById(`item-linha-${linha}`);
+                    if (row) {
+                        if (marcar) {
+                            row.classList.add('item-marcado-faturar');
+                        } else {
+                            row.classList.remove('item-marcado-faturar');
+                        }
+                    }
+                    console.log(`✅ Item ${marcar ? 'marcado' : 'desmarcado'} para faturamento!`);
+                } else {
+                    alert('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
+                    // Reverte checkbox em caso de erro
+                    const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
+                    if (checkbox) {
+                        checkbox.checked = !marcar;
+                    }
+                }
+            })
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao marcar item:', error);
+                alert('Falha ao marcar item: ' + error.message);
+                // Reverte checkbox em caso de erro
+                const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
+                if (checkbox) {
+                    checkbox.checked = !marcar;
+                }
+            })
+            .marcarParaFaturar(uniqueId, linha, marcar);
+    }
     
     function showSuccessModal(message) {
         $successMessage.textContent = message;
@@ -2049,22 +2112,6 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     // ==== MODAL DE BAIXA PARCIAL ====
-
-    function getProgressColor(percentRestante) {
-        if (percentRestante >= 70) return 'verde';
-        if (percentRestante >= 30) return 'amarelo';
-        if (percentRestante >= 10) return 'laranja';
-        return 'vermelho';
-    }
-
-    function updateProgressBar(qtdOriginal, qtdAberta) {
-        const percentRestante = qtdOriginal > 0 ? Math.round((qtdAberta / qtdOriginal) * 100) : 0;
-        const color = getProgressColor(percentRestante);
-
-        $baixaProgressBar.style.width = percentRestante + '%';
-        $baixaProgressBar.className = 'progress-bar-fill ' + color + (percentRestante === 100 ? ' full' : '');
-        $baixaProgressText.textContent = percentRestante + '%';
-    }
 
     function showBaixaModal(item) {
         currentBaixaItem = item;
@@ -2079,8 +2126,6 @@ ALL_OCS_ITEMS = itemsObj;
         $baixaQtdAberta.textContent = fmtInt(qtdAberta);
         $baixaMaxQtd.textContent = fmtInt(qtdAberta);
         $baixaItemDesc.textContent = formatItemInfo(desc, tamanho, qtdAberta);
-
-        updateProgressBar(qtdOriginal, qtdAberta);
 
         // Limpa input
         $novaBaixaInput.value = '';
@@ -2236,7 +2281,6 @@ ALL_OCS_ITEMS = itemsObj;
                     // Atualiza modal
                     $baixaQtdAberta.textContent = fmtInt(result.novaQtdRestante);
                     $baixaMaxQtd.textContent = fmtInt(result.novaQtdRestante);
-                    updateProgressBar(currentBaixaItem['QTD. ORIGINAL'], result.novaQtdRestante);
 
                     // Atualiza a linha na tabela
                     const row = document.getElementById(`item-linha-${currentBaixaItem.planilhaLinha}`);
@@ -2249,22 +2293,6 @@ ALL_OCS_ITEMS = itemsObj;
                         const qtdAbertaCell = cells[5 + offset];
                         if (qtdAbertaCell) {
                             qtdAbertaCell.textContent = fmtInt(result.novaQtdRestante);
-                        }
-
-                        // Coluna Progresso: índice 6 + offset
-                        const progressCell = cells[6 + offset];
-                        if (progressCell) {
-                            const qtdOriginal = currentBaixaItem['QTD. ORIGINAL'] || currentBaixaItem['QTD. ABERTA'] || 0;
-                            const percentRestante = qtdOriginal > 0 ? Math.round((result.novaQtdRestante / qtdOriginal) * 100) : 0;
-                            const progressColor = percentRestante >= 70 ? 'verde' : (percentRestante >= 30 ? 'amarelo' : (percentRestante >= 10 ? 'laranja' : 'vermelho'));
-                            const progressFull = percentRestante === 100 ? ' full' : '';
-
-                            progressCell.innerHTML = `
-                                <div class="progress-bar-container">
-                                    <div class="progress-bar-fill ${progressColor}${progressFull}" style="width: ${percentRestante}%"></div>
-                                    <div class="progress-text">${percentRestante}%</div>
-                                </div>
-                            `;
                         }
                     }
 
@@ -2349,7 +2377,6 @@ ALL_OCS_ITEMS = itemsObj;
                     // Atualiza modal
                     $baixaQtdAberta.textContent = fmtInt(result.novaQtd);
                     $baixaMaxQtd.textContent = fmtInt(result.novaQtd);
-                    updateProgressBar(currentBaixaItem['QTD. ORIGINAL'], result.novaQtd);
 
                     // Recarrega histórico
                     console.log(`🔄 Chamando carregarHistorico("${currentBaixaItem.uniqueId}")`);
@@ -2378,22 +2405,6 @@ ALL_OCS_ITEMS = itemsObj;
                             const qtdAbertaCell = cells[5 + offset];
                             if (qtdAbertaCell) {
                                 qtdAbertaCell.textContent = fmtInt(result.novaQtd);
-                            }
-
-                            // Coluna Progresso: índice 6 + offset
-                            const progressCell = cells[6 + offset];
-                            if (progressCell) {
-                                const qtdOriginal = currentBaixaItem['QTD. ORIGINAL'] || currentBaixaItem['QTD. ABERTA'] || 0;
-                                const percentRestante = qtdOriginal > 0 ? Math.round((result.novaQtd / qtdOriginal) * 100) : 0;
-                                const progressColor = percentRestante >= 70 ? 'verde' : (percentRestante >= 30 ? 'amarelo' : (percentRestante >= 10 ? 'laranja' : 'vermelho'));
-                                const progressFull = percentRestante === 100 ? ' full' : '';
-
-                                progressCell.innerHTML = `
-                                    <div class="progress-bar-container">
-                                        <div class="progress-bar-fill ${progressColor}${progressFull}" style="width: ${percentRestante}%"></div>
-                                        <div class="progress-text">${percentRestante}%</div>
-                                    </div>
-                                `;
                             }
                         }
 
@@ -2492,13 +2503,13 @@ ALL_OCS_ITEMS = itemsObj;
 
     // Keyboard navigation - ↑↓ entre itens (linhas)
     document.addEventListener('keydown', (e) => {
-        if (!$confirmModal.classList.contains('hidden') || 
-            !$warningModal.classList.contains('hidden') || 
+        if (!$confirmModal.classList.contains('hidden') ||
+            !$warningModal.classList.contains('hidden') ||
             !$deleteAllModal.classList.contains('hidden') ||
             !$successModal.classList.contains('hidden') ||
             e.target.tagName === 'INPUT' ||
             e.target.tagName === 'SELECT') return;
-        
+
         switch(e.key) {
             case 'ArrowDown':
                 e.preventDefault();
@@ -2508,12 +2519,36 @@ ALL_OCS_ITEMS = itemsObj;
                 e.preventDefault();
                 moveRowSelection(-1);
                 break;
+            case ' ': // Espaço - marcar/desmarcar item para faturamento
+                e.preventDefault();
+                toggleMarcarFaturar();
+                break;
             case 'Escape':
                 e.preventDefault();
                 clearRowSelection();
                 break;
         }
     });
+
+    // Função para marcar/desmarcar item selecionado com Espaço
+    function toggleMarcarFaturar() {
+        if (currentRowIndex < 0 || currentRowIndex >= allVisibleRows.length) return;
+
+        const currentRow = allVisibleRows[currentRowIndex];
+        const checkbox = currentRow.querySelector('.checkbox-faturar');
+
+        if (!checkbox) {
+            console.log('⚠️ Checkbox de faturamento não encontrado nesta linha');
+            return;
+        }
+
+        // Alterna o estado do checkbox
+        checkbox.checked = !checkbox.checked;
+
+        // Dispara o evento change manualmente para chamar handleMarcarFaturar
+        const event = new Event('change', { bubbles: true });
+        checkbox.dispatchEvent(event);
+    }
 
     // ==== MODAL DE ETIQUETAS ====
 
@@ -2866,9 +2901,15 @@ ALL_OCS_ITEMS = itemsObj;
 
     let ocsSelecionadas = new Set();
 
-    // Abrir modal de relatório
+    // Abrir modal de relatório de produção
     $btnRelatorioProducao.addEventListener('click', function() {
         abrirModalRelatorio();
+    });
+
+    // Relatório para Faturamento
+    const $btnRelatorioFaturamento = document.getElementById('btn-relatorio-faturamento');
+    $btnRelatorioFaturamento.addEventListener('click', function() {
+        gerarRelatorioFaturamento();
     });
 
     // Fechar modal
@@ -3250,6 +3291,195 @@ ALL_OCS_ITEMS = itemsObj;
 
         // Fechar modal
         $relatorioModal.classList.add('hidden');
+    }
+
+    // ==== RELATÓRIO PARA FATURAMENTO ====
+    function gerarRelatorioFaturamento() {
+        console.log('💰 Gerando Relatório para Faturamento...');
+
+        show($loader, true);
+        $loadingText.textContent = 'Carregando itens marcados para faturamento...';
+
+        google.script.run
+            .withSuccessHandler(function(result) {
+                show($loader, false);
+
+                // Validação robusta da resposta
+                if (!result || result === null || result === undefined) {
+                    alert('ERRO: A coluna MARCAR_FATURAR não existe na planilha Relatorio_DB.\n\n' +
+                          'SOLUÇÃO: Clique no botão "Atualizar" para sincronizar e criar a coluna automaticamente.');
+                    console.error('❌ Resposta nula do backend - coluna MARCAR_FATURAR pode não existir');
+                    return;
+                }
+
+                if (!result.success) {
+                    alert('Erro ao obter itens marcados: ' + (result.error || 'Erro desconhecido'));
+                    return;
+                }
+
+                const itensMarcados = result.items || [];
+
+                if (itensMarcados.length === 0) {
+                    alert('Nenhum item está marcado para faturamento. Marque ao menos um item antes de gerar o relatório.');
+                    return;
+                }
+
+                console.log(`✓ ${itensMarcados.length} itens marcados para faturamento`);
+
+                // Organizar itens por OC
+                const itensPorOC = {};
+                itensMarcados.forEach(item => {
+                    const oc = item['ORD. COMPRA'] || 'SEM OC';
+                    if (!itensPorOC[oc]) {
+                        itensPorOC[oc] = {
+                            cliente: item.CLIENTE || 'SEM CLIENTE',
+                            itens: []
+                        };
+                    }
+                    itensPorOC[oc].itens.push(item);
+                });
+
+                // Criar janela de impressão
+                const printWindow = window.open('', '_blank');
+                const dataHoje = new Date().toLocaleDateString('pt-BR');
+
+                let html = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Relatório para Faturamento</title>
+                    <style>
+                        * { margin: 0; padding: 0; box-sizing: border-box; }
+                        body {
+                            font-family: Arial, sans-serif;
+                            font-size: 12px;
+                            orphans: 3;
+                            widows: 3;
+                        }
+                        h1 {
+                            text-align: center;
+                            margin: 0 0 5px 0;
+                            padding: 10px 0 0 0;
+                            font-size: 16px;
+                            color: #10b981;
+                        }
+                        .info {
+                            text-align: center;
+                            margin: 0 0 10px 0;
+                            color: #666;
+                            font-size: 9px;
+                            line-height: 1.3;
+                        }
+                        .oc-section { page-break-inside: avoid; margin-bottom: 20px; background: #f0fdf4; padding: 8px; border: 2px solid #22c55e; border-radius: 6px; }
+                        .oc-header { background: #dcfce7; padding: 8px; border: 2px solid #16a34a; margin-bottom: 8px; border-radius: 4px; }
+                        .oc-title { font-size: 13px; font-weight: bold; margin-bottom: 4px; color: #166534; }
+                        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+                        th { background: #16a34a; color: white; padding: 6px 3px; text-align: left; font-size: 9px; border: 1px solid #166534; }
+                        td { padding: 5px 3px; border: 1px solid #dcfce7; font-size: 9px; background: white; }
+                        tr:nth-child(even) td { background: #f0fdf4; }
+                        .highlight { background: #90EE90 !important; font-weight: 600; }
+                        @media print {
+                            @page {
+                                size: A4;
+                                margin: 0.8cm;
+                            }
+                            body {
+                                margin: 0;
+                                padding: 0;
+                            }
+                            h1, .info {
+                                page-break-after: avoid;
+                                page-break-inside: avoid;
+                            }
+                            .oc-section {
+                                page-break-inside: avoid;
+                            }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>💰 RELATÓRIO PARA FATURAMENTO</h1>
+                    <div class="info">Gerado em: ${dataHoje}</div>
+                `;
+
+                // Processar cada OC
+                Object.keys(itensPorOC).sort().forEach(ocNum => {
+                    const ocData = itensPorOC[ocNum];
+                    const itens = ocData.itens;
+
+                    html += `
+                        <div class="oc-section">
+                            <div class="oc-header">
+                                <div class="oc-title">OC: ${ocNum} - ${ocData.cliente}</div>
+                            </div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Cartela</th>
+                                        <th>Cód. Cliente</th>
+                                        <th>Descrição</th>
+                                        <th>Tamanho</th>
+                                        <th>QUANTIDADE</th>
+                                        <th>OS</th>
+                                        <th>Dt. Recebimento</th>
+                                        <th>Dt. Entrega</th>
+                                        <th>Prazo</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    itens.forEach(item => {
+                        const saldo = item.SALDO || 0; // SALDO = soma das baixas
+                        const dtRecebimento = formatarData(item['DATA RECEB.']);
+                        const dtEntrega = formatarData(item['DT. ENTREGA']);
+                        const prazo = item.PRAZO ?? 'N/A';
+                        const codOS = item['CÓD. OS'] ?? 'N/A';
+
+                        html += `
+                            <tr class="highlight">
+                                <td>${item.CARTELA ?? 'N/A'}</td>
+                                <td>${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
+                                <td>${item.DESCRIÇÃO ?? 'N/A'}</td>
+                                <td>${item.TAMANHO ?? 'N/A'}</td>
+                                <td style="text-align: center; font-weight: 700;">${fmtInt(saldo)}</td>
+                                <td>${codOS}</td>
+                                <td>${dtRecebimento}</td>
+                                <td>${dtEntrega}</td>
+                                <td style="text-align: center;">${prazo}</td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                });
+
+                html += `
+                </body>
+                </html>
+                `;
+
+                printWindow.document.write(html);
+                printWindow.document.close();
+
+                // Aguardar carregamento e imprimir
+                setTimeout(() => {
+                    printWindow.print();
+                }, 250);
+
+                console.log('✅ Relatório de Faturamento gerado com sucesso!');
+            })
+            .withFailureHandler(function(error) {
+                show($loader, false);
+                console.error('❌ Erro ao gerar relatório:', error);
+                alert('Falha ao gerar relatório: ' + error.message);
+            })
+            .obterItensMarcadosParaFaturar();
     }
 
     // ==== ETIQUETA NF ====
