@@ -494,7 +494,267 @@ function calcularQtdOriginal(uniqueId, qtdAbertaAtual) {
   }
 }
 
-// ====== GERAR IDs ======
+// ====== GERAR IDs COM SUFIXO NUMÉRICO ======
+
+/**
+ * Cria um menu personalizado na planilha ao abri-la.
+ */
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('IDs Personalizados')
+    .addItem('1. Gerar IDs Faltantes', 'gerarIDsUnicos')
+    .addSeparator()
+    .addItem('2. Ativar Geração Automática (a cada 5 min)', 'instalarTriggerAutomatico')
+    .addItem('3. Desativar Geração Automática', 'desinstalarTriggerAutomatico')
+    .addItem('4. Status do Trigger', 'mostrarStatusTrigger')
+    .addToUi();
+}
+
+/**
+ * Função principal para gerar os IDs únicos e estáticos com sufixo numérico.
+ * Esta função é chamada manualmente ou pelo trigger automático.
+ */
+function gerarIDsUnicos() {
+  Logger.log("=== GERANDO IDs COM SUFIXO NUMÉRICO ===");
+
+  const sheet = SS.getSheetByName(FONTE_SHEET_NAME);
+
+  if (!sheet) {
+    Logger.log('❌ A aba "' + FONTE_SHEET_NAME + '" não foi encontrada!');
+    return { gerados: 0, erro: 'Aba não encontrada' };
+  }
+
+  const ultimaLinha = sheet.getLastRow();
+  if (ultimaLinha < FONTE_DATA_START_ROW) {
+    Logger.log('⚠️ Não há dados para processar na aba "' + FONTE_SHEET_NAME + '".');
+    return { gerados: 0, erro: 'Sem dados' };
+  }
+
+  // O intervalo começa na FONTE_DATA_START_ROW (4)
+  const intervalo = sheet.getRange(FONTE_DATA_START_ROW, 1, ultimaLinha - FONTE_DATA_START_ROW + 1, sheet.getLastColumn());
+  const valores = intervalo.getValues();
+
+  const contagemIDs = {};
+
+  // 1ª PASSAGEM: Ler todos os IDs existentes e extrair sufixos
+  valores.forEach(function(linha) {
+    const idExistente = linha[0]; // Coluna A (índice 0)
+
+    if (idExistente) {
+      const ultimoTraco = String(idExistente).lastIndexOf('-');
+      if (ultimoTraco !== -1) {
+        const idBase = String(idExistente).substring(0, ultimoTraco);
+        const sufixo = parseInt(String(idExistente).substring(ultimoTraco + 1), 10);
+
+        if (idBase && !isNaN(sufixo)) {
+          if (!contagemIDs[idBase] || sufixo > contagemIDs[idBase]) {
+            contagemIDs[idBase] = sufixo;
+          }
+        }
+      }
+    }
+  });
+
+  // 2ª PASSAGEM: Gerar IDs APENAS para linhas em branco
+  const novosValores = [];
+  let mudancasFeitas = false;
+
+  valores.forEach(function(linha, i) {
+    const idAtual = linha[0];
+
+    if (idAtual) {
+      novosValores.push([idAtual]);
+      return;
+    }
+
+    // Concatenação das colunas: C + D + E + F + H + I + G + J + L + M
+    const idBase = "" +
+      String(linha[2] || '').trim() + // Coluna C - CLIENTE
+      String(linha[3] || '').trim() + // Coluna D
+      String(linha[4] || '').trim() + // Coluna E - PEDIDO
+      String(linha[5] || '').trim() + // Coluna F - CÓD. CLIENTE
+      String(linha[7] || '').trim() + // Coluna H - DESCRIÇÃO
+      String(linha[8] || '').trim() + // Coluna I - TAMANHO
+      String(linha[6] || '').trim() + // Coluna G - CÓD. MARFIM
+      String(linha[9] || '').trim() + // Coluna J - ORD. COMPRA
+      String(linha[11] || '').trim() + // Coluna L - CÓD. OS
+      String(linha[12] || '').trim();  // Coluna M - DATA RECEB.
+
+    if (idBase.trim() === "") {
+      novosValores.push([""]);
+      return;
+    }
+
+    const sufixoAtual = contagemIDs[idBase] || 0;
+    const novoSufixo = sufixoAtual + 1;
+    contagemIDs[idBase] = novoSufixo;
+
+    const novoID = idBase + "-" + novoSufixo;
+
+    novosValores.push([novoID]);
+    mudancasFeitas = true;
+    Logger.log(`  ✓ Linha ${i + FONTE_DATA_START_ROW}: ${novoID} (novo)`);
+  });
+
+  // 3ª PASSAGEM: Escreve os novos valores na Coluna A
+  if (mudancasFeitas) {
+    sheet.getRange(FONTE_DATA_START_ROW, 1, novosValores.length, 1).setValues(novosValores);
+    SpreadsheetApp.flush();
+    Logger.log(`✅ IDs gerados com sucesso na aba "${FONTE_SHEET_NAME}"!`);
+    limparCache();
+    return { gerados: novosValores.filter(v => v[0] && String(v[0]).includes('-')).length, erro: null };
+  } else {
+    Logger.log('✅ Nenhum ID novo precisou ser gerado.');
+    return { gerados: 0, erro: null };
+  }
+}
+
+/**
+ * Função que verifica se há IDs faltantes antes de gerar.
+ * Usada pelo trigger automático para evitar execuções desnecessárias.
+ */
+function verificarEGerarIDs() {
+  try {
+    const sheet = SS.getSheetByName(FONTE_SHEET_NAME);
+    if (!sheet) return;
+
+    const ultimaLinha = sheet.getLastRow();
+    if (ultimaLinha < FONTE_DATA_START_ROW) return;
+
+    // Lê apenas a coluna A (IDs)
+    const idsRange = sheet.getRange(FONTE_DATA_START_ROW, 1, ultimaLinha - FONTE_DATA_START_ROW + 1, 1);
+    const ids = idsRange.getValues();
+
+    // Verifica se há alguma linha sem ID mas com dados nas outras colunas
+    let temIDsFaltantes = false;
+    for (let i = 0; i < ids.length; i++) {
+      if (!ids[i][0] || String(ids[i][0]).trim() === "") {
+        // Verifica se a linha tem dados (coluna CARTELA preenchida, por exemplo)
+        const cartela = sheet.getRange(i + FONTE_DATA_START_ROW, CARTELA_COL + 1).getValue();
+        if (cartela && String(cartela).trim() !== "") {
+          temIDsFaltantes = true;
+          break;
+        }
+      }
+    }
+
+    if (temIDsFaltantes) {
+      Logger.log("🔄 IDs faltantes detectados - gerando automaticamente...");
+      const resultado = gerarIDsUnicos();
+      Logger.log(`✅ Geração automática: ${resultado.gerados} IDs criados`);
+    } else {
+      Logger.log("✓ Nenhum ID faltante - tudo atualizado");
+    }
+  } catch (e) {
+    Logger.log(`❌ Erro na verificação automática: ${e.message}`);
+  }
+}
+
+/**
+ * Instala o trigger automático que executa a cada 5 minutos
+ */
+function instalarTriggerAutomatico() {
+  try {
+    // Remove triggers antigos para evitar duplicatas
+    desinstalarTriggerAutomatico();
+
+    // Cria novo trigger
+    ScriptApp.newTrigger('verificarEGerarIDs')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+
+    SpreadsheetApp.getUi().alert(
+      '✅ Trigger Ativado!',
+      'A geração automática de IDs está ativa.\n\n' +
+      'O sistema verificará a cada 5 minutos se há novos itens sem ID e gerará automaticamente.\n\n' +
+      'Para desativar, use o menu: IDs Personalizados > Desativar Geração Automática',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+
+    Logger.log("✅ Trigger automático instalado com sucesso");
+  } catch (e) {
+    SpreadsheetApp.getUi().alert('❌ Erro ao instalar trigger: ' + e.message);
+    Logger.log(`❌ Erro ao instalar trigger: ${e.message}`);
+  }
+}
+
+/**
+ * Remove o trigger automático
+ */
+function desinstalarTriggerAutomatico() {
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    let removidos = 0;
+
+    triggers.forEach(trigger => {
+      if (trigger.getHandlerFunction() === 'verificarEGerarIDs') {
+        ScriptApp.deleteTrigger(trigger);
+        removidos++;
+      }
+    });
+
+    if (removidos > 0) {
+      SpreadsheetApp.getUi().alert(
+        '✅ Trigger Desativado!',
+        `A geração automática foi desativada.\n\n` +
+        `${removidos} trigger(s) removido(s).\n\n` +
+        'Você ainda pode gerar IDs manualmente usando: IDs Personalizados > Gerar IDs Faltantes',
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+      Logger.log(`✅ ${removidos} trigger(s) removido(s)`);
+    } else {
+      SpreadsheetApp.getUi().alert(
+        'ℹ️ Nenhum Trigger Ativo',
+        'Não há triggers automáticos instalados.',
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+      Logger.log("ℹ️ Nenhum trigger encontrado para remover");
+    }
+  } catch (e) {
+    SpreadsheetApp.getUi().alert('❌ Erro ao desinstalar trigger: ' + e.message);
+    Logger.log(`❌ Erro ao desinstalar trigger: ${e.message}`);
+  }
+}
+
+/**
+ * Mostra o status dos triggers instalados
+ */
+function mostrarStatusTrigger() {
+  try {
+    const triggers = ScriptApp.getProjectTriggers();
+    const triggersAtivos = triggers.filter(t => t.getHandlerFunction() === 'verificarEGerarIDs');
+
+    if (triggersAtivos.length > 0) {
+      const trigger = triggersAtivos[0];
+      const eventType = trigger.getEventType();
+
+      SpreadsheetApp.getUi().alert(
+        '✅ Trigger Ativo',
+        `Status: ATIVO\n` +
+        `Função: verificarEGerarIDs\n` +
+        `Tipo: ${eventType}\n` +
+        `Frequência: A cada 5 minutos\n` +
+        `Triggers instalados: ${triggersAtivos.length}\n\n` +
+        'O sistema está monitorando automaticamente novos itens sem ID.',
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+    } else {
+      SpreadsheetApp.getUi().alert(
+        'ℹ️ Trigger Inativo',
+        'Status: INATIVO\n\n' +
+        'A geração automática não está ativa.\n\n' +
+        'Para ativar: IDs Personalizados > Ativar Geração Automática',
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+    }
+  } catch (e) {
+    SpreadsheetApp.getUi().alert('❌ Erro ao verificar status: ' + e.message);
+    Logger.log(`❌ Erro ao verificar status: ${e.message}`);
+  }
+}
+
+// ====== FUNÇÃO LEGADA (mantida para compatibilidade) ======
 
 // Gera ID composto baseado nas colunas C,D,E,F,G,J,L,M
 function _gerarIdComposto_(row) {
@@ -522,9 +782,13 @@ function _gerarIdComposto_(row) {
   return id;
 }
 
+/**
+ * Função legada - mantida para compatibilidade
+ * Use gerarIDsUnicos() para o novo formato com sufixos numéricos
+ */
 function gerarIdsFaltantes() {
   Logger.clear();
-  Logger.log("=== GERANDO IDs COMPOSTOS ===");
+  Logger.log("=== GERANDO IDs COMPOSTOS (FORMATO LEGADO) ===");
 
   const sheet = SS.getSheetByName(FONTE_SHEET_NAME);
   if (!sheet) { Logger.log("❌ Aba PEDIDOS não encontrada"); return; }
