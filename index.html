@@ -24,9 +24,11 @@
     .auto-refresh-toggle { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; font-size: 0.75rem; }
     .auto-refresh-toggle label { cursor: pointer; display: flex; align-items: center; gap: 0.25rem; font-weight: 500; color: #374151; }
     .auto-refresh-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #3b82f6; }
-    .auto-refresh-indicator { font-size: 0.7rem; color: #6b7280; padding: 0.25rem 0.5rem; background-color: #f0f9ff; border: 1px solid #bfdbfe; border-radius: 0.375rem; white-space: nowrap; }
+    .auto-refresh-indicator { font-size: 0.7rem; color: #6b7280; padding: 0.25rem 0.5rem; background-color: #f0f9ff; border: 1px solid #bfdbfe; border-radius: 0.375rem; white-space: nowrap; transition: all 0.3s ease; }
     .auto-refresh-indicator.active { background-color: #dbeafe; border-color: #3b82f6; color: #1e40af; font-weight: 500; }
     .auto-refresh-indicator.paused { background-color: #fef3c7; border-color: #fbbf24; color: #92400e; }
+    .auto-refresh-indicator.refreshing { background-color: #10b981; border-color: #059669; color: white; font-weight: 600; animation: pulse-subtle 1.5s ease-in-out infinite; }
+    @keyframes pulse-subtle { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.85; transform: scale(1.02); } }
     
     /* Área de controles em uma linha */
     .controls-wrapper { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; padding: 0.75rem; background-color: #f9fafb; border-radius: 0.5rem; border: 1px solid #e5e7eb; flex-wrap: wrap; }
@@ -1069,10 +1071,22 @@
 
     // ==== CARREGAMENTO DE DADOS ====
 
-    function carregarListaOcs(isRefresh = false) {
+    function carregarListaOcs(isRefresh = false, silentRefresh = false) {
         console.log("🚀 SISTEMA UNIFICADO v19.0 - Carregando TUDO em 1 chamada...");
-        $loader.classList.remove('hidden');
-        $loadingText.textContent = isRefresh ? 'Atualizando...' : 'Carregando dados...';
+
+        // Só mostra o loader se NÃO for silent refresh
+        if (!silentRefresh) {
+            $loader.classList.remove('hidden');
+            $loadingText.textContent = isRefresh ? 'Atualizando...' : 'Carregando dados...';
+        } else {
+            console.log('🔄 Auto-refresh silencioso em andamento...');
+            // Atualizar indicador para mostrar que está atualizando em background
+            if ($autoRefreshIndicator) {
+                $autoRefreshIndicator.textContent = '🔄 Atualizando em segundo plano...';
+                $autoRefreshIndicator.classList.remove('active', 'paused');
+                $autoRefreshIndicator.classList.add('refreshing');
+            }
+        }
 
         // Reset da flag de modal de aviso em refresh/carregamento completo
         warningModalShown = false;
@@ -1142,19 +1156,37 @@ ALL_OCS_ITEMS = itemsObj;
                     
                 } else {
                     console.error("❌ Resposta inválida:", response);
-                    alert("Erro ao carregar dados: " + (response && response.error ? response.error : "Resposta inválida"));
+                    if (!silentRefresh) {
+                        alert("Erro ao carregar dados: " + (response && response.error ? response.error : "Resposta inválida"));
+                    }
                 }
-                
-                $loader.classList.add('hidden');
+
+                // Só oculta loader se NÃO for silent refresh
+                if (!silentRefresh) {
+                    $loader.classList.add('hidden');
+                } else {
+                    // Após silent refresh, restaurar o countdown
+                    if (typeof startCountdown === 'function') {
+                        startCountdown();
+                    }
+                }
             })
-             .withFailureHandler(error => {
-  console.error('❌ Erro ao faturar:', error);
-  alert('Falha ao faturar itens: ' + error.message);
-  $btnFaturarGlobal.disabled = false;
-  $btnFaturarGlobal.textContent = 'Faturado sem finalizar'; // ← aqui
-})
-           
-.fetchAllDataUnified(cacheBuster);
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao carregar dados:', error);
+
+                // Só mostra alert se NÃO for silent refresh
+                if (!silentRefresh) {
+                    alert('Falha ao carregar dados: ' + error.message);
+                    $loader.classList.add('hidden');
+                } else {
+                    console.error('❌ Erro no auto-refresh silencioso:', error);
+                    // Restaurar countdown mesmo em caso de erro
+                    if (typeof startCountdown === 'function') {
+                        startCountdown();
+                    }
+                }
+            })
+            .fetchAllDataUnified(cacheBuster);
     }
 
     function aplicarFiltros() {
@@ -3853,6 +3885,11 @@ ALL_OCS_ITEMS = itemsObj;
             clearInterval(countdownTimer);
         }
 
+        // Remover classe de refreshing se estiver presente
+        if ($autoRefreshIndicator) {
+            $autoRefreshIndicator.classList.remove('refreshing');
+        }
+
         let secondsRemaining = Math.floor(AUTO_REFRESH_INTERVAL / 1000);
         updateAutoRefreshIndicator(secondsRemaining);
 
@@ -3879,10 +3916,11 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         if (canAutoRefresh()) {
-            console.log('🔄 Auto-refresh executado');
+            console.log('🔄 Auto-refresh silencioso executado');
             lastRefreshTime = Date.now();
-            carregarListaOcs(true);
-            startCountdown();
+            // Passa silentRefresh = true para não mostrar o loader
+            carregarListaOcs(true, true);
+            // startCountdown será chamado após o carregamento completar
         } else {
             console.log('⏸️ Auto-refresh pausado (modal aberto ou usuário interagindo)');
             updateAutoRefreshIndicator();
