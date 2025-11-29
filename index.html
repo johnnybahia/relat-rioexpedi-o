@@ -18,6 +18,17 @@
     #refreshButton { padding: 0.5rem; border-radius: 9999px; transition: background-color 0.2s; background: none; border: none; cursor: pointer;}
     #refreshButton:hover { background-color: #f3f4f6; }
     #refreshButton svg { height: 1.25rem; width: 1.25rem; color: #3b82f6; display: block;}
+
+    /* Auto-refresh controls */
+    .auto-refresh-controls { display: flex; align-items: center; gap: 0.5rem; }
+    .auto-refresh-toggle { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; font-size: 0.75rem; }
+    .auto-refresh-toggle label { cursor: pointer; display: flex; align-items: center; gap: 0.25rem; font-weight: 500; color: #374151; }
+    .auto-refresh-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #3b82f6; }
+    .auto-refresh-indicator { font-size: 0.7rem; color: #6b7280; padding: 0.25rem 0.5rem; background-color: #f0f9ff; border: 1px solid #bfdbfe; border-radius: 0.375rem; white-space: nowrap; transition: all 0.3s ease; }
+    .auto-refresh-indicator.active { background-color: #dbeafe; border-color: #3b82f6; color: #1e40af; font-weight: 500; }
+    .auto-refresh-indicator.paused { background-color: #fef3c7; border-color: #fbbf24; color: #92400e; }
+    .auto-refresh-indicator.refreshing { background-color: #10b981; border-color: #059669; color: white; font-weight: 600; animation: pulse-subtle 1.5s ease-in-out infinite; }
+    @keyframes pulse-subtle { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.85; transform: scale(1.02); } }
     
     /* Área de controles em uma linha */
     .controls-wrapper { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; padding: 0.75rem; background-color: #f9fafb; border-radius: 0.5rem; border: 1px solid #e5e7eb; flex-wrap: wrap; }
@@ -240,11 +251,22 @@
         <div id="updated-at">Carregando...</div>
         <div id="stats"></div>
       </div>
-      <button id="refreshButton" title="Atualizar dados">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-      </button>
+      <div class="auto-refresh-controls">
+        <button id="refreshButton" title="Atualizar dados">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+        <div class="auto-refresh-toggle">
+          <label>
+            <input type="checkbox" id="autoRefreshToggle" checked>
+            Auto-refresh
+          </label>
+        </div>
+        <div id="autoRefreshIndicator" class="auto-refresh-indicator">
+          Próximo refresh em 30s
+        </div>
+      </div>
     </div>
 
     <!-- Controles -->
@@ -698,7 +720,16 @@
     // Autocomplete
     let autocompleteData = [];
     let autocompleteIndex = -1;
-    
+
+    // ==== AUTO-REFRESH CONFIGURATION ====
+    const AUTO_REFRESH_INTERVAL = 30000; // 30 segundos
+    let autoRefreshTimer = null;
+    let autoRefreshEnabled = true;
+    let lastRefreshTime = null;
+    let countdownTimer = null;
+    let lastUserActivity = Date.now();
+    let isUserInteracting = false;
+
     // ==== ELEMENTOS DO DOM ====
     const $loader = document.getElementById('loader');
     const $loadingText = document.getElementById('loading-text');
@@ -708,7 +739,11 @@
     const $btnMore = document.getElementById('btnMore');
     const $noResults = document.getElementById('noResults');
     const $refreshButton = document.getElementById('refreshButton');
-    
+
+    // Auto-refresh
+    const $autoRefreshToggle = document.getElementById('autoRefreshToggle');
+    const $autoRefreshIndicator = document.getElementById('autoRefreshIndicator');
+
     // Filtros
     const $searchOC = document.getElementById('search-oc');
     const $filterStatus = document.getElementById('filter-status');
@@ -1036,10 +1071,22 @@
 
     // ==== CARREGAMENTO DE DADOS ====
 
-    function carregarListaOcs(isRefresh = false) {
+    function carregarListaOcs(isRefresh = false, silentRefresh = false) {
         console.log("🚀 SISTEMA UNIFICADO v19.0 - Carregando TUDO em 1 chamada...");
-        $loader.classList.remove('hidden');
-        $loadingText.textContent = isRefresh ? 'Atualizando...' : 'Carregando dados...';
+
+        // Só mostra o loader se NÃO for silent refresh
+        if (!silentRefresh) {
+            $loader.classList.remove('hidden');
+            $loadingText.textContent = isRefresh ? 'Atualizando...' : 'Carregando dados...';
+        } else {
+            console.log('🔄 Auto-refresh silencioso em andamento...');
+            // Atualizar indicador para mostrar que está atualizando em background
+            if ($autoRefreshIndicator) {
+                $autoRefreshIndicator.textContent = '🔄 Atualizando em segundo plano...';
+                $autoRefreshIndicator.classList.remove('active', 'paused');
+                $autoRefreshIndicator.classList.add('refreshing');
+            }
+        }
 
         // Reset da flag de modal de aviso em refresh/carregamento completo
         warningModalShown = false;
@@ -1109,19 +1156,37 @@ ALL_OCS_ITEMS = itemsObj;
                     
                 } else {
                     console.error("❌ Resposta inválida:", response);
-                    alert("Erro ao carregar dados: " + (response && response.error ? response.error : "Resposta inválida"));
+                    if (!silentRefresh) {
+                        alert("Erro ao carregar dados: " + (response && response.error ? response.error : "Resposta inválida"));
+                    }
                 }
-                
-                $loader.classList.add('hidden');
+
+                // Só oculta loader se NÃO for silent refresh
+                if (!silentRefresh) {
+                    $loader.classList.add('hidden');
+                } else {
+                    // Após silent refresh, restaurar o countdown
+                    if (typeof startCountdown === 'function') {
+                        startCountdown();
+                    }
+                }
             })
-             .withFailureHandler(error => {
-  console.error('❌ Erro ao faturar:', error);
-  alert('Falha ao faturar itens: ' + error.message);
-  $btnFaturarGlobal.disabled = false;
-  $btnFaturarGlobal.textContent = 'Faturado sem finalizar'; // ← aqui
-})
-           
-.fetchAllDataUnified(cacheBuster);
+            .withFailureHandler(error => {
+                console.error('❌ Erro ao carregar dados:', error);
+
+                // Só mostra alert se NÃO for silent refresh
+                if (!silentRefresh) {
+                    alert('Falha ao carregar dados: ' + error.message);
+                    $loader.classList.add('hidden');
+                } else {
+                    console.error('❌ Erro no auto-refresh silencioso:', error);
+                    // Restaurar countdown mesmo em caso de erro
+                    if (typeof startCountdown === 'function') {
+                        startCountdown();
+                    }
+                }
+            })
+            .fetchAllDataUnified(cacheBuster);
     }
 
     function aplicarFiltros() {
@@ -2475,7 +2540,13 @@ ALL_OCS_ITEMS = itemsObj;
         radio.addEventListener('change', aplicarFiltros);
     });
 
-    $refreshButton.addEventListener('click', () => carregarListaOcs(true));
+    $refreshButton.addEventListener('click', () => {
+        carregarListaOcs(true);
+        // Resetar o timer de auto-refresh após refresh manual
+        if (typeof resetAutoRefresh === 'function') {
+            resetAutoRefresh();
+        }
+    });
     $btnFaturarGlobal.addEventListener('click', showConfirmModal);
     $btnExcluirGlobal.addEventListener('click', showExcluirGlobalModal);
     $modalConfirmBtn.addEventListener('click', confirmFaturamento);
@@ -3760,8 +3831,217 @@ ALL_OCS_ITEMS = itemsObj;
         $nfModal.classList.add('hidden');
     }
 
+    // ==== AUTO-REFRESH SYSTEM ====
+
+    // Verifica se há modais abertos ou usuário está interagindo
+    function canAutoRefresh() {
+        // Obter elementos de modais que podem não existir no início
+        const $relatorioModal = document.getElementById('relatorioModal');
+        const $nfModal = document.getElementById('nfModal');
+
+        const hasOpenModal = !$confirmModal.classList.contains('hidden') ||
+                           !$warningModal.classList.contains('hidden') ||
+                           !$deleteAllModal.classList.contains('hidden') ||
+                           !$successModal.classList.contains('hidden') ||
+                           !$baixaModal.classList.contains('hidden') ||
+                           !$etiquetaModal.classList.contains('hidden') ||
+                           ($relatorioModal && !$relatorioModal.classList.contains('hidden')) ||
+                           ($nfModal && !$nfModal.classList.contains('hidden'));
+
+        const isLoading = !$loader.classList.contains('hidden');
+
+        return !hasOpenModal && !isLoading && !isUserInteracting;
+    }
+
+    // Atualiza o indicador visual
+    function updateAutoRefreshIndicator(secondsRemaining) {
+        if (!autoRefreshEnabled) {
+            $autoRefreshIndicator.textContent = 'Auto-refresh desabilitado';
+            $autoRefreshIndicator.classList.remove('active', 'paused');
+            return;
+        }
+
+        if (!canAutoRefresh()) {
+            $autoRefreshIndicator.textContent = 'Auto-refresh pausado';
+            $autoRefreshIndicator.classList.remove('active');
+            $autoRefreshIndicator.classList.add('paused');
+            return;
+        }
+
+        if (secondsRemaining !== undefined) {
+            $autoRefreshIndicator.textContent = `Próximo refresh em ${secondsRemaining}s`;
+            $autoRefreshIndicator.classList.add('active');
+            $autoRefreshIndicator.classList.remove('paused');
+        } else if (lastRefreshTime) {
+            const elapsed = Math.floor((Date.now() - lastRefreshTime) / 1000);
+            $autoRefreshIndicator.textContent = `Último refresh há ${elapsed}s`;
+            $autoRefreshIndicator.classList.remove('active', 'paused');
+        }
+    }
+
+    // Inicia o countdown visual
+    function startCountdown() {
+        if (countdownTimer) {
+            clearInterval(countdownTimer);
+        }
+
+        // Remover classe de refreshing se estiver presente
+        if ($autoRefreshIndicator) {
+            $autoRefreshIndicator.classList.remove('refreshing');
+        }
+
+        let secondsRemaining = Math.floor(AUTO_REFRESH_INTERVAL / 1000);
+        updateAutoRefreshIndicator(secondsRemaining);
+
+        countdownTimer = setInterval(() => {
+            secondsRemaining--;
+            if (secondsRemaining >= 0) {
+                updateAutoRefreshIndicator(secondsRemaining);
+            }
+        }, 1000);
+    }
+
+    // Para o countdown
+    function stopCountdown() {
+        if (countdownTimer) {
+            clearInterval(countdownTimer);
+            countdownTimer = null;
+        }
+    }
+
+    // Executa o auto-refresh
+    function performAutoRefresh() {
+        if (!autoRefreshEnabled) {
+            return;
+        }
+
+        if (canAutoRefresh()) {
+            console.log('🔄 Auto-refresh silencioso executado');
+            lastRefreshTime = Date.now();
+            // Passa silentRefresh = true para não mostrar o loader
+            carregarListaOcs(true, true);
+            // startCountdown será chamado após o carregamento completar
+        } else {
+            console.log('⏸️ Auto-refresh pausado (modal aberto ou usuário interagindo)');
+            updateAutoRefreshIndicator();
+        }
+    }
+
+    // Inicia o timer de auto-refresh
+    function startAutoRefresh() {
+        stopAutoRefresh(); // Para qualquer timer existente
+
+        if (!autoRefreshEnabled) {
+            return;
+        }
+
+        console.log(`✅ Auto-refresh iniciado (intervalo: ${AUTO_REFRESH_INTERVAL / 1000}s)`);
+        startCountdown();
+
+        autoRefreshTimer = setInterval(() => {
+            performAutoRefresh();
+        }, AUTO_REFRESH_INTERVAL);
+    }
+
+    // Para o auto-refresh
+    function stopAutoRefresh() {
+        if (autoRefreshTimer) {
+            clearInterval(autoRefreshTimer);
+            autoRefreshTimer = null;
+        }
+        stopCountdown();
+        console.log('⏹️ Auto-refresh parado');
+    }
+
+    // Reseta o timer (útil quando usuário faz refresh manual)
+    function resetAutoRefresh() {
+        if (autoRefreshEnabled) {
+            lastRefreshTime = Date.now();
+            stopCountdown();
+            startAutoRefresh();
+        }
+    }
+
+    // Detecta atividade do usuário
+    function trackUserActivity() {
+        lastUserActivity = Date.now();
+    }
+
+    // Detecta quando usuário está interagindo com inputs
+    function onInputFocus() {
+        isUserInteracting = true;
+        updateAutoRefreshIndicator();
+    }
+
+    function onInputBlur() {
+        isUserInteracting = false;
+        updateAutoRefreshIndicator();
+    }
+
+    // Toggle do auto-refresh
+    function toggleAutoRefresh() {
+        autoRefreshEnabled = $autoRefreshToggle.checked;
+
+        if (autoRefreshEnabled) {
+            console.log('✅ Auto-refresh habilitado pelo usuário');
+            startAutoRefresh();
+        } else {
+            console.log('❌ Auto-refresh desabilitado pelo usuário');
+            stopAutoRefresh();
+            updateAutoRefreshIndicator();
+        }
+
+        // Salvar preferência no localStorage
+        try {
+            localStorage.setItem('autoRefreshEnabled', autoRefreshEnabled);
+        } catch (e) {
+            console.warn('Não foi possível salvar preferência de auto-refresh:', e);
+        }
+    }
+
+    // Inicializa o sistema de auto-refresh
+    function initAutoRefresh() {
+        // Restaurar preferência do localStorage
+        try {
+            const savedPref = localStorage.getItem('autoRefreshEnabled');
+            if (savedPref !== null) {
+                autoRefreshEnabled = savedPref === 'true';
+                $autoRefreshToggle.checked = autoRefreshEnabled;
+            }
+        } catch (e) {
+            console.warn('Não foi possível restaurar preferência de auto-refresh:', e);
+        }
+
+        // Event listener para o toggle
+        $autoRefreshToggle.addEventListener('change', toggleAutoRefresh);
+
+        // Event listeners para detectar atividade do usuário
+        document.addEventListener('click', trackUserActivity);
+        document.addEventListener('keypress', trackUserActivity);
+        document.addEventListener('scroll', trackUserActivity);
+
+        // Detectar foco em inputs (para pausar auto-refresh durante digitação)
+        const inputs = document.querySelectorAll('input, textarea, select');
+        inputs.forEach(input => {
+            input.addEventListener('focus', onInputFocus);
+            input.addEventListener('blur', onInputBlur);
+        });
+
+        // Iniciar auto-refresh se habilitado
+        if (autoRefreshEnabled) {
+            startAutoRefresh();
+        } else {
+            updateAutoRefreshIndicator();
+        }
+
+        console.log('🚀 Sistema de auto-refresh inicializado');
+    }
+
     // ==== INICIALIZAÇÃO ====
-    document.addEventListener('DOMContentLoaded', carregarListaOcs); 
+    document.addEventListener('DOMContentLoaded', () => {
+        carregarListaOcs();
+        initAutoRefresh();
+    }); 
 
   </script>
 </body>
