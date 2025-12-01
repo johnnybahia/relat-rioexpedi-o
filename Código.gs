@@ -605,39 +605,90 @@ function gerarIDsUnicos() {
 }
 
 /**
- * Função que SEMPRE regenera IDs para garantir alinhamento com IMPORTRANGE.
+ * Função INTELIGENTE que só regenera IDs quando REALMENTE necessário.
  * Usada pelo trigger automático.
  *
- * IMPORTANTE: Como o IMPORTRANGE pode adicionar/remover linhas a qualquer momento,
- * sempre regeneramos os IDs para garantir que a coluna A está alinhada com os dados.
+ * OTIMIZAÇÃO: Verifica se há mudanças antes de regenerar (performance!)
+ * - Compara quantidade de linhas
+ * - Verifica se há IDs faltantes
+ * - Só regenera se detectar inconsistência
  */
 function verificarEGerarIDs() {
   try {
     const sheet = SS.getSheetByName(FONTE_SHEET_NAME);
-    if (!sheet) return;
+    if (!sheet) return { regenerou: false, motivo: 'Aba não encontrada' };
 
     const ultimaLinha = sheet.getLastRow();
-    if (ultimaLinha < FONTE_DATA_START_ROW) return;
+    if (ultimaLinha < FONTE_DATA_START_ROW) {
+      return { regenerou: false, motivo: 'Sem dados' };
+    }
 
-    Logger.log("🔄 Regenerando IDs para garantir alinhamento com IMPORTRANGE...");
+    // PASSO 1: Verificar se realmente precisa regenerar
+    Logger.log("🔍 Verificando se precisa regenerar IDs...");
+
+    const numLinhas = ultimaLinha - FONTE_DATA_START_ROW + 1;
+
+    // Lê apenas colunas A (ID) e B (CARTELA) para performance
+    const range = sheet.getRange(FONTE_DATA_START_ROW, 1, numLinhas, 2);
+    const dados = range.getValues();
+
+    let linhasComDados = 0;
+    let linhasComId = 0;
+    let linhasSemIdMasComDados = 0;
+
+    dados.forEach(row => {
+      const id = row[0];
+      const cartela = row[1];
+
+      if (cartela && String(cartela).trim() !== '') {
+        linhasComDados++;
+        if (id && String(id).trim() !== '') {
+          linhasComId++;
+        } else {
+          linhasSemIdMasComDados++;
+        }
+      }
+    });
+
+    Logger.log(`   📊 Estatísticas:`);
+    Logger.log(`      - Linhas com dados: ${linhasComDados}`);
+    Logger.log(`      - Linhas com ID: ${linhasComId}`);
+    Logger.log(`      - Linhas sem ID mas com dados: ${linhasSemIdMasComDados}`);
+
+    // DECISÃO: Só regenera se houver linhas sem ID
+    if (linhasSemIdMasComDados === 0 && linhasComDados === linhasComId) {
+      Logger.log("   ✅ Todos os IDs estão OK - NADA A FAZER");
+      Logger.log("   🚀 Performance: Regeneração não necessária!");
+      return { regenerou: false, motivo: 'IDs já estão corretos' };
+    }
+
+    // PRECISA REGENERAR
+    Logger.log(`   ⚠️ Encontradas ${linhasSemIdMasComDados} linhas sem ID`);
+    Logger.log("   🔄 Regenerando IDs...");
+
     const resultado = gerarIDsUnicos();
 
     if (resultado.gerados > 0) {
-      Logger.log(`✅ ${resultado.gerados} IDs regenerados com sucesso`);
+      Logger.log(`   ✅ ${resultado.gerados} IDs regenerados com sucesso`);
+      return { regenerou: true, gerados: resultado.gerados };
     } else {
-      Logger.log("✓ Nenhum dado para processar");
+      Logger.log("   ✓ Nenhum ID gerado");
+      return { regenerou: false, motivo: 'Sem dados válidos' };
     }
   } catch (e) {
     Logger.log(`❌ Erro na regeneração de IDs: ${e.message}`);
+    return { regenerou: false, erro: e.message };
   }
 }
 
 /**
- * PROCESSO AUTOMÁTICO COMPLETO
+ * PROCESSO AUTOMÁTICO COMPLETO OTIMIZADO
  * Executa a cada 5 minutos via trigger
- * 1. Gera IDs faltantes automaticamente
- * 2. Sincroniza PEDIDOS → Relatorio_DB
- * 3. Limpa cache
+ *
+ * OTIMIZAÇÕES:
+ * 1. Só regenera IDs se necessário (performance!)
+ * 2. Só limpa cache se houve mudanças (UX!)
+ * 3. Log detalhado de performance
  */
 function processoAutomaticoCompleto() {
   const inicioProcesso = Date.now();
@@ -645,22 +696,46 @@ function processoAutomaticoCompleto() {
   Logger.log(`⏰ PROCESSO AUTOMÁTICO INICIADO - ${new Date().toLocaleString('pt-BR')}`);
   Logger.log("=".repeat(70));
 
+  let houveMudancas = false;
+
   try {
     // ETAPA 1: Verificar e gerar IDs faltantes
     Logger.log("\n🔑 ETAPA 1: Verificação de IDs");
-    verificarEGerarIDs();
+    const resultadoIds = verificarEGerarIDs();
+
+    if (resultadoIds.regenerou) {
+      Logger.log(`   ✅ IDs regenerados: ${resultadoIds.gerados || 0}`);
+      houveMudancas = true;
+    } else {
+      Logger.log(`   ✓ ${resultadoIds.motivo || 'Nenhuma alteração necessária'}`);
+    }
 
     // ETAPA 2: Sincronizar dados
     Logger.log("\n🔄 ETAPA 2: Sincronização de dados");
-    sincronizarDados();
+    const resultadoSync = sincronizarDadosOtimizado();
 
-    // ETAPA 3: Limpar cache
+    if (resultadoSync.houveMudancas) {
+      Logger.log(`   ✅ Mudanças detectadas na sincronização`);
+      houveMudancas = true;
+    } else {
+      Logger.log(`   ✓ Nenhuma mudança - dados já sincronizados`);
+    }
+
+    // ETAPA 3: Limpar cache APENAS se houve mudanças
     Logger.log("\n🗑️ ETAPA 3: Limpeza de cache");
-    limparCache();
+    if (houveMudancas) {
+      limparCache();
+      Logger.log("   ✅ Cache limpo (houve mudanças)");
+    } else {
+      Logger.log("   ⏭️  Cache mantido (sem mudanças - melhor performance para usuários!)");
+    }
 
     const tempoTotal = Date.now() - inicioProcesso;
     Logger.log("\n" + "=".repeat(70));
     Logger.log(`✅ PROCESSO AUTOMÁTICO CONCLUÍDO EM ${tempoTotal}ms`);
+    if (!houveMudancas) {
+      Logger.log(`🚀 OTIMIZAÇÃO: Nenhuma mudança detectada - usuários não afetados!`);
+    }
     Logger.log("=".repeat(70));
 
   } catch (erro) {
@@ -922,6 +997,17 @@ function _criarMapImpressoes_(dbData) {
 }
 
 // ====== SINCRONIZAÇÃO ======
+
+/**
+ * Versão otimizada da sincronização que retorna se houve mudanças.
+ * Usada pelo processo automático para decidir se limpa cache.
+ */
+function sincronizarDadosOtimizado() {
+  const resultado = sincronizarDados();
+  const houveMudancas = resultado.novos > 0 || resultado.updates > 0 || resultado.inativos > 0;
+  return { houveMudancas: houveMudancas, ...resultado };
+}
+
 function sincronizarDados() {
   Logger.clear();
   Logger.log("=".repeat(70));
@@ -1226,7 +1312,15 @@ function sincronizarDados() {
     if (semId > 0) Logger.log(`   ⚠️ ${semId} linhas em PEDIDOS sem ID (ignoradas)`);
     if (semCartela > 0) Logger.log(`   ⚠️ ${semCartela} linhas em PEDIDOS sem CARTELA (ignoradas)`);
     Logger.log("=".repeat(70));
-    
+
+    // Retorna contadores para o processo automático decidir se limpa cache
+    return {
+      novos: novosValidados.length,
+      updates: updates.length,
+      inativos: marcaInativos.length,
+      idsAtualizados: idsAtualizados.length
+    };
+
   } catch (error) {
     Logger.log("\n❌ ERRO: " + error.message);
     throw error;
