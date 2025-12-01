@@ -754,6 +754,65 @@ function processoAutomaticoCompleto() {
 }
 
 /**
+ * Instala o trigger automático SEM ALERTAS (para executar pelo Apps Script).
+ * Use esta função quando executar pelo Apps Script Editor.
+ */
+function instalarTriggerAutomaticoSilencioso() {
+  try {
+    Logger.log("🔄 Instalando trigger automático...");
+
+    // Remove triggers antigos
+    const triggers = ScriptApp.getProjectTriggers();
+    let removidos = 0;
+
+    triggers.forEach(trigger => {
+      const funcao = trigger.getHandlerFunction();
+      if (funcao === 'verificarEGerarIDs' || funcao === 'processoAutomaticoCompleto') {
+        ScriptApp.deleteTrigger(trigger);
+        removidos++;
+        Logger.log(`   ✓ Removido trigger: ${funcao}`);
+      }
+    });
+
+    if (removidos > 0) {
+      Logger.log(`✅ ${removidos} trigger(s) antigo(s) removido(s)`);
+    }
+
+    // Cria novo trigger
+    ScriptApp.newTrigger('processoAutomaticoCompleto')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+
+    Logger.log("✅ TRIGGER INSTALADO COM SUCESSO!");
+    Logger.log("📋 Detalhes:");
+    Logger.log("   • Função: processoAutomaticoCompleto");
+    Logger.log("   • Frequência: A cada 5 minutos");
+    Logger.log("   • Status: ATIVO");
+    Logger.log("");
+    Logger.log("🎯 O sistema automático está rodando!");
+    Logger.log("   • Gera IDs faltantes automaticamente");
+    Logger.log("   • Sincroniza PEDIDOS → Relatorio_DB");
+    Logger.log("   • Mantém dados sempre atualizados");
+
+    return {
+      success: true,
+      message: 'Trigger instalado com sucesso',
+      funcao: 'processoAutomaticoCompleto',
+      frequencia: '5 minutos'
+    };
+
+  } catch (e) {
+    Logger.log(`❌ ERRO ao instalar trigger: ${e.message}`);
+    Logger.log(`   Stack: ${e.stack}`);
+    return {
+      success: false,
+      error: e.message
+    };
+  }
+}
+
+/**
  * Instala o trigger automático que executa a cada 5 minutos
  * IMPORTANTE: Este trigger chama processoAutomaticoCompleto() que faz TUDO
  */
