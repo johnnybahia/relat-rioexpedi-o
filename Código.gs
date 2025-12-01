@@ -651,28 +651,77 @@ function verificarEGerarIDs() {
 }
 
 /**
+ * PROCESSO AUTOMÁTICO COMPLETO
+ * Executa a cada 5 minutos via trigger
+ * 1. Gera IDs faltantes automaticamente
+ * 2. Sincroniza PEDIDOS → Relatorio_DB
+ * 3. Limpa cache
+ */
+function processoAutomaticoCompleto() {
+  const inicioProcesso = Date.now();
+  Logger.log("=" .repeat(70));
+  Logger.log(`⏰ PROCESSO AUTOMÁTICO INICIADO - ${new Date().toLocaleString('pt-BR')}`);
+  Logger.log("=".repeat(70));
+
+  try {
+    // ETAPA 1: Verificar e gerar IDs faltantes
+    Logger.log("\n🔑 ETAPA 1: Verificação de IDs");
+    verificarEGerarIDs();
+
+    // ETAPA 2: Sincronizar dados
+    Logger.log("\n🔄 ETAPA 2: Sincronização de dados");
+    sincronizarDados();
+
+    // ETAPA 3: Limpar cache
+    Logger.log("\n🗑️ ETAPA 3: Limpeza de cache");
+    limparCache();
+
+    const tempoTotal = Date.now() - inicioProcesso;
+    Logger.log("\n" + "=".repeat(70));
+    Logger.log(`✅ PROCESSO AUTOMÁTICO CONCLUÍDO EM ${tempoTotal}ms`);
+    Logger.log("=".repeat(70));
+
+  } catch (erro) {
+    Logger.log("\n❌ ERRO NO PROCESSO AUTOMÁTICO:");
+    Logger.log(`   Mensagem: ${erro.message}`);
+    Logger.log(`   Stack: ${erro.stack}`);
+    Logger.log("=".repeat(70));
+
+    // Envia email de notificação em caso de erro (opcional)
+    // MailApp.sendEmail({
+    //   to: Session.getEffectiveUser().getEmail(),
+    //   subject: "⚠️ Erro no Processo Automático",
+    //   body: `Erro: ${erro.message}\n\nDetalhes: ${erro.stack}`
+    // });
+  }
+}
+
+/**
  * Instala o trigger automático que executa a cada 5 minutos
+ * IMPORTANTE: Este trigger chama processoAutomaticoCompleto() que faz TUDO
  */
 function instalarTriggerAutomatico() {
   try {
     // Remove triggers antigos para evitar duplicatas
     desinstalarTriggerAutomatico();
 
-    // Cria novo trigger
-    ScriptApp.newTrigger('verificarEGerarIDs')
+    // Cria novo trigger que executa o processo completo
+    ScriptApp.newTrigger('processoAutomaticoCompleto')
       .timeBased()
       .everyMinutes(5)
       .create();
 
     SpreadsheetApp.getUi().alert(
-      '✅ Trigger Ativado!',
-      'A geração automática de IDs está ativa.\n\n' +
-      'O sistema verificará a cada 5 minutos se há novos itens sem ID e gerará automaticamente.\n\n' +
+      '✅ Trigger Automático Ativado!',
+      'O sistema automático está ativo e executará a cada 5 minutos:\n\n' +
+      '• Gera IDs faltantes automaticamente\n' +
+      '• Sincroniza PEDIDOS → Relatorio_DB\n' +
+      '• Mantém dados sempre atualizados\n\n' +
       'Para desativar, use o menu: IDs Personalizados > Desativar Geração Automática',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
 
-    Logger.log("✅ Trigger automático instalado com sucesso");
+    Logger.log("✅ Trigger automático completo instalado com sucesso");
   } catch (e) {
     SpreadsheetApp.getUi().alert('❌ Erro ao instalar trigger: ' + e.message);
     Logger.log(`❌ Erro ao instalar trigger: ${e.message}`);
@@ -681,6 +730,7 @@ function instalarTriggerAutomatico() {
 
 /**
  * Remove o trigger automático
+ * Remove triggers de verificarEGerarIDs e processoAutomaticoCompleto
  */
 function desinstalarTriggerAutomatico() {
   try {
@@ -688,18 +738,22 @@ function desinstalarTriggerAutomatico() {
     let removidos = 0;
 
     triggers.forEach(trigger => {
-      if (trigger.getHandlerFunction() === 'verificarEGerarIDs') {
+      const funcao = trigger.getHandlerFunction();
+      if (funcao === 'verificarEGerarIDs' || funcao === 'processoAutomaticoCompleto') {
         ScriptApp.deleteTrigger(trigger);
         removidos++;
+        Logger.log(`   Removido trigger: ${funcao}`);
       }
     });
 
     if (removidos > 0) {
       SpreadsheetApp.getUi().alert(
         '✅ Trigger Desativado!',
-        `A geração automática foi desativada.\n\n` +
+        `O sistema automático foi desativado.\n\n` +
         `${removidos} trigger(s) removido(s).\n\n` +
-        'Você ainda pode gerar IDs manualmente usando: IDs Personalizados > Gerar IDs Faltantes',
+        'Você ainda pode:\n' +
+        '• Gerar IDs manualmente: IDs Personalizados > Gerar IDs Faltantes\n' +
+        '• Sincronizar manualmente: Use a função sincronizarDados()',
         SpreadsheetApp.getUi().ButtonSet.OK
       );
       Logger.log(`✅ ${removidos} trigger(s) removido(s)`);
@@ -723,27 +777,39 @@ function desinstalarTriggerAutomatico() {
 function mostrarStatusTrigger() {
   try {
     const triggers = ScriptApp.getProjectTriggers();
-    const triggersAtivos = triggers.filter(t => t.getHandlerFunction() === 'verificarEGerarIDs');
+    const triggersAtivos = triggers.filter(t =>
+      t.getHandlerFunction() === 'verificarEGerarIDs' ||
+      t.getHandlerFunction() === 'processoAutomaticoCompleto'
+    );
 
     if (triggersAtivos.length > 0) {
       const trigger = triggersAtivos[0];
+      const funcao = trigger.getHandlerFunction();
       const eventType = trigger.getEventType();
+
+      const descricao = funcao === 'processoAutomaticoCompleto'
+        ? 'Processo Completo (Gera IDs + Sincroniza)'
+        : 'Geração de IDs';
 
       SpreadsheetApp.getUi().alert(
         '✅ Trigger Ativo',
         `Status: ATIVO\n` +
-        `Função: verificarEGerarIDs\n` +
+        `Função: ${funcao}\n` +
+        `Descrição: ${descricao}\n` +
         `Tipo: ${eventType}\n` +
         `Frequência: A cada 5 minutos\n` +
         `Triggers instalados: ${triggersAtivos.length}\n\n` +
-        'O sistema está monitorando automaticamente novos itens sem ID.',
+        'O sistema automático está rodando:\n' +
+        '• Gera IDs faltantes\n' +
+        '• Sincroniza PEDIDOS → Relatorio_DB\n' +
+        '• Mantém dados sempre atualizados',
         SpreadsheetApp.getUi().ButtonSet.OK
       );
     } else {
       SpreadsheetApp.getUi().alert(
         'ℹ️ Trigger Inativo',
         'Status: INATIVO\n\n' +
-        'A geração automática não está ativa.\n\n' +
+        'O sistema automático não está ativo.\n\n' +
         'Para ativar: IDs Personalizados > Ativar Geração Automática',
         SpreadsheetApp.getUi().ButtonSet.OK
       );
@@ -993,13 +1059,51 @@ function sincronizarDados() {
     Logger.log(`   🆕 Novos: ${novos.length}`);
     Logger.log(`   📝 Atualizar: ${updates.length}`);
     Logger.log(`   ⚠️ Marcar Inativo: ${marcaInativos.length}`);
-    
-    // 4) APLICAR
+
+    // 4) VALIDAÇÃO ANTI-DUPLICATA
+    Logger.log("\n🔍 3.5. VALIDAÇÃO ANTI-DUPLICATA");
+    const novosValidados = [];
+    const idsExistentes = new Set(dbMap.keys());
+    const idsJaAdicionados = new Set();
+
+    novos.forEach(item => {
+      const id = String(item[ID_COL]).trim();
+
+      // Verifica se já existe no DB
+      if (idsExistentes.has(id)) {
+        Logger.log(`   ⚠️ DUPLICATA EVITADA: ID="${id}" já existe no Relatorio_DB`);
+        return;
+      }
+
+      // Verifica se já foi adicionado nesta rodada
+      if (idsJaAdicionados.has(id)) {
+        Logger.log(`   ⚠️ DUPLICATA EVITADA: ID="${id}" já foi processado nesta sincronização`);
+        return;
+      }
+
+      // Valida se tem dados essenciais
+      if (!item[CARTELA_COL] || String(item[CARTELA_COL]).trim() === '') {
+        Logger.log(`   ⚠️ ITEM REJEITADO: ID="${id}" sem CARTELA`);
+        return;
+      }
+
+      // Item válido - adiciona
+      novosValidados.push(item);
+      idsJaAdicionados.add(id);
+    });
+
+    const duplicatasEvitadas = novos.length - novosValidados.length;
+    if (duplicatasEvitadas > 0) {
+      Logger.log(`   🛡️ ${duplicatasEvitadas} duplicata(s) evitada(s)`);
+    }
+    Logger.log(`   ✓ ${novosValidados.length} itens validados para inserção`);
+
+    // 5) APLICAR
     Logger.log("\n💾 4. APLICANDO");
-    if (novos.length > 0) {
+    if (novosValidados.length > 0) {
       const proxLinha = dbSheet.getLastRow() + 1;
-      dbSheet.getRange(proxLinha, 1, novos.length, 16).setValues(novos);
-      Logger.log(`   ✅ ${novos.length} novos adicionados`);
+      dbSheet.getRange(proxLinha, 1, novosValidados.length, 16).setValues(novosValidados);
+      Logger.log(`   ✅ ${novosValidados.length} novos adicionados`);
     }
     if (updates.length > 0) {
       updates.forEach(u => {
@@ -1017,11 +1121,11 @@ function sincronizarDados() {
     }
     
     SpreadsheetApp.flush();
-    if (novos.length > 0 || updates.length > 0 || marcaInativos.length > 0) {
+    if (novosValidados.length > 0 || updates.length > 0 || marcaInativos.length > 0) {
       limparCache();
       Logger.log("   🗑️ Cache limpo");
     }
-    
+
     const execTime = Date.now() - startTime;
     Logger.log("\n" + "=".repeat(70));
     Logger.log(`✅ SINCRONIZAÇÃO CONCLUÍDA (${execTime}ms)`);
@@ -1029,9 +1133,10 @@ function sincronizarDados() {
     Logger.log("\n📊 RESUMO:");
     Logger.log(`   • ${totalFonte} itens lidos de PEDIDOS (com ID + CARTELA)`);
     Logger.log(`   • ${totalDB} itens lidos de Relatorio_DB`);
-    Logger.log(`   • ${novos.length} novos itens adicionados ao Relatorio_DB como Ativo`);
+    Logger.log(`   • ${novosValidados.length} novos itens adicionados ao Relatorio_DB como Ativo`);
     Logger.log(`   • ${updates.length} itens atualizados no Relatorio_DB`);
     Logger.log(`   • ${marcaInativos.length} itens marcados como Inativo (não encontrados em PEDIDOS)`);
+    if (duplicatasEvitadas > 0) Logger.log(`   🛡️ ${duplicatasEvitadas} duplicata(s) evitada(s)`);
     if (semId > 0) Logger.log(`   ⚠️ ${semId} linhas em PEDIDOS sem ID (ignoradas)`);
     if (semCartela > 0) Logger.log(`   ⚠️ ${semCartela} linhas em PEDIDOS sem CARTELA (ignoradas)`);
     Logger.log("=".repeat(70));
