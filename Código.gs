@@ -513,6 +513,13 @@ function onOpen() {
 /**
  * Função principal para gerar os IDs únicos e estáticos com sufixo numérico.
  * Esta função é chamada manualmente ou pelo trigger automático.
+ *
+ * IMPORTANTE: Para evitar desalinhamento com IMPORTRANGE, esta função:
+ * 1. LIMPA toda a coluna A (remove IDs antigos)
+ * 2. LÊ dados atuais do IMPORTRANGE
+ * 3. GERA novos IDs alinhados com os dados atuais
+ *
+ * Os IDs são baseados em dados + sufixo numérico sequencial.
  */
 function gerarIDsUnicos() {
   Logger.log("=== GERANDO IDs COM SUFIXO NUMÉRICO ===");
@@ -530,44 +537,31 @@ function gerarIDsUnicos() {
     return { gerados: 0, erro: 'Sem dados' };
   }
 
-  // O intervalo começa na FONTE_DATA_START_ROW (4)
+  // PASSO 1: LIMPAR coluna A (IDs antigos) para evitar desalinhamento
+  Logger.log(`🧹 Limpando coluna A (linhas ${FONTE_DATA_START_ROW} até ${ultimaLinha})...`);
+  const rangeParaLimpar = sheet.getRange(FONTE_DATA_START_ROW, 1, ultimaLinha - FONTE_DATA_START_ROW + 1, 1);
+  rangeParaLimpar.clearContent();
+  SpreadsheetApp.flush();
+
+  // PASSO 2: LER dados atuais do IMPORTRANGE (colunas B+)
   const intervalo = sheet.getRange(FONTE_DATA_START_ROW, 1, ultimaLinha - FONTE_DATA_START_ROW + 1, sheet.getLastColumn());
   const valores = intervalo.getValues();
 
   const contagemIDs = {};
-
-  // 1ª PASSAGEM: Ler todos os IDs existentes e extrair sufixos
-  valores.forEach(function(linha) {
-    const idExistente = linha[0]; // Coluna A (índice 0)
-
-    if (idExistente) {
-      const ultimoTraco = String(idExistente).lastIndexOf('-');
-      if (ultimoTraco !== -1) {
-        const idBase = String(idExistente).substring(0, ultimoTraco);
-        const sufixo = parseInt(String(idExistente).substring(ultimoTraco + 1), 10);
-
-        if (idBase && !isNaN(sufixo)) {
-          if (!contagemIDs[idBase] || sufixo > contagemIDs[idBase]) {
-            contagemIDs[idBase] = sufixo;
-          }
-        }
-      }
-    }
-  });
-
-  // 2ª PASSAGEM: Gerar IDs APENAS para linhas em branco
   const novosValores = [];
-  let mudancasFeitas = false;
+  let idsGerados = 0;
 
+  // PASSO 3: GERAR IDs para TODAS as linhas com dados
   valores.forEach(function(linha, i) {
-    const idAtual = linha[0];
+    // Verifica se linha tem dados (coluna CARTELA preenchida)
+    const cartela = linha[CARTELA_COL];
 
-    if (idAtual) {
-      novosValores.push([idAtual]);
+    if (!cartela || String(cartela).trim() === "") {
+      novosValores.push([""]);
       return;
     }
 
-    // Concatenação das colunas: C + D + E + F + H + I + G + J + L + M
+    // Concatenação das colunas para criar ID base: C + D + E + F + H + I + G + J + L + M
     const idBase = "" +
       String(linha[2] || '').trim() + // Coluna C - CLIENTE
       String(linha[3] || '').trim() + // Coluna D
@@ -585,6 +579,7 @@ function gerarIDsUnicos() {
       return;
     }
 
+    // Gera sufixo sequencial (1, 2, 3...) para itens com mesmos dados
     const sufixoAtual = contagemIDs[idBase] || 0;
     const novoSufixo = sufixoAtual + 1;
     contagemIDs[idBase] = novoSufixo;
@@ -592,26 +587,29 @@ function gerarIDsUnicos() {
     const novoID = idBase + "-" + novoSufixo;
 
     novosValores.push([novoID]);
-    mudancasFeitas = true;
+    idsGerados++;
     Logger.log(`  ✓ Linha ${i + FONTE_DATA_START_ROW}: ${novoID} (novo)`);
   });
 
-  // 3ª PASSAGEM: Escreve os novos valores na Coluna A
-  if (mudancasFeitas) {
+  // PASSO 4: Escrever IDs na coluna A (agora alinhados com IMPORTRANGE)
+  if (idsGerados > 0) {
     sheet.getRange(FONTE_DATA_START_ROW, 1, novosValores.length, 1).setValues(novosValores);
     SpreadsheetApp.flush();
-    Logger.log(`✅ IDs gerados com sucesso na aba "${FONTE_SHEET_NAME}"!`);
+    Logger.log(`✅ ${idsGerados} IDs gerados com sucesso (coluna A alinhada com IMPORTRANGE)!`);
     limparCache();
-    return { gerados: novosValores.filter(v => v[0] && String(v[0]).includes('-')).length, erro: null };
+    return { gerados: idsGerados, erro: null };
   } else {
-    Logger.log('✅ Nenhum ID novo precisou ser gerado.');
+    Logger.log('⚠️ Nenhum ID gerado (sem dados válidos).');
     return { gerados: 0, erro: null };
   }
 }
 
 /**
- * Função que verifica se há IDs faltantes antes de gerar.
- * Usada pelo trigger automático para evitar execuções desnecessárias.
+ * Função que SEMPRE regenera IDs para garantir alinhamento com IMPORTRANGE.
+ * Usada pelo trigger automático.
+ *
+ * IMPORTANTE: Como o IMPORTRANGE pode adicionar/remover linhas a qualquer momento,
+ * sempre regeneramos os IDs para garantir que a coluna A está alinhada com os dados.
  */
 function verificarEGerarIDs() {
   try {
@@ -621,32 +619,16 @@ function verificarEGerarIDs() {
     const ultimaLinha = sheet.getLastRow();
     if (ultimaLinha < FONTE_DATA_START_ROW) return;
 
-    // Lê apenas a coluna A (IDs)
-    const idsRange = sheet.getRange(FONTE_DATA_START_ROW, 1, ultimaLinha - FONTE_DATA_START_ROW + 1, 1);
-    const ids = idsRange.getValues();
+    Logger.log("🔄 Regenerando IDs para garantir alinhamento com IMPORTRANGE...");
+    const resultado = gerarIDsUnicos();
 
-    // Verifica se há alguma linha sem ID mas com dados nas outras colunas
-    let temIDsFaltantes = false;
-    for (let i = 0; i < ids.length; i++) {
-      if (!ids[i][0] || String(ids[i][0]).trim() === "") {
-        // Verifica se a linha tem dados (coluna CARTELA preenchida, por exemplo)
-        const cartela = sheet.getRange(i + FONTE_DATA_START_ROW, CARTELA_COL + 1).getValue();
-        if (cartela && String(cartela).trim() !== "") {
-          temIDsFaltantes = true;
-          break;
-        }
-      }
-    }
-
-    if (temIDsFaltantes) {
-      Logger.log("🔄 IDs faltantes detectados - gerando automaticamente...");
-      const resultado = gerarIDsUnicos();
-      Logger.log(`✅ Geração automática: ${resultado.gerados} IDs criados`);
+    if (resultado.gerados > 0) {
+      Logger.log(`✅ ${resultado.gerados} IDs regenerados com sucesso`);
     } else {
-      Logger.log("✓ Nenhum ID faltante - tudo atualizado");
+      Logger.log("✓ Nenhum dado para processar");
     }
   } catch (e) {
-    Logger.log(`❌ Erro na verificação automática: ${e.message}`);
+    Logger.log(`❌ Erro na regeneração de IDs: ${e.message}`);
   }
 }
 
@@ -899,6 +881,46 @@ function gerarIdsFaltantes() {
   }
 }
 
+// ====== FUNÇÕES AUXILIARES PARA SINCRONIZAÇÃO ======
+
+/**
+ * Cria uma "impressão digital" única dos dados para identificar itens.
+ * Usado para comparar itens mesmo quando IDs mudam (devido ao IMPORTRANGE).
+ *
+ * Retorna uma string única baseada em: CARTELA + CLIENTE + PEDIDO + MARFIM + OC + OS + DATA
+ */
+function _criarImpressaoDigital_(row) {
+  const partes = [
+    String(row[CARTELA_COL] || '').trim(),
+    String(row[CLIENTE_COL] || '').trim(),
+    String(row[PEDIDO_COL] || '').trim(),
+    String(row[MARFIM_COL] || '').trim(),
+    String(row[OC_COL] || '').trim(),
+    String(row[OS_COL] || '').trim(),
+    row[DTREC_COL] instanceof Date ? row[DTREC_COL].toISOString() : String(row[DTREC_COL] || '')
+  ];
+  return partes.join('|');
+}
+
+/**
+ * Cria um Map de impressões digitais do Relatorio_DB.
+ * Retorna: Map<impressao_digital, {id, linha, row}>
+ */
+function _criarMapImpressoes_(dbData) {
+  const map = new Map();
+  dbData.forEach((row, idx) => {
+    const impressao = _criarImpressaoDigital_(row);
+    if (impressao && impressao !== '||||||') { // ignora linhas vazias
+      map.set(impressao, {
+        id: row[ID_COL],
+        linha: idx + 2, // linha na planilha (primeira linha de dados = 2)
+        row: row
+      });
+    }
+  });
+  return map;
+}
+
 // ====== SINCRONIZAÇÃO ======
 function sincronizarDados() {
   Logger.clear();
@@ -984,17 +1006,38 @@ function sincronizarDados() {
     Logger.log(`   ${totalDB} itens`);
     Logger.log(`   Status: ${statusCount.Ativo} Ativo, ${statusCount.Inativo} Inativo, ${statusCount.Faturado} Faturado, ${statusCount.Excluido} Excluido`);
 
+    // 2.5) CRIAR MAPS DE IMPRESSÕES DIGITAIS
+    Logger.log("\n🔍 2.5. CRIANDO IMPRESSÕES DIGITAIS");
+
+    // Map<impressao, {id, row}> para PEDIDOS
+    const fonteImpressoes = new Map();
+    for (let [id, row] of fonteMap.entries()) {
+      const impressao = _criarImpressaoDigital_(row);
+      fonteImpressoes.set(impressao, { id: id, row: row });
+    }
+    Logger.log(`   ✓ ${fonteImpressoes.size} impressões digitais criadas para PEDIDOS`);
+
+    // Map<impressao, {id, linha, row}> para Relatorio_DB
+    const dbImpressoes = new Map();
+    for (let [id, dbItem] of dbMap.entries()) {
+      const impressao = _criarImpressaoDigital_(dbItem.row);
+      dbImpressoes.set(impressao, { id: id, linha: dbItem.linha, row: dbItem.row });
+    }
+    Logger.log(`   ✓ ${dbImpressoes.size} impressões digitais criadas para Relatorio_DB`);
+
     // 3) PROCESSAR
     Logger.log("\n🔄 3. PROCESSANDO");
-    
+
     let novos = [];
     let updates = [];
     let marcaInativos = [];
-    
+    let idsAtualizados = [];
+
     for (let [id, dbItem] of dbMap.entries()) {
       const statusAtual = dbItem.row[STATUS_COL];  // Coluna O (índice 14)
       if (statusAtual === "Excluido") continue;
 
+      // PRIMEIRA TENTATIVA: Buscar por ID
       if (fonteMap.has(id)) {
         Logger.log(`   🔄 Match encontrado: ID="${id}" existe em PEDIDOS e Relatorio_DB`);
         const fonteRow = fonteMap.get(id);
@@ -1025,19 +1068,55 @@ function sincronizarDados() {
           Logger.log(`   📝 Update: ID="${id}" Linha=${dbItem.linha} Status: ${statusAtual} → ${novoStatus}`);
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus });
         }
+
+        fonteMap.delete(id);
+
       } else {
-        Logger.log(`   ❌ ID="${id}" existe em Relatorio_DB mas NÃO encontrado em PEDIDOS (com CARTELA preenchida)`);
-        Logger.log(`      Status atual: "${statusAtual}", Linha: ${dbItem.linha}`);
-        Logger.log(`      Motivo: ID não existe em PEDIDOS OU existe mas sem CARTELA preenchida`);
-        if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
-          Logger.log(`   ⚠️ Será marcado como Inativo`);
-          marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual });
+        // SEGUNDA TENTATIVA: Buscar por IMPRESSÃO DIGITAL (dados)
+        const impressaoDB = _criarImpressaoDigital_(dbItem.row);
+        const fonteItem = fonteImpressoes.get(impressaoDB);
+
+        if (fonteItem) {
+          // ENCONTROU POR DADOS! O ID mudou devido ao IMPORTRANGE
+          const novoId = fonteItem.id;
+          Logger.log(`   🔄 Item encontrado por dados: ID mudou "${id}" → "${novoId}"`);
+          Logger.log(`      Linha=${dbItem.linha}, Status="${statusAtual}"`);
+          Logger.log(`      Atualizando ID e dados no Relatorio_DB...`);
+
+          const fonteRow = fonteItem.row;
+          const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
+
+          // Atualiza com NOVO ID
+          const novaLinha = [
+            novoId,                fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
+            fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
+            fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
+            fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
+            fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
+          ];
+
+          const novoStatus = (statusAtual === "Faturado") ? "Faturado" : "Ativo";
+          novaLinha[STATUS_COL] = novoStatus;
+
+          updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus });
+          idsAtualizados.push({ de: id, para: novoId, linha: dbItem.linha });
+
+          // Remove do fonteMap para não adicionar como novo depois
+          fonteMap.delete(novoId);
+
         } else {
-          Logger.log(`   ℹ️ Não será alterado (já é ${statusAtual})`);
+          // NÃO ENCONTROU nem por ID nem por dados - item realmente sumiu
+          Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS (nem por ID nem por dados)`);
+          Logger.log(`      Status atual: "${statusAtual}", Linha: ${dbItem.linha}`);
+
+          if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
+            Logger.log(`   ⚠️ Será marcado como Inativo`);
+            marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual });
+          } else {
+            Logger.log(`   ℹ️ Não será alterado (já é ${statusAtual})`);
+          }
         }
       }
-      
-      fonteMap.delete(id);
     }
     
     // Novos itens que estão em PEDIDOS mas não em Relatorio_DB
@@ -1058,6 +1137,7 @@ function sincronizarDados() {
     
     Logger.log(`   🆕 Novos: ${novos.length}`);
     Logger.log(`   📝 Atualizar: ${updates.length}`);
+    Logger.log(`   🔄 IDs Atualizados: ${idsAtualizados.length}`);
     Logger.log(`   ⚠️ Marcar Inativo: ${marcaInativos.length}`);
 
     // 4) VALIDAÇÃO ANTI-DUPLICATA
@@ -1136,6 +1216,12 @@ function sincronizarDados() {
     Logger.log(`   • ${novosValidados.length} novos itens adicionados ao Relatorio_DB como Ativo`);
     Logger.log(`   • ${updates.length} itens atualizados no Relatorio_DB`);
     Logger.log(`   • ${marcaInativos.length} itens marcados como Inativo (não encontrados em PEDIDOS)`);
+    if (idsAtualizados.length > 0) {
+      Logger.log(`   🔄 ${idsAtualizados.length} IDs atualizados (por mudança de posição no IMPORTRANGE):`);
+      idsAtualizados.forEach(ida => {
+        Logger.log(`      - Linha ${ida.linha}: "${ida.de}" → "${ida.para}"`);
+      });
+    }
     if (duplicatasEvitadas > 0) Logger.log(`   🛡️ ${duplicatasEvitadas} duplicata(s) evitada(s)`);
     if (semId > 0) Logger.log(`   ⚠️ ${semId} linhas em PEDIDOS sem ID (ignoradas)`);
     if (semCartela > 0) Logger.log(`   ⚠️ ${semCartela} linhas em PEDIDOS sem CARTELA (ignoradas)`);
