@@ -594,7 +594,11 @@ function gerarIDsUnicos() {
 
     novosValores.push([novoID]);
     idsGerados++;
-    Logger.log(`  ✓ Linha ${i + FONTE_DATA_START_ROW}: ${novoID} (novo)`);
+
+    // Log apenas a cada 100 linhas para evitar timeout
+    if (idsGerados % 100 === 0) {
+      Logger.log(`  ✓ Processadas ${idsGerados} linhas...`);
+    }
   });
 
   // PASSO 4: Escrever IDs na coluna A (agora alinhados com IMPORTRANGE)
@@ -745,10 +749,17 @@ function processoAutomaticoCompleto() {
     Logger.log("=".repeat(70));
 
   } catch (erro) {
-    Logger.log("\n❌ ERRO NO PROCESSO AUTOMÁTICO:");
-    Logger.log(`   Mensagem: ${erro.message}`);
-    Logger.log(`   Stack: ${erro.stack}`);
-    Logger.log("=".repeat(70));
+    try {
+      Logger.log("\n❌ ERRO NO PROCESSO AUTOMÁTICO:");
+      Logger.log(`   Mensagem: ${erro ? erro.message : 'Erro desconhecido'}`);
+      if (erro && erro.stack) {
+        Logger.log(`   Stack: ${erro.stack}`);
+      }
+      Logger.log("=".repeat(70));
+    } catch (logError) {
+      // Se até o log falhar, tenta console.log
+      console.log("Erro crítico:", erro);
+    }
 
     // Envia email de notificação em caso de erro (opcional)
     // MailApp.sendEmail({
