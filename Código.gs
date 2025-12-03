@@ -562,6 +562,12 @@ function gerarIDsUnicos() {
     }
 
     // Concatenação das colunas para criar ID base: C + D + E + F + H + I + G + J + L + M
+    // Trata data de forma consistente (formata para yyyyMMdd se for Date)
+    const dataReceb = linha[12]; // Coluna M - DATA RECEB.
+    const dataFormatada = dataReceb instanceof Date ?
+      Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd') :
+      String(dataReceb || '').trim();
+
     const idBase = "" +
       String(linha[2] || '').trim() + // Coluna C - CLIENTE
       String(linha[3] || '').trim() + // Coluna D
@@ -572,7 +578,7 @@ function gerarIDsUnicos() {
       String(linha[6] || '').trim() + // Coluna G - CÓD. MARFIM
       String(linha[9] || '').trim() + // Coluna J - ORD. COMPRA
       String(linha[11] || '').trim() + // Coluna L - CÓD. OS
-      String(linha[12] || '').trim();  // Coluna M - DATA RECEB.
+      dataFormatada;  // Coluna M - DATA RECEB. (formatada)
 
     if (idBase.trim() === "") {
       novosValores.push([""]);
