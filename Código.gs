@@ -41,6 +41,25 @@ const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova c
 // ====== BAIXAS PARCIAIS ======
 const BAIXAS_SHEET_NAME = "Baixas_Historico";
 
+// ====== FUNÇÕES AUXILIARES SEGURAS ======
+/**
+ * Converte um valor Date para ISO string de forma segura.
+ * Retorna string vazia se a data for inválida.
+ * @param {Date} date - Objeto Date para converter
+ * @returns {string} String ISO ou vazio se inválido
+ */
+function _toISOStringSafe_(date) {
+  if (!(date instanceof Date)) return '';
+  // Verifica se a data é válida
+  if (isNaN(date.getTime())) return '';
+  try {
+    return date.toISOString();
+  } catch (e) {
+    Logger.log(`⚠️ Erro ao converter data para ISO: ${e.message}`);
+    return '';
+  }
+}
+
 // ====== FUNÇÃO WEB APP ======
 function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('index')
@@ -939,7 +958,7 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
   const dataReceb = row[11 + offset];
 
   const dataStr = dataReceb instanceof Date ?
-    dataReceb.toISOString() :
+    _toISOStringSafe_(dataReceb) :
     String(dataReceb || '');
 
   return `${cartela}|${cliente}|${pedido}|${marfim}|${oc}|${os}|${dataStr}`;
@@ -1318,7 +1337,7 @@ function _criarImpressaoDigital_(row) {
     String(row[MARFIM_COL] || '').trim(),
     String(row[OC_COL] || '').trim(),
     String(row[OS_COL] || '').trim(),
-    row[DTREC_COL] instanceof Date ? row[DTREC_COL].toISOString() : String(row[DTREC_COL] || '')
+    row[DTREC_COL] instanceof Date ? _toISOStringSafe_(row[DTREC_COL]) : String(row[DTREC_COL] || '')
   ];
   return partes.join('|');
 }
@@ -1489,8 +1508,8 @@ function sincronizarDados() {
         let mudou = false;
         // Compara as 14 primeiras colunas (0-13), excluindo Status e MARCAR_FATURAR
         for (let i = 0; i < STATUS_COL; i++) {
-          let dbVal = (dbItem.row[i] instanceof Date) ? dbItem.row[i].toISOString() : dbItem.row[i];
-          let novoVal = (novaLinha[i] instanceof Date) ? novaLinha[i].toISOString() : novaLinha[i];
+          let dbVal = (dbItem.row[i] instanceof Date) ? _toISOStringSafe_(dbItem.row[i]) : dbItem.row[i];
+          let novoVal = (novaLinha[i] instanceof Date) ? _toISOStringSafe_(novaLinha[i]) : novaLinha[i];
           if (dbVal != novoVal) { mudou = true; break; }
         }
 
