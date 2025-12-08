@@ -7,10 +7,11 @@
 // ====== CONFIGURAÇÃO ======
 const SS = SpreadsheetApp.openById("1qPJ8c7cq7qb86VJJ-iByeiaPnALOBcDPrPMeL75N2EI");
 const FONTE_SHEET_NAME = "PEDIDOS";
+const IMPORTRANGE_SHEET_NAME = "DADOS_IMPORTADOS"; // Nova aba intermediária
 const DB_SHEET_NAME = "Relatorio_DB";
 const FONTE_DATA_START_ROW = 4;
 const TZ = 'America/Fortaleza';
-const APP_VERSION = '15.5-OTIMIZADA';
+const APP_VERSION = '15.6-SINCRONIZACAO';
 
 // CACHE (10 minutos)
 const CACHE_DURATION = 600; // 10 minutos em segundos
@@ -30,6 +31,7 @@ const OS_COL = 11;       // L
 const DTREC_COL = 12;    // M
 const DTENT_COL = 13;    // N
 const PRAZO_COL = 14;    // O (na aba PEDIDOS)
+const TIMESTAMP_COL = 15; // P (na aba PEDIDOS) - Timestamp de criação do ID
 
 // Índices de colunas - ABA Relatorio_DB
 // Status é sempre a coluna O (índice 14 no array, coluna 15 na planilha)
@@ -692,6 +694,258 @@ function verificarEGerarIDs() {
 }
 
 /**
+ * SINCRONIZAÇÃO INTELIGENTE: DADOS_IMPORTADOS → PEDIDOS
+ *
+ * Sincroniza dados do IMPORTRANGE com aba PEDIDOS mantendo IDs estáveis.
+ * - Identifica itens por "impressão digital" (CARTELA+CLIENTE+PEDIDO+etc)
+ * - Preserva IDs e timestamps de itens existentes
+ * - Adiciona novos itens com novos IDs
+ * - Atualiza dados de itens existentes
+ * - Lida com itens 100% idênticos usando ordem + timestamp
+ *
+ * @returns {Object} {houveMudancas: boolean, novos: number, atualizados: number, erro: string}
+ */
+function sincronizarPedidosComFonte() {
+  const inicioSync = Date.now();
+  Logger.log("=" .repeat(70));
+  Logger.log(`🔄 SINCRONIZAÇÃO DADOS_IMPORTADOS → PEDIDOS`);
+  Logger.log("=".repeat(70));
+
+  try {
+    // PASSO 1: Ler aba DADOS_IMPORTADOS (fonte com IMPORTRANGE)
+    const fonteSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
+    if (!fonteSheet) {
+      Logger.log(`❌ Aba ${IMPORTRANGE_SHEET_NAME} não encontrada!`);
+      Logger.log(`   Crie a aba e configure o IMPORTRANGE primeiro.`);
+      return { houveMudancas: false, erro: 'Aba DADOS_IMPORTADOS não existe' };
+    }
+
+    const fonteLastRow = fonteSheet.getLastRow();
+    if (fonteLastRow < FONTE_DATA_START_ROW) {
+      Logger.log(`⚠️ Sem dados em ${IMPORTRANGE_SHEET_NAME}`);
+      return { houveMudancas: false, erro: 'Sem dados na fonte' };
+    }
+
+    // Lê dados da fonte (sem coluna de ID, começa direto em CARTELA)
+    const fonteNumCols = fonteSheet.getLastColumn();
+    const fonteData = fonteSheet.getRange(FONTE_DATA_START_ROW, 1, fonteLastRow - FONTE_DATA_START_ROW + 1, fonteNumCols).getValues();
+    Logger.log(`📥 Leu ${fonteData.length} linhas de ${IMPORTRANGE_SHEET_NAME}`);
+
+    // PASSO 2: Ler aba PEDIDOS (atual com IDs)
+    const pedidosSheet = SS.getSheetByName(FONTE_SHEET_NAME);
+    if (!pedidosSheet) {
+      Logger.log(`❌ Aba ${FONTE_SHEET_NAME} não encontrada!`);
+      return { houveMudancas: false, erro: 'Aba PEDIDOS não existe' };
+    }
+
+    const pedidosLastRow = pedidosSheet.getLastRow();
+    let pedidosData = [];
+    let pedidosMap = new Map(); // impressao_digital → {id, timestamp, row, linhaOriginal}
+
+    if (pedidosLastRow >= FONTE_DATA_START_ROW) {
+      // Lê dados atuais de PEDIDOS (com ID e timestamp)
+      const pedidosNumCols = Math.max(16, pedidosSheet.getLastColumn()); // Garante até coluna P
+      pedidosData = pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosNumCols).getValues();
+
+      Logger.log(`📋 Leu ${pedidosData.length} linhas de ${FONTE_SHEET_NAME}`);
+
+      // Cria mapa de itens existentes em PEDIDOS
+      pedidosData.forEach((row, idx) => {
+        const id = row[ID_COL];
+        const cartela = row[CARTELA_COL];
+
+        // Ignora linhas sem dados
+        if (!cartela || String(cartela).trim() === '') return;
+
+        // Cria impressão digital (colunas B até O em PEDIDOS = índices 1-14)
+        const impressao = _criarImpressaoDigitalFromRow_(row, 1); // offset 1 porque ID está em 0
+        const timestamp = row[TIMESTAMP_COL] || null;
+
+        // Para itens com mesma impressão, guarda em array
+        if (!pedidosMap.has(impressao)) {
+          pedidosMap.set(impressao, []);
+        }
+        pedidosMap.get(impressao).push({
+          id: id,
+          timestamp: timestamp,
+          row: row,
+          linhaOriginal: idx + FONTE_DATA_START_ROW,
+          usado: false
+        });
+      });
+
+      Logger.log(`🔑 Mapeou ${pedidosMap.size} impressões digitais únicas`);
+    } else {
+      Logger.log(`📋 PEDIDOS está vazio (primeira sincronização)`);
+    }
+
+    // PASSO 3: Processar cada linha da fonte
+    const novasPedidosData = [];
+    let novosItens = 0;
+    let itensAtualizados = 0;
+    const idsUsados = new Set();
+
+    fonteData.forEach((fonteRow, idx) => {
+      const cartela = fonteRow[0]; // Em DADOS_IMPORTADOS, CARTELA é coluna A (índice 0)
+
+      // Ignora linhas vazias
+      if (!cartela || String(cartela).trim() === '') {
+        return;
+      }
+
+      // Cria impressão digital da linha fonte (offset 0 porque não tem coluna ID)
+      const impressao = _criarImpressaoDigitalFromRow_(fonteRow, 0);
+
+      // Procura match em PEDIDOS
+      const matches = pedidosMap.get(impressao);
+
+      let idFinal = null;
+      let timestampFinal = null;
+      let isNovo = false;
+
+      if (matches && matches.length > 0) {
+        // TEM MATCH(ES) - Reusar ID existente
+
+        // Encontra primeiro match não usado
+        let matchEscolhido = matches.find(m => !m.usado);
+
+        if (!matchEscolhido) {
+          // Todos os matches já foram usados (mais itens na fonte que em PEDIDOS)
+          // Gerar novo ID
+          isNovo = true;
+        } else {
+          // Marca como usado
+          matchEscolhido.usado = true;
+          idFinal = matchEscolhido.id;
+          timestampFinal = matchEscolhido.timestamp;
+          itensAtualizados++;
+        }
+      } else {
+        // NÃO TEM MATCH - Item novo
+        isNovo = true;
+      }
+
+      // Se é novo item, gera ID e timestamp
+      if (isNovo) {
+        // Gera ID usando lógica existente (concatenação + sufixo)
+        const dataReceb = fonteRow[11]; // Coluna L em DADOS_IMPORTADOS = DATA RECEB. (índice 11)
+        const dataFormatada = dataReceb instanceof Date ?
+          Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd') :
+          String(dataReceb || '').trim();
+
+        const idBase = "" +
+          String(fonteRow[0] || '').trim() +  // CARTELA
+          String(fonteRow[1] || '').trim() +  // CLIENTE
+          String(fonteRow[2] || '').trim() +  // CÓD. FILIAL
+          String(fonteRow[3] || '').trim() +  // PEDIDO
+          String(fonteRow[4] || '').trim() +  // CÓD. CLIENTE
+          String(fonteRow[6] || '').trim() +  // DESCRIÇÃO
+          String(fonteRow[7] || '').trim() +  // TAMANHO
+          String(fonteRow[5] || '').trim() +  // CÓD. MARFIM
+          String(fonteRow[8] || '').trim() +  // ORD. COMPRA
+          String(fonteRow[10] || '').trim() + // CÓD. OS
+          dataFormatada;
+
+        // Gera sufixo único
+        let sufixo = 1;
+        while (idsUsados.has(idBase + "-" + sufixo)) {
+          sufixo++;
+        }
+
+        idFinal = idBase + "-" + sufixo;
+        timestampFinal = new Date();
+        novosItens++;
+      }
+
+      idsUsados.add(idFinal);
+
+      // Monta linha completa para PEDIDOS (A até P)
+      const novaLinha = [
+        idFinal,           // A: ID_UNICO
+        fonteRow[0],       // B: CARTELA
+        fonteRow[1],       // C: CLIENTE
+        fonteRow[2],       // D: CÓD. FILIAL
+        fonteRow[3],       // E: PEDIDO
+        fonteRow[4],       // F: CÓD. CLIENTE
+        fonteRow[5],       // G: CÓD. MARFIM
+        fonteRow[6],       // H: DESCRIÇÃO
+        fonteRow[7],       // I: TAMANHO
+        fonteRow[8],       // J: ORD. COMPRA
+        fonteRow[9],       // K: QTD. ABERTA
+        fonteRow[10],      // L: CÓD. OS
+        fonteRow[11],      // M: DATA RECEB.
+        fonteRow[12],      // N: DT. ENTREGA
+        fonteRow[13],      // O: PRAZO
+        timestampFinal     // P: TIMESTAMP_CRIACAO
+      ];
+
+      novasPedidosData.push(novaLinha);
+    });
+
+    // PASSO 4: Escrever dados em PEDIDOS
+    if (novasPedidosData.length > 0) {
+      // Limpa dados antigos
+      if (pedidosLastRow >= FONTE_DATA_START_ROW) {
+        pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosSheet.getLastColumn()).clearContent();
+      }
+
+      // Escreve novos dados
+      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 16).setValues(novasPedidosData);
+      SpreadsheetApp.flush();
+
+      const tempoTotal = Date.now() - inicioSync;
+      Logger.log("\n" + "=".repeat(70));
+      Logger.log(`✅ SINCRONIZAÇÃO CONCLUÍDA EM ${tempoTotal}ms`);
+      Logger.log(`   📊 Total de linhas: ${novasPedidosData.length}`);
+      Logger.log(`   🆕 Itens novos: ${novosItens}`);
+      Logger.log(`   🔄 Itens atualizados: ${itensAtualizados}`);
+      Logger.log("=".repeat(70));
+
+      const houveMudancas = novosItens > 0 || itensAtualizados > 0;
+      return {
+        houveMudancas: houveMudancas,
+        novos: novosItens,
+        atualizados: itensAtualizados,
+        total: novasPedidosData.length
+      };
+    } else {
+      Logger.log("⚠️ Nenhum dado para sincronizar");
+      return { houveMudancas: false, novos: 0, atualizados: 0 };
+    }
+
+  } catch (e) {
+    Logger.log(`❌ ERRO na sincronização: ${e.message}`);
+    Logger.log(`   Stack: ${e.stack}`);
+    return { houveMudancas: false, erro: e.message };
+  }
+}
+
+/**
+ * Cria impressão digital de uma row com offset configurável
+ * @param {Array} row - Array com dados da linha
+ * @param {Number} offset - Offset das colunas (0 para DADOS_IMPORTADOS, 1 para PEDIDOS)
+ */
+function _criarImpressaoDigitalFromRow_(row, offset) {
+  // Índices ajustados pelo offset:
+  // DADOS_IMPORTADOS (offset=0): CARTELA=0, CLIENTE=1, PEDIDO=3, MARFIM=5, OC=8, OS=10, DATA=11
+  // PEDIDOS (offset=1): CARTELA=1, CLIENTE=2, PEDIDO=4, MARFIM=6, OC=9, OS=11, DATA=12
+
+  const cartela = String(row[0 + offset] || '').trim();
+  const cliente = String(row[1 + offset] || '').trim();
+  const pedido = String(row[3 + offset] || '').trim();
+  const marfim = String(row[5 + offset] || '').trim();
+  const oc = String(row[8 + offset] || '').trim();
+  const os = String(row[10 + offset] || '').trim();
+  const dataReceb = row[11 + offset];
+
+  const dataStr = dataReceb instanceof Date ?
+    dataReceb.toISOString() :
+    String(dataReceb || '');
+
+  return `${cartela}|${cliente}|${pedido}|${marfim}|${oc}|${os}|${dataStr}`;
+}
+
+/**
  * PROCESSO AUTOMÁTICO COMPLETO OTIMIZADO
  * Executa a cada 5 minutos via trigger
  *
@@ -709,7 +963,23 @@ function processoAutomaticoCompleto() {
   let houveMudancas = false;
 
   try {
-    // ETAPA 1: Verificar e gerar IDs faltantes
+    // ETAPA 0: Sincronizar DADOS_IMPORTADOS → PEDIDOS (Nova arquitetura!)
+    Logger.log("\n📥 ETAPA 0: Sincronização IMPORTRANGE → PEDIDOS");
+    const resultadoSyncFonte = sincronizarPedidosComFonte();
+
+    if (resultadoSyncFonte.houveMudancas) {
+      Logger.log(`   ✅ Sincronização concluída:`);
+      Logger.log(`      🆕 Novos: ${resultadoSyncFonte.novos || 0}`);
+      Logger.log(`      🔄 Atualizados: ${resultadoSyncFonte.atualizados || 0}`);
+      houveMudancas = true;
+    } else if (resultadoSyncFonte.erro) {
+      Logger.log(`   ⚠️ Erro: ${resultadoSyncFonte.erro}`);
+      // Continua processo mesmo com erro (pode ser primeira execução)
+    } else {
+      Logger.log(`   ✓ Nenhuma mudança detectada`);
+    }
+
+    // ETAPA 1: Verificar e gerar IDs faltantes (mantido por compatibilidade)
     Logger.log("\n🔑 ETAPA 1: Verificação de IDs");
     const resultadoIds = verificarEGerarIDs();
 
@@ -720,8 +990,8 @@ function processoAutomaticoCompleto() {
       Logger.log(`   ✓ ${resultadoIds.motivo || 'Nenhuma alteração necessária'}`);
     }
 
-    // ETAPA 2: Sincronizar dados
-    Logger.log("\n🔄 ETAPA 2: Sincronização de dados");
+    // ETAPA 2: Sincronizar PEDIDOS → Relatorio_DB
+    Logger.log("\n🔄 ETAPA 2: Sincronização PEDIDOS → Relatorio_DB");
     const resultadoSync = sincronizarDadosOtimizado();
 
     if (resultadoSync.houveMudancas) {
