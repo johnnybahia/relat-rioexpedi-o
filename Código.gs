@@ -1440,16 +1440,23 @@ function sincronizarDados() {
     const statusCount = { Ativo: 0, Inativo: 0, Faturado: 0, Excluido: 0 };
 
     dbData.forEach((row, idx) => {
+      // Calcula a linha real ANTES de verificar se tem ID
+      // Isso garante que linhas vazias também sejam contabilizadas
+      const linhaReal = idx + 2;  // +2 porque linha 1 é cabeçalho e idx começa em 0
+
       const id = row[ID_COL];  // Coluna A (índice 0)
       if (id && String(id).trim()) {
         const idStr = String(id).trim();
-        dbMap.set(idStr, { row: row, linha: idx + 2 });
+        dbMap.set(idStr, { row: row, linha: linhaReal });
         const st = row[STATUS_COL];  // Coluna O (índice 14)
-        Logger.log(`   ✓ Relatorio_DB: ID="${idStr}", Status="${st}", Linha=${idx + 2}`);
+        Logger.log(`   ✓ Relatorio_DB: ID="${idStr}", Status="${st}", Linha=${linhaReal}`);
         if (st === 'Ativo') statusCount.Ativo++;
         else if (st === 'Inativo') statusCount.Inativo++;
         else if (st === 'Faturado') statusCount.Faturado++;
         else if (st === 'Excluido') statusCount.Excluido++;
+      } else if (linhaReal <= 10 || idx % 100 === 0) {
+        // Log apenas para primeiras 10 linhas ou a cada 100 linhas para evitar spam
+        Logger.log(`   ⚠️ Linha ${linhaReal}: sem ID válido (será ignorada)`);
       }
     });
 
@@ -1517,7 +1524,8 @@ function sincronizarDados() {
           const novoStatus = (statusAtual === "Faturado") ? "Faturado" : "Ativo";
           novaLinha[STATUS_COL] = novoStatus;  // Coluna O (índice 14)
           Logger.log(`   📝 Update: ID="${id}" Linha=${dbItem.linha} Status: ${statusAtual} → ${novoStatus}`);
-          updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus });
+          Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
+          updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus, id: id });
         }
 
         fonteMap.delete(id);
@@ -1558,11 +1566,12 @@ function sincronizarDados() {
         } else {
           // NÃO ENCONTROU nem por ID nem por dados - item realmente sumiu
           Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS (nem por ID nem por dados)`);
-          Logger.log(`      Status atual: "${statusAtual}", Linha: ${dbItem.linha}`);
+          Logger.log(`      Linha: ${dbItem.linha}, Status atual: "${statusAtual}"`);
+          Logger.log(`      CARTELA="${dbItem.row[CARTELA_COL]}", CLIENTE="${dbItem.row[CLIENTE_COL]}", OC="${dbItem.row[OC_COL]}"`);
 
           if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
             Logger.log(`   ⚠️ Será marcado como Inativo`);
-            marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual });
+            marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual, cartela: dbItem.row[CARTELA_COL], cliente: dbItem.row[CLIENTE_COL] });
           } else {
             Logger.log(`   ℹ️ Não será alterado (já é ${statusAtual})`);
           }
@@ -1639,7 +1648,7 @@ function sincronizarDados() {
     if (updates.length > 0) {
       updates.forEach(u => {
         dbSheet.getRange(u.linha, 1, 1, 16).setValues([u.dados]);
-        Logger.log(`   ✅ Linha ${u.linha}: ${u.de} → ${u.para}`);
+        Logger.log(`   ✅ Linha ${u.linha}: ${u.de} → ${u.para} | ID: ${u.id}`);
       });
     }
     if (marcaInativos.length > 0) {
@@ -1647,7 +1656,8 @@ function sincronizarDados() {
         // STATUS_COL = 14 (índice do array)
         // +1 porque getRange usa índice baseado em 1, então coluna O = 15
         dbSheet.getRange(m.linha, STATUS_COL + 1, 1, 1).setValue("Inativo");
-        Logger.log(`   ⚠️ Linha ${m.linha}: ${m.de} → Inativo (ID: ${m.id})`);
+        Logger.log(`   ⚠️ Linha ${m.linha}: ${m.de} → Inativo`);
+        Logger.log(`      ID: "${m.id}" | CARTELA: "${m.cartela}" | CLIENTE: "${m.cliente}"`);
       });
     }
     
