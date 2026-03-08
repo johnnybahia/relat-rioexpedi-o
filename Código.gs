@@ -1558,7 +1558,9 @@ function sincronizarDados() {
         }
 
         if (mudou || statusAtual === "Inativo") {
-          const novoStatus = (statusAtual === "Faturado") ? "Faturado" : "Ativo";
+          // FIX: preserva "Faturado" e "Finalizado" - não regride para "Ativo" se o item
+          // voltou ao DADOS_IMPORTADOS após já ter sido processado pelo usuário do HTML.
+          const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
           novaLinha[STATUS_COL] = novoStatus;  // Coluna O (índice 14)
           Logger.log(`   📝 Update: ID="${id}" Linha=${dbItem.linha} Status: ${statusAtual} → ${novoStatus}`);
           Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
@@ -1591,7 +1593,8 @@ function sincronizarDados() {
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
           ];
 
-          const novoStatus = (statusAtual === "Faturado") ? "Faturado" : "Ativo";
+          // FIX: preserva "Faturado" e "Finalizado" na atualização por fingerprint também
+          const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
           novaLinha[STATUS_COL] = novoStatus;
 
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus });
@@ -1615,7 +1618,10 @@ function sincronizarDados() {
           if (aguardandoNF) {
             Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
             // Não adiciona ao marcaInativos - item fica visível para o usuário do HTML
-          } else if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
+          } else if (statusAtual !== "Faturado" && statusAtual !== "Inativo" && statusAtual !== "Finalizado") {
+            // FIX: "Finalizado" adicionado à lista de exceções.
+            // Sem isso, itens já finalizados pelo User B podiam ser rebaixados para
+            // Inativo numa sync seguinte, reaparecendo no aviso e confundindo o usuário.
             Logger.log(`   ⚠️ Será marcado como Inativo`);
             marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual, cartela: dbItem.row[CARTELA_COL], cliente: dbItem.row[CLIENTE_COL] });
           } else {
