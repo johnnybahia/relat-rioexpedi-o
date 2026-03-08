@@ -589,7 +589,11 @@ function gerarIDsUnicos() {
       Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd') :
       String(dataReceb || '').trim();
 
+    // BUG FIX: Inclui CARTELA (coluna B) no início para ser consistente com
+    // sincronizarPedidosComFonte(). Sem isso, as duas funções geravam IDs
+    // diferentes para o mesmo item, causando perda de rastreamento.
     const idBase = "" +
+      String(linha[1] || '').trim() + // Coluna B - CARTELA  ← ADICIONADO
       String(linha[2] || '').trim() + // Coluna C - CLIENTE
       String(linha[3] || '').trim() + // Coluna D
       String(linha[4] || '').trim() + // Coluna E - PEDIDO
@@ -802,7 +806,21 @@ function sincronizarPedidosComFonte() {
     const novasPedidosData = [];
     let novosItens = 0;
     let itensAtualizados = 0;
+    let itensComMudancaReal = 0;
+
+    // BUG FIX: Pré-carrega TODOS os IDs do Relatorio_DB no Set de IDs usados.
+    // Sem isso, um novo item pode receber o mesmo ID de um item removido que ainda
+    // existe no Relatorio_DB, herdando incorretamente seu status (ex: Faturado).
     const idsUsados = new Set();
+    const dbSheetRef = SS.getSheetByName(DB_SHEET_NAME);
+    if (dbSheetRef && dbSheetRef.getLastRow() >= 2) {
+      const dbIdsRange = dbSheetRef.getRange(2, 1, dbSheetRef.getLastRow() - 1, 1).getValues();
+      dbIdsRange.forEach(dbIdRow => {
+        const dbId = String(dbIdRow[0] || '').trim();
+        if (dbId) idsUsados.add(dbId);
+      });
+      Logger.log(`🔒 ${idsUsados.size} IDs do Relatorio_DB carregados para prevenir colisões de ID`);
+    }
 
     fonteData.forEach((fonteRow, idx) => {
       const cartela = fonteRow[0]; // Em DADOS_IMPORTADOS, CARTELA é coluna A (índice 0)
@@ -838,6 +856,18 @@ function sincronizarPedidosComFonte() {
           idFinal = matchEscolhido.id;
           timestampFinal = matchEscolhido.timestamp;
           itensAtualizados++;
+
+          // BUG FIX: Detecta se houve mudança REAL nos dados do item.
+          // fonteRow[0..13] corresponde a pedidosRow[1..14] (offset 1 pelo ID na col A de PEDIDOS).
+          // Antes, qualquer item correspondido era contado como "mudança", causando
+          // limpeza desnecessária de cache e re-sincronização mesmo sem alterações.
+          for (let fi = 0; fi <= 13; fi++) {
+            const fv = fonteRow[fi];
+            const pv = matchEscolhido.row[fi + 1];
+            const fStr = fv instanceof Date ? _toISOStringSafe_(fv) : String(fv || '');
+            const pStr = pv instanceof Date ? _toISOStringSafe_(pv) : String(pv || '');
+            if (fStr !== pStr) { itensComMudancaReal++; break; }
+          }
         }
       } else {
         // NÃO TEM MATCH - Item novo
@@ -917,10 +947,13 @@ function sincronizarPedidosComFonte() {
       Logger.log(`✅ SINCRONIZAÇÃO CONCLUÍDA EM ${tempoTotal}ms`);
       Logger.log(`   📊 Total de linhas: ${novasPedidosData.length}`);
       Logger.log(`   🆕 Itens novos: ${novosItens}`);
-      Logger.log(`   🔄 Itens atualizados: ${itensAtualizados}`);
+      Logger.log(`   🔄 Itens correspondidos: ${itensAtualizados} (${itensComMudancaReal} com dados alterados)`);
       Logger.log("=".repeat(70));
 
-      const houveMudancas = novosItens > 0 || itensAtualizados > 0;
+      // BUG FIX: houveMudancas agora só é true se há itens NOVOS ou com dados
+      // realmente alterados. Antes era true para qualquer item correspondido,
+      // causando limpeza desnecessária de cache a cada execução do trigger.
+      const houveMudancas = novosItens > 0 || itensComMudancaReal > 0;
       return {
         houveMudancas: houveMudancas,
         novos: novosItens,
