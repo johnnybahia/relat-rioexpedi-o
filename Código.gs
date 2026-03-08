@@ -589,16 +589,15 @@ function gerarIDsUnicos() {
       Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd') :
       String(dataReceb || '').trim();
 
-    // BUG FIX: Inclui CARTELA (coluna B) no início para ser consistente com
-    // sincronizarPedidosComFonte(). Sem isso, as duas funções geravam IDs
-    // diferentes para o mesmo item, causando perda de rastreamento.
+    // FIX: CARTELA (col B) e DESCRIÇÃO (col H) removidos do ID base.
+    // São campos mutáveis que podem ser atualizados pelo sistema de origem.
+    // Mantém apenas campos estáveis como identidade do pedido, consistente
+    // com a lógica de sincronizarPedidosComFonte() e _criarImpressaoDigital_().
     const idBase = "" +
-      String(linha[1] || '').trim() + // Coluna B - CARTELA  ← ADICIONADO
       String(linha[2] || '').trim() + // Coluna C - CLIENTE
-      String(linha[3] || '').trim() + // Coluna D
+      String(linha[3] || '').trim() + // Coluna D - CÓD. FILIAL
       String(linha[4] || '').trim() + // Coluna E - PEDIDO
       String(linha[5] || '').trim() + // Coluna F - CÓD. CLIENTE
-      String(linha[7] || '').trim() + // Coluna H - DESCRIÇÃO
       String(linha[8] || '').trim() + // Coluna I - TAMANHO
       String(linha[6] || '').trim() + // Coluna G - CÓD. MARFIM
       String(linha[9] || '').trim() + // Coluna J - ORD. COMPRA
@@ -882,13 +881,14 @@ function sincronizarPedidosComFonte() {
           Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd') :
           String(dataReceb || '').trim();
 
+        // FIX: CARTELA (fonteRow[0]) e DESCRIÇÃO (fonteRow[6]) removidos do ID base.
+        // Ambos são campos mutáveis - podem ser atualizados pelo sistema de origem.
+        // O ID usa apenas campos estáveis que identificam o pedido de forma permanente.
         const idBase = "" +
-          String(fonteRow[0] || '').trim() +  // CARTELA
           String(fonteRow[1] || '').trim() +  // CLIENTE
           String(fonteRow[2] || '').trim() +  // CÓD. FILIAL
           String(fonteRow[3] || '').trim() +  // PEDIDO
           String(fonteRow[4] || '').trim() +  // CÓD. CLIENTE
-          String(fonteRow[6] || '').trim() +  // DESCRIÇÃO
           String(fonteRow[7] || '').trim() +  // TAMANHO
           String(fonteRow[5] || '').trim() +  // CÓD. MARFIM
           String(fonteRow[8] || '').trim() +  // ORD. COMPRA
@@ -978,23 +978,26 @@ function sincronizarPedidosComFonte() {
  * @param {Number} offset - Offset das colunas (0 para DADOS_IMPORTADOS, 1 para PEDIDOS)
  */
 function _criarImpressaoDigitalFromRow_(row, offset) {
-  // Índices ajustados pelo offset:
-  // DADOS_IMPORTADOS (offset=0): CARTELA=0, CLIENTE=1, PEDIDO=3, MARFIM=5, OC=8, OS=10, DATA=11
-  // PEDIDOS (offset=1): CARTELA=1, CLIENTE=2, PEDIDO=4, MARFIM=6, OC=9, OS=11, DATA=12
+  // FIX: CARTELA foi removida da impressão digital pois pode ser atualizada
+  // pelo sistema de origem. Usar CARTELA causava falsos "novos itens" quando
+  // ela mudava, perdendo todo o histórico e marcações do item no Relatorio_DB.
+  //
+  // Campos estáveis usados como identidade:
+  // DADOS_IMPORTADOS (offset=0): CLIENTE=1, PEDIDO=3, MARFIM=5, OC=8, OS=10, DATA=11
+  // PEDIDOS          (offset=1): CLIENTE=2, PEDIDO=4, MARFIM=6, OC=9, OS=11, DATA=12
 
-  const cartela = String(row[0 + offset] || '').trim();
   const cliente = String(row[1 + offset] || '').trim();
-  const pedido = String(row[3 + offset] || '').trim();
-  const marfim = String(row[5 + offset] || '').trim();
-  const oc = String(row[8 + offset] || '').trim();
-  const os = String(row[10 + offset] || '').trim();
+  const pedido  = String(row[3 + offset] || '').trim();
+  const marfim  = String(row[5 + offset] || '').trim();
+  const oc      = String(row[8 + offset] || '').trim();
+  const os      = String(row[10 + offset] || '').trim();
   const dataReceb = row[11 + offset];
 
   const dataStr = dataReceb instanceof Date ?
     _toISOStringSafe_(dataReceb) :
     String(dataReceb || '');
 
-  return `${cartela}|${cliente}|${pedido}|${marfim}|${oc}|${os}|${dataStr}`;
+  return `${cliente}|${pedido}|${marfim}|${oc}|${os}|${dataStr}`;
 }
 
 /**
@@ -1363,8 +1366,9 @@ function gerarIdsFaltantes() {
  * Retorna uma string única baseada em: CARTELA + CLIENTE + PEDIDO + MARFIM + OC + OS + DATA
  */
 function _criarImpressaoDigital_(row) {
+  // FIX: CARTELA removida - é campo mutável (pode ser atualizado na origem).
+  // Mantém apenas campos estáveis que identificam o pedido de forma única.
   const partes = [
-    String(row[CARTELA_COL] || '').trim(),
     String(row[CLIENTE_COL] || '').trim(),
     String(row[PEDIDO_COL] || '').trim(),
     String(row[MARFIM_COL] || '').trim(),
@@ -1597,12 +1601,21 @@ function sincronizarDados() {
           fonteMap.delete(novoId);
 
         } else {
-          // NÃO ENCONTROU nem por ID nem por dados - item realmente sumiu
+          // NÃO ENCONTROU nem por ID nem por dados - item saiu do DADOS_IMPORTADOS
           Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS (nem por ID nem por dados)`);
           Logger.log(`      Linha: ${dbItem.linha}, Status atual: "${statusAtual}"`);
           Logger.log(`      CARTELA="${dbItem.row[CARTELA_COL]}", CLIENTE="${dbItem.row[CLIENTE_COL]}", OC="${dbItem.row[OC_COL]}"`);
 
-          if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
+          // FIX: Se o usuário do HTML já marcou o item para faturar (MARCAR_FATURAR=SIM),
+          // o item pode ter sido fechado/removido pelo sistema de origem mas ainda não foi
+          // faturado. Manter visível e ativo para o usuário do HTML concluir o processo.
+          const marcarFaturar = String(dbItem.row[MARCAR_FATURAR_COL] || '').trim().toUpperCase();
+          const aguardandoNF = marcarFaturar === 'SIM';
+
+          if (aguardandoNF) {
+            Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
+            // Não adiciona ao marcaInativos - item fica visível para o usuário do HTML
+          } else if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
             Logger.log(`   ⚠️ Será marcado como Inativo`);
             marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual, cartela: dbItem.row[CARTELA_COL], cliente: dbItem.row[CLIENTE_COL] });
           } else {
