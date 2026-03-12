@@ -126,6 +126,9 @@
     
     #noResults { display: none; color: #6b7280; padding: 2rem 0; text-align: center; }
     #noResults.visible { display: block; }
+    #noResults .no-results-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    #noResults .no-results-title { font-size: 1.1rem; font-weight: 600; color: #374151; margin-bottom: 0.25rem; }
+    #noResults .no-results-sub { font-size: 0.875rem; color: #9ca3af; }
     
     /* Modais */
     .modal-overlay { position: fixed; inset: 0; background-color: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2000; }
@@ -349,7 +352,11 @@
     <div id="cards-container"></div>
 
     <!-- No Results -->
-    <div id="noResults">Nenhuma OC encontrada com os filtros aplicados.</div>
+    <div id="noResults">
+      <div class="no-results-icon">📭</div>
+      <div class="no-results-title" id="noResultsTitle">Nenhuma OC encontrada</div>
+      <div class="no-results-sub" id="noResultsSub">Nenhuma OC encontrada com os filtros aplicados.</div>
+    </div>
 
     <!-- Controls -->
     <div id="controls">
@@ -1266,6 +1273,15 @@ ALL_OCS_ITEMS = itemsObj;
         console.log(`🔍 Filtros aplicados. OCs filtradas: ${FILTERED_OCS_INFO.length}`);
         
         if (FILTERED_OCS_INFO.length === 0) {
+            const $noResultsTitle = document.getElementById('noResultsTitle');
+            const $noResultsSub   = document.getElementById('noResultsSub');
+            if (ALL_OCS_INFO.length === 0) {
+                if ($noResultsTitle) $noResultsTitle.textContent = 'Nenhum dado disponível';
+                if ($noResultsSub)   $noResultsSub.textContent   = 'O banco de dados ainda não foi populado. Execute a sincronização no Google Apps Script (processoAutomaticoCompleto) para importar os pedidos.';
+            } else {
+                if ($noResultsTitle) $noResultsTitle.textContent = 'Nenhuma OC encontrada';
+                if ($noResultsSub)   $noResultsSub.textContent   = 'Nenhuma OC corresponde aos filtros aplicados. Tente limpar os filtros ou alterar os critérios de busca.';
+            }
             $noResults.classList.add('visible');
             updateStats();
             updateTotaisGerais();

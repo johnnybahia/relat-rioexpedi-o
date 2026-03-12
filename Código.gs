@@ -1802,6 +1802,55 @@ function salvarDadosCache(dados) {
 }
 
 // ====== SISTEMA WEB OTIMIZADO ======
+
+// Cabeçalhos corretos do Relatorio_DB, na ordem exata em que são gravados por sincronizarDados()
+const RELATORIO_DB_HEADERS = [
+  'ID_UNICO', 'CARTELA', 'CLIENTE', 'PEDIDO', 'CÓD. CLIENTE',
+  'CÓD. MARFIM', 'DESCRIÇÃO', 'TAMANHO', 'ORD. COMPRA', 'QTD. ABERTA',
+  'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR'
+];
+
+/**
+ * Garante que a aba Relatorio_DB existe e tem os cabeçalhos corretos na linha 1.
+ * Chamada automaticamente por fetchAllDataUnified quando nenhum item é retornado.
+ * NÃO sobrescreve cabeçalhos existentes para evitar perda de dados.
+ */
+function _garantirHeadersRelatorio_DB_() {
+  try {
+    let sheet = SS.getSheetByName(DB_SHEET_NAME);
+
+    // Cria a aba se não existir
+    if (!sheet) {
+      Logger.log(`📝 Criando aba ${DB_SHEET_NAME}...`);
+      sheet = SS.insertSheet(DB_SHEET_NAME);
+    }
+
+    // Verifica se a linha 1 está vazia ou sem ID_UNICO
+    const primeiraLinha = sheet.getLastRow() >= 1
+      ? sheet.getRange(1, 1, 1, Math.max(RELATORIO_DB_HEADERS.length, sheet.getLastColumn())).getValues()[0]
+      : [];
+
+    const temHeaderValido = primeiraLinha.some(h => String(h).trim() === 'ID_UNICO');
+
+    if (!temHeaderValido) {
+      Logger.log(`📝 Cabeçalhos ausentes ou incorretos — gravando cabeçalhos padrão na linha 1...`);
+      Logger.log(`   Cabeçalhos existentes: [${primeiraLinha.filter(h => h).join(', ')}]`);
+      sheet.getRange(1, 1, 1, RELATORIO_DB_HEADERS.length).setValues([RELATORIO_DB_HEADERS]);
+      sheet.getRange(1, 1, 1, RELATORIO_DB_HEADERS.length).setFontWeight('bold').setBackground('#f0f2f5');
+      sheet.setFrozenRows(1);
+      SpreadsheetApp.flush();
+      Logger.log(`✅ Cabeçalhos gravados: ${RELATORIO_DB_HEADERS.join(', ')}`);
+      return true; // headers foram criados/corrigidos
+    }
+
+    Logger.log(`✅ Cabeçalhos do ${DB_SHEET_NAME} OK (ID_UNICO encontrado)`);
+    return false;
+  } catch (e) {
+    Logger.log(`❌ Erro ao verificar cabeçalhos: ${e.message}`);
+    return false;
+  }
+}
+
 function _readAllData_() {
   const sheet = SS.getSheetByName(DB_SHEET_NAME);
   if (!sheet) throw new Error(`Aba '${DB_SHEET_NAME}' não encontrada`);
@@ -1946,7 +1995,21 @@ function fetchAllDataUnified(cacheBuster) {
     const itemsWeb = rows
       .map((row, idx) => _rowToItem_(row, displayRows[idx], colMap, idx))
       .filter(item => item !== null);
-    
+
+    // Diagnóstico: rows existem mas nenhum item foi retornado → provável problema de cabeçalhos
+    if (rows.length > 0 && itemsWeb.length === 0) {
+      Logger.log(`⚠️ ATENÇÃO: ${rows.length} linhas lidas mas NENHUM item convertido!`);
+      Logger.log(`   Cabeçalhos encontrados: [${headers.filter(h => h).join(', ')}]`);
+      Logger.log(`   Cabeçalhos esperados:   [${RELATORIO_DB_HEADERS.join(', ')}]`);
+      Logger.log(`   Verifique se 'ID_UNICO' existe exatamente assim na linha 1 do ${DB_SHEET_NAME}`);
+
+      // Tenta corrigir os cabeçalhos automaticamente se estiverem ausentes
+      const corrigiu = _garantirHeadersRelatorio_DB_();
+      if (corrigiu) {
+        Logger.log(`   ✅ Cabeçalhos corrigidos automaticamente. Execute a sincronização para popular os dados.`);
+      }
+    }
+
     const ordCompras = _organizeByOC_(itemsWeb);
     
     const stats = {
