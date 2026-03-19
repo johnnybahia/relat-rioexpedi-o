@@ -1520,8 +1520,21 @@ function sincronizarDados() {
 
     let novos = [];
     let updates = [];
-    let marcaInativos = [];
+    let avisos = [];
     let idsAtualizados = [];
+
+    // Precarrega IDs com histórico de baixas para detectar itens parcializados removidos
+    const idsBaixados = new Set();
+    try {
+      const baixasSheet = SS.getSheetByName(BAIXAS_SHEET_NAME);
+      if (baixasSheet && baixasSheet.getLastRow() > 1) {
+        const baixasIds = baixasSheet.getRange(2, 1, baixasSheet.getLastRow() - 1, 1).getValues();
+        baixasIds.forEach(r => { if (r[0]) idsBaixados.add(String(r[0]).trim()); });
+      }
+    } catch (e) {
+      Logger.log(`   ⚠️ Não foi possível carregar IDs de baixas: ${e.message}`);
+    }
+    Logger.log(`   ${idsBaixados.size} IDs com histórico de baixas`);
 
     for (let [id, dbItem] of dbMap.entries()) {
       const statusAtual = dbItem.row[STATUS_COL];  // Coluna O (índice 14)
@@ -1539,9 +1552,9 @@ function sincronizarDados() {
           fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
           fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
           fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
-          fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
+          dbItem.row[QTD_COL],   fonteRow[OS_COL],      fonteRow[DTREC_COL],
           fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
-        ];
+        ]; // QTD. ABERTA preservada do DB (gerida pelo usuário via baixas)
 
         let mudou = false;
         // Compara as 14 primeiras colunas (0-13), excluindo Status e MARCAR_FATURAR
@@ -1579,9 +1592,9 @@ function sincronizarDados() {
             novoId,                fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
             fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
-            fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
+            dbItem.row[QTD_COL],   fonteRow[OS_COL],      fonteRow[DTREC_COL],
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
-          ];
+          ]; // QTD. ABERTA preservada do DB (gerida pelo usuário via baixas)
 
           // FIX: preserva "Faturado" e "Finalizado" na atualização por fingerprint também
           const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
@@ -1605,15 +1618,21 @@ function sincronizarDados() {
 
           if (aguardandoNF) {
             Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
-            // Não adiciona ao marcaInativos - item fica visível para o usuário do HTML
-          } else if (statusAtual !== "Faturado" && statusAtual !== "Inativo" && statusAtual !== "Finalizado") {
-            // FIX: "Finalizado" adicionado à lista de exceções.
-            // Sem isso, itens já finalizados pelo User B podiam ser rebaixados para
-            // Inativo numa sync seguinte, reaparecendo no aviso e confundindo o usuário.
-            Logger.log(`   ⚠️ Será marcado como Inativo`);
-            marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual, cartela: dbItem.row[CARTELA_COL], cliente: dbItem.row[CLIENTE_COL] });
+          } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
+            if (idsBaixados.has(id)) {
+              Logger.log(`   ⚠️ Item com baixa removido de PEDIDOS - gerando aviso para o usuário`);
+              avisos.push({
+                id: id,
+                cartela: dbItem.row[CARTELA_COL],
+                cliente: dbItem.row[CLIENTE_COL],
+                pedido: dbItem.row[PEDIDO_COL],
+                timestamp: new Date().toISOString()
+              });
+            } else {
+              Logger.log(`   ℹ️ Item removido de PEDIDOS sem histórico de baixas - sem ação`);
+            }
           } else {
-            Logger.log(`   ℹ️ Não será alterado (já é ${statusAtual})`);
+            Logger.log(`   ℹ️ Não alterado (status: ${statusAtual})`);
           }
         }
       }
@@ -1703,18 +1722,16 @@ function sincronizarDados() {
         Logger.log(`   ✅ Linha ${u.linha}: ${u.de} → ${u.para} | ID: ${u.id}`);
       });
     }
-    if (marcaInativos.length > 0) {
-      marcaInativos.forEach(m => {
-        // STATUS_COL = 14 (índice do array)
-        // +1 porque getRange usa índice baseado em 1, então coluna O = 15
-        dbSheet.getRange(m.linha, STATUS_COL + 1, 1, 1).setValue("Inativo");
-        Logger.log(`   ⚠️ Linha ${m.linha}: ${m.de} → Inativo`);
-        Logger.log(`      ID: "${m.id}" | CARTELA: "${m.cartela}" | CLIENTE: "${m.cliente}"`);
-      });
+    // Persiste avisos de itens parcializados que saíram do PEDIDOS
+    if (avisos.length > 0) {
+      const sp = PropertiesService.getScriptProperties();
+      const existentes = JSON.parse(sp.getProperty('AVISOS_PENDENTES') || '[]');
+      sp.setProperty('AVISOS_PENDENTES', JSON.stringify(existentes.concat(avisos)));
+      Logger.log(`   ⚠️ ${avisos.length} aviso(s) de itens com baixa gravados`);
     }
-    
+
     SpreadsheetApp.flush();
-    if (novosValidados.length > 0 || updates.length > 0 || marcaInativos.length > 0) {
+    if (novosValidados.length > 0 || updates.length > 0) {
       limparCache();
       Logger.log("   🗑️ Cache limpo");
     }
@@ -1727,8 +1744,8 @@ function sincronizarDados() {
     Logger.log(`   • ${totalFonte} itens lidos de PEDIDOS (com ID + CARTELA)`);
     Logger.log(`   • ${totalDB} itens lidos de Relatorio_DB`);
     Logger.log(`   • ${novosValidados.length} novos itens adicionados ao Relatorio_DB como Ativo`);
-    Logger.log(`   • ${updates.length} itens atualizados no Relatorio_DB`);
-    Logger.log(`   • ${marcaInativos.length} itens marcados como Inativo (não encontrados em PEDIDOS)`);
+    Logger.log(`   • ${updates.length} itens atualizados no Relatorio_DB (QTD. ABERTA preservada do DB)`);
+    Logger.log(`   • ${avisos.length} aviso(s) de itens com baixa removidos de PEDIDOS`);
     if (idsAtualizados.length > 0) {
       Logger.log(`   🔄 ${idsAtualizados.length} IDs atualizados (por mudança de posição no IMPORTRANGE):`);
       idsAtualizados.forEach(ida => {
@@ -1744,7 +1761,7 @@ function sincronizarDados() {
     return {
       novos: novosValidados.length,
       updates: updates.length,
-      inativos: marcaInativos.length,
+      avisos: avisos.length,
       idsAtualizados: idsAtualizados.length
     };
 
@@ -2074,6 +2091,15 @@ function fetchAllDataUnified(cacheBuster) {
       }
     };
     
+    // Inclui e limpa avisos pendentes de itens parcializados removidos do PEDIDOS
+    const spFetch = PropertiesService.getScriptProperties();
+    const avisosPendentes = JSON.parse(spFetch.getProperty('AVISOS_PENDENTES') || '[]');
+    if (avisosPendentes.length > 0) {
+      spFetch.deleteProperty('AVISOS_PENDENTES');
+      Logger.log(`   ⚠️ ${avisosPendentes.length} aviso(s) incluídos e limpos`);
+    }
+    result.avisosPendentes = avisosPendentes;
+
     salvarDadosCache(result);
     return JSON.parse(JSON.stringify(result)); // garante tipos JSON puros
     
