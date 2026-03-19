@@ -589,12 +589,15 @@ function gerarIDsUnicos() {
       Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd') :
       String(dataReceb || '').trim();
 
+    // FIX: CARTELA (col B) e DESCRIÇÃO (col H) removidos do ID base.
+    // São campos mutáveis que podem ser atualizados pelo sistema de origem.
+    // Mantém apenas campos estáveis como identidade do pedido, consistente
+    // com a lógica de sincronizarPedidosComFonte() e _criarImpressaoDigital_().
     const idBase = "" +
       String(linha[2] || '').trim() + // Coluna C - CLIENTE
-      String(linha[3] || '').trim() + // Coluna D
+      String(linha[3] || '').trim() + // Coluna D - CÓD. FILIAL
       String(linha[4] || '').trim() + // Coluna E - PEDIDO
       String(linha[5] || '').trim() + // Coluna F - CÓD. CLIENTE
-      String(linha[7] || '').trim() + // Coluna H - DESCRIÇÃO
       String(linha[8] || '').trim() + // Coluna I - TAMANHO
       String(linha[6] || '').trim() + // Coluna G - CÓD. MARFIM
       String(linha[9] || '').trim() + // Coluna J - ORD. COMPRA
@@ -802,7 +805,21 @@ function sincronizarPedidosComFonte() {
     const novasPedidosData = [];
     let novosItens = 0;
     let itensAtualizados = 0;
+    let itensComMudancaReal = 0;
+
+    // BUG FIX: Pré-carrega TODOS os IDs do Relatorio_DB no Set de IDs usados.
+    // Sem isso, um novo item pode receber o mesmo ID de um item removido que ainda
+    // existe no Relatorio_DB, herdando incorretamente seu status (ex: Faturado).
     const idsUsados = new Set();
+    const dbSheetRef = SS.getSheetByName(DB_SHEET_NAME);
+    if (dbSheetRef && dbSheetRef.getLastRow() >= 2) {
+      const dbIdsRange = dbSheetRef.getRange(2, 1, dbSheetRef.getLastRow() - 1, 1).getValues();
+      dbIdsRange.forEach(dbIdRow => {
+        const dbId = String(dbIdRow[0] || '').trim();
+        if (dbId) idsUsados.add(dbId);
+      });
+      Logger.log(`🔒 ${idsUsados.size} IDs do Relatorio_DB carregados para prevenir colisões de ID`);
+    }
 
     fonteData.forEach((fonteRow, idx) => {
       const cartela = fonteRow[0]; // Em DADOS_IMPORTADOS, CARTELA é coluna A (índice 0)
@@ -838,6 +855,18 @@ function sincronizarPedidosComFonte() {
           idFinal = matchEscolhido.id;
           timestampFinal = matchEscolhido.timestamp;
           itensAtualizados++;
+
+          // BUG FIX: Detecta se houve mudança REAL nos dados do item.
+          // fonteRow[0..13] corresponde a pedidosRow[1..14] (offset 1 pelo ID na col A de PEDIDOS).
+          // Antes, qualquer item correspondido era contado como "mudança", causando
+          // limpeza desnecessária de cache e re-sincronização mesmo sem alterações.
+          for (let fi = 0; fi <= 13; fi++) {
+            const fv = fonteRow[fi];
+            const pv = matchEscolhido.row[fi + 1];
+            const fStr = fv instanceof Date ? _toISOStringSafe_(fv) : String(fv || '');
+            const pStr = pv instanceof Date ? _toISOStringSafe_(pv) : String(pv || '');
+            if (fStr !== pStr) { itensComMudancaReal++; break; }
+          }
         }
       } else {
         // NÃO TEM MATCH - Item novo
@@ -852,13 +881,14 @@ function sincronizarPedidosComFonte() {
           Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd') :
           String(dataReceb || '').trim();
 
+        // FIX: CARTELA (fonteRow[0]) e DESCRIÇÃO (fonteRow[6]) removidos do ID base.
+        // Ambos são campos mutáveis - podem ser atualizados pelo sistema de origem.
+        // O ID usa apenas campos estáveis que identificam o pedido de forma permanente.
         const idBase = "" +
-          String(fonteRow[0] || '').trim() +  // CARTELA
           String(fonteRow[1] || '').trim() +  // CLIENTE
           String(fonteRow[2] || '').trim() +  // CÓD. FILIAL
           String(fonteRow[3] || '').trim() +  // PEDIDO
           String(fonteRow[4] || '').trim() +  // CÓD. CLIENTE
-          String(fonteRow[6] || '').trim() +  // DESCRIÇÃO
           String(fonteRow[7] || '').trim() +  // TAMANHO
           String(fonteRow[5] || '').trim() +  // CÓD. MARFIM
           String(fonteRow[8] || '').trim() +  // ORD. COMPRA
@@ -917,10 +947,13 @@ function sincronizarPedidosComFonte() {
       Logger.log(`✅ SINCRONIZAÇÃO CONCLUÍDA EM ${tempoTotal}ms`);
       Logger.log(`   📊 Total de linhas: ${novasPedidosData.length}`);
       Logger.log(`   🆕 Itens novos: ${novosItens}`);
-      Logger.log(`   🔄 Itens atualizados: ${itensAtualizados}`);
+      Logger.log(`   🔄 Itens correspondidos: ${itensAtualizados} (${itensComMudancaReal} com dados alterados)`);
       Logger.log("=".repeat(70));
 
-      const houveMudancas = novosItens > 0 || itensAtualizados > 0;
+      // BUG FIX: houveMudancas agora só é true se há itens NOVOS ou com dados
+      // realmente alterados. Antes era true para qualquer item correspondido,
+      // causando limpeza desnecessária de cache a cada execução do trigger.
+      const houveMudancas = novosItens > 0 || itensComMudancaReal > 0;
       return {
         houveMudancas: houveMudancas,
         novos: novosItens,
@@ -945,23 +978,26 @@ function sincronizarPedidosComFonte() {
  * @param {Number} offset - Offset das colunas (0 para DADOS_IMPORTADOS, 1 para PEDIDOS)
  */
 function _criarImpressaoDigitalFromRow_(row, offset) {
-  // Índices ajustados pelo offset:
-  // DADOS_IMPORTADOS (offset=0): CARTELA=0, CLIENTE=1, PEDIDO=3, MARFIM=5, OC=8, OS=10, DATA=11
-  // PEDIDOS (offset=1): CARTELA=1, CLIENTE=2, PEDIDO=4, MARFIM=6, OC=9, OS=11, DATA=12
+  // FIX: CARTELA foi removida da impressão digital pois pode ser atualizada
+  // pelo sistema de origem. Usar CARTELA causava falsos "novos itens" quando
+  // ela mudava, perdendo todo o histórico e marcações do item no Relatorio_DB.
+  //
+  // Campos estáveis usados como identidade:
+  // DADOS_IMPORTADOS (offset=0): CLIENTE=1, PEDIDO=3, MARFIM=5, OC=8, OS=10, DATA=11
+  // PEDIDOS          (offset=1): CLIENTE=2, PEDIDO=4, MARFIM=6, OC=9, OS=11, DATA=12
 
-  const cartela = String(row[0 + offset] || '').trim();
   const cliente = String(row[1 + offset] || '').trim();
-  const pedido = String(row[3 + offset] || '').trim();
-  const marfim = String(row[5 + offset] || '').trim();
-  const oc = String(row[8 + offset] || '').trim();
-  const os = String(row[10 + offset] || '').trim();
+  const pedido  = String(row[3 + offset] || '').trim();
+  const marfim  = String(row[5 + offset] || '').trim();
+  const oc      = String(row[8 + offset] || '').trim();
+  const os      = String(row[10 + offset] || '').trim();
   const dataReceb = row[11 + offset];
 
   const dataStr = dataReceb instanceof Date ?
     _toISOStringSafe_(dataReceb) :
     String(dataReceb || '');
 
-  return `${cartela}|${cliente}|${pedido}|${marfim}|${oc}|${os}|${dataStr}`;
+  return `${cliente}|${pedido}|${marfim}|${oc}|${os}|${dataStr}`;
 }
 
 /**
@@ -1330,8 +1366,9 @@ function gerarIdsFaltantes() {
  * Retorna uma string única baseada em: CARTELA + CLIENTE + PEDIDO + MARFIM + OC + OS + DATA
  */
 function _criarImpressaoDigital_(row) {
+  // FIX: CARTELA removida - é campo mutável (pode ser atualizado na origem).
+  // Mantém apenas campos estáveis que identificam o pedido de forma única.
   const partes = [
-    String(row[CARTELA_COL] || '').trim(),
     String(row[CLIENTE_COL] || '').trim(),
     String(row[PEDIDO_COL] || '').trim(),
     String(row[MARFIM_COL] || '').trim(),
@@ -1521,7 +1558,9 @@ function sincronizarDados() {
         }
 
         if (mudou || statusAtual === "Inativo") {
-          const novoStatus = (statusAtual === "Faturado") ? "Faturado" : "Ativo";
+          // FIX: preserva "Faturado" e "Finalizado" - não regride para "Ativo" se o item
+          // voltou ao DADOS_IMPORTADOS após já ter sido processado pelo usuário do HTML.
+          const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
           novaLinha[STATUS_COL] = novoStatus;  // Coluna O (índice 14)
           Logger.log(`   📝 Update: ID="${id}" Linha=${dbItem.linha} Status: ${statusAtual} → ${novoStatus}`);
           Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
@@ -1554,7 +1593,8 @@ function sincronizarDados() {
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
           ];
 
-          const novoStatus = (statusAtual === "Faturado") ? "Faturado" : "Ativo";
+          // FIX: preserva "Faturado" e "Finalizado" na atualização por fingerprint também
+          const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
           novaLinha[STATUS_COL] = novoStatus;
 
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus });
@@ -1564,12 +1604,24 @@ function sincronizarDados() {
           fonteMap.delete(novoId);
 
         } else {
-          // NÃO ENCONTROU nem por ID nem por dados - item realmente sumiu
+          // NÃO ENCONTROU nem por ID nem por dados - item saiu do DADOS_IMPORTADOS
           Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS (nem por ID nem por dados)`);
           Logger.log(`      Linha: ${dbItem.linha}, Status atual: "${statusAtual}"`);
           Logger.log(`      CARTELA="${dbItem.row[CARTELA_COL]}", CLIENTE="${dbItem.row[CLIENTE_COL]}", OC="${dbItem.row[OC_COL]}"`);
 
-          if (statusAtual !== "Faturado" && statusAtual !== "Inativo") {
+          // FIX: Se o usuário do HTML já marcou o item para faturar (MARCAR_FATURAR=SIM),
+          // o item pode ter sido fechado/removido pelo sistema de origem mas ainda não foi
+          // faturado. Manter visível e ativo para o usuário do HTML concluir o processo.
+          const marcarFaturar = String(dbItem.row[MARCAR_FATURAR_COL] || '').trim().toUpperCase();
+          const aguardandoNF = marcarFaturar === 'SIM';
+
+          if (aguardandoNF) {
+            Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
+            // Não adiciona ao marcaInativos - item fica visível para o usuário do HTML
+          } else if (statusAtual !== "Faturado" && statusAtual !== "Inativo" && statusAtual !== "Finalizado") {
+            // FIX: "Finalizado" adicionado à lista de exceções.
+            // Sem isso, itens já finalizados pelo User B podiam ser rebaixados para
+            // Inativo numa sync seguinte, reaparecendo no aviso e confundindo o usuário.
             Logger.log(`   ⚠️ Será marcado como Inativo`);
             marcaInativos.push({ linha: dbItem.linha, id: id, de: statusAtual, cartela: dbItem.row[CARTELA_COL], cliente: dbItem.row[CLIENTE_COL] });
           } else {
@@ -1750,6 +1802,55 @@ function salvarDadosCache(dados) {
 }
 
 // ====== SISTEMA WEB OTIMIZADO ======
+
+// Cabeçalhos corretos do Relatorio_DB, na ordem exata em que são gravados por sincronizarDados()
+const RELATORIO_DB_HEADERS = [
+  'ID_UNICO', 'CARTELA', 'CLIENTE', 'PEDIDO', 'CÓD. CLIENTE',
+  'CÓD. MARFIM', 'DESCRIÇÃO', 'TAMANHO', 'ORD. COMPRA', 'QTD. ABERTA',
+  'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR'
+];
+
+/**
+ * Garante que a aba Relatorio_DB existe e tem os cabeçalhos corretos na linha 1.
+ * Chamada automaticamente por fetchAllDataUnified quando nenhum item é retornado.
+ * NÃO sobrescreve cabeçalhos existentes para evitar perda de dados.
+ */
+function _garantirHeadersRelatorio_DB_() {
+  try {
+    let sheet = SS.getSheetByName(DB_SHEET_NAME);
+
+    // Cria a aba se não existir
+    if (!sheet) {
+      Logger.log(`📝 Criando aba ${DB_SHEET_NAME}...`);
+      sheet = SS.insertSheet(DB_SHEET_NAME);
+    }
+
+    // Verifica se a linha 1 está vazia ou sem ID_UNICO
+    const primeiraLinha = sheet.getLastRow() >= 1
+      ? sheet.getRange(1, 1, 1, Math.max(RELATORIO_DB_HEADERS.length, sheet.getLastColumn())).getValues()[0]
+      : [];
+
+    const temHeaderValido = primeiraLinha.some(h => String(h).trim() === 'ID_UNICO');
+
+    if (!temHeaderValido) {
+      Logger.log(`📝 Cabeçalhos ausentes ou incorretos — gravando cabeçalhos padrão na linha 1...`);
+      Logger.log(`   Cabeçalhos existentes: [${primeiraLinha.filter(h => h).join(', ')}]`);
+      sheet.getRange(1, 1, 1, RELATORIO_DB_HEADERS.length).setValues([RELATORIO_DB_HEADERS]);
+      sheet.getRange(1, 1, 1, RELATORIO_DB_HEADERS.length).setFontWeight('bold').setBackground('#f0f2f5');
+      sheet.setFrozenRows(1);
+      SpreadsheetApp.flush();
+      Logger.log(`✅ Cabeçalhos gravados: ${RELATORIO_DB_HEADERS.join(', ')}`);
+      return true; // headers foram criados/corrigidos
+    }
+
+    Logger.log(`✅ Cabeçalhos do ${DB_SHEET_NAME} OK (ID_UNICO encontrado)`);
+    return false;
+  } catch (e) {
+    Logger.log(`❌ Erro ao verificar cabeçalhos: ${e.message}`);
+    return false;
+  }
+}
+
 function _readAllData_() {
   const sheet = SS.getSheetByName(DB_SHEET_NAME);
   if (!sheet) throw new Error(`Aba '${DB_SHEET_NAME}' não encontrada`);
@@ -1894,7 +1995,21 @@ function fetchAllDataUnified(cacheBuster) {
     const itemsWeb = rows
       .map((row, idx) => _rowToItem_(row, displayRows[idx], colMap, idx))
       .filter(item => item !== null);
-    
+
+    // Diagnóstico: rows existem mas nenhum item foi retornado → provável problema de cabeçalhos
+    if (rows.length > 0 && itemsWeb.length === 0) {
+      Logger.log(`⚠️ ATENÇÃO: ${rows.length} linhas lidas mas NENHUM item convertido!`);
+      Logger.log(`   Cabeçalhos encontrados: [${headers.filter(h => h).join(', ')}]`);
+      Logger.log(`   Cabeçalhos esperados:   [${RELATORIO_DB_HEADERS.join(', ')}]`);
+      Logger.log(`   Verifique se 'ID_UNICO' existe exatamente assim na linha 1 do ${DB_SHEET_NAME}`);
+
+      // Tenta corrigir os cabeçalhos automaticamente se estiverem ausentes
+      const corrigiu = _garantirHeadersRelatorio_DB_();
+      if (corrigiu) {
+        Logger.log(`   ✅ Cabeçalhos corrigidos automaticamente. Execute a sincronização para popular os dados.`);
+      }
+    }
+
     const ordCompras = _organizeByOC_(itemsWeb);
     
     const stats = {
