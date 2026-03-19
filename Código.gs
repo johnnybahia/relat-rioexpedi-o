@@ -1681,7 +1681,19 @@ function sincronizarDados() {
     // 5) APLICAR
     Logger.log("\n💾 4. APLICANDO");
     if (novosValidados.length > 0) {
-      const proxLinha = dbSheet.getLastRow() + 1;
+      // getLastRow() pode retornar linhas com formatação residual mas sem dado real.
+      // Buscamos a última linha com ID_UNICO preenchido na coluna A para inserir logo após.
+      const totalRows = dbSheet.getLastRow();
+      let proxLinha = 2; // mínimo: logo após o cabeçalho
+      if (totalRows >= 2) {
+        const colA = dbSheet.getRange(2, 1, totalRows - 1, 1).getValues();
+        for (let i = colA.length - 1; i >= 0; i--) {
+          if (String(colA[i][0]).trim() !== '') {
+            proxLinha = i + 3; // +2 por 0-index e cabeçalho, +1 para próxima linha
+            break;
+          }
+        }
+      }
       dbSheet.getRange(proxLinha, 1, novosValidados.length, 16).setValues(novosValidados);
       Logger.log(`   ✅ ${novosValidados.length} novos adicionados`);
     }
