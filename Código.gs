@@ -1449,7 +1449,6 @@ function sincronizarDados() {
       if (id && String(id).trim()) {
         const idStr = String(id).trim();
         fonteMap.set(idStr, row);
-        Logger.log(`   ✓ PEDIDOS: ID="${idStr}", CARTELA="${cartela}"`);
       } else {
         semId++;
         Logger.log(`   ⚠️ Linha ${idx + FONTE_DATA_START_ROW}: SEM ID mas tem CARTELA="${cartela}"`);
@@ -1486,14 +1485,10 @@ function sincronizarDados() {
         const idStr = String(id).trim();
         dbMap.set(idStr, { row: row, linha: linhaReal });
         const st = row[STATUS_COL];  // Coluna O (índice 14)
-        Logger.log(`   ✓ Relatorio_DB: ID="${idStr}", Status="${st}", Linha=${linhaReal}`);
         if (st === 'Ativo') statusCount.Ativo++;
         else if (st === 'Inativo') statusCount.Inativo++;
         else if (st === 'Faturado') statusCount.Faturado++;
         else if (st === 'Excluido') statusCount.Excluido++;
-      } else if (linhaReal <= 10 || idx % 100 === 0) {
-        // Log apenas para primeiras 10 linhas ou a cada 100 linhas para evitar spam
-        Logger.log(`   ⚠️ Linha ${linhaReal}: sem ID válido (será ignorada)`);
       }
     });
 
@@ -1534,7 +1529,6 @@ function sincronizarDados() {
 
       // PRIMEIRA TENTATIVA: Buscar por ID
       if (fonteMap.has(id)) {
-        Logger.log(`   🔄 Match encontrado: ID="${id}" existe em PEDIDOS e Relatorio_DB`);
         const fonteRow = fonteMap.get(id);
 
         // Array de 16 elementos (índices 0-15)
@@ -1562,8 +1556,6 @@ function sincronizarDados() {
           // voltou ao DADOS_IMPORTADOS após já ter sido processado pelo usuário do HTML.
           const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
           novaLinha[STATUS_COL] = novoStatus;  // Coluna O (índice 14)
-          Logger.log(`   📝 Update: ID="${id}" Linha=${dbItem.linha} Status: ${statusAtual} → ${novoStatus}`);
-          Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus, id: id });
         }
 
@@ -1577,9 +1569,7 @@ function sincronizarDados() {
         if (fonteItem) {
           // ENCONTROU POR DADOS! O ID mudou devido ao IMPORTRANGE
           const novoId = fonteItem.id;
-          Logger.log(`   🔄 Item encontrado por dados: ID mudou "${id}" → "${novoId}"`);
-          Logger.log(`      Linha=${dbItem.linha}, Status="${statusAtual}"`);
-          Logger.log(`      Atualizando ID e dados no Relatorio_DB...`);
+          Logger.log(`   🔄 ID atualizado por fingerprint: "${id}" → "${novoId}" (Linha ${dbItem.linha})`);
 
           const fonteRow = fonteItem.row;
           const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
@@ -1605,9 +1595,7 @@ function sincronizarDados() {
 
         } else {
           // NÃO ENCONTROU nem por ID nem por dados - item saiu do DADOS_IMPORTADOS
-          Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS (nem por ID nem por dados)`);
-          Logger.log(`      Linha: ${dbItem.linha}, Status atual: "${statusAtual}"`);
-          Logger.log(`      CARTELA="${dbItem.row[CARTELA_COL]}", CLIENTE="${dbItem.row[CLIENTE_COL]}", OC="${dbItem.row[OC_COL]}"`);
+          Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS — OC="${dbItem.row[OC_COL]}", Status="${statusAtual}"`);
 
           // FIX: Se o usuário do HTML já marcou o item para faturar (MARCAR_FATURAR=SIM),
           // o item pode ter sido fechado/removido pelo sistema de origem mas ainda não foi
@@ -1755,11 +1743,21 @@ function sincronizarDados() {
 }
 
 // ====== CACHE ======
+// Tamanho máximo por chave do CacheService (Apps Script limita a 100KB por chave)
+const CACHE_CHUNK_SIZE = 90000;  // 90KB por chunk com margem de segurança
+const CACHE_MAX_TOTAL  = 500000; // 500KB total (até ~5 chunks)
+
 function limparCache() {
   try {
     const cache = CacheService.getScriptCache();
-    cache.remove('dados_completos');
-    cache.remove('timestamp_dados');
+    // Remove chunks de dados (formato novo)
+    const keysToRemove = ['timestamp_dados', 'dados_chunks_count', 'dados_completos'];
+    const numChunksStr = cache.get('dados_chunks_count');
+    if (numChunksStr) {
+      const numChunks = parseInt(numChunksStr);
+      for (let i = 0; i < numChunks; i++) keysToRemove.push(`dados_chunk_${i}`);
+    }
+    cache.removeAll(keysToRemove);
     Logger.log("🗑️ Cache limpo");
   } catch (e) {
     Logger.log("⚠️ Erro ao limpar cache: " + e.message);
@@ -1769,12 +1767,31 @@ function limparCache() {
 function obterDadosCache() {
   try {
     const cache = CacheService.getScriptCache();
-    const dadosStr = cache.get('dados_completos');
     const timestamp = cache.get('timestamp_dados');
-    if (dadosStr && timestamp) {
+    if (!timestamp) return null;
+
+    // Tenta formato novo (chunks)
+    const numChunksStr = cache.get('dados_chunks_count');
+    if (numChunksStr) {
+      const numChunks = parseInt(numChunksStr);
+      let dadosStr = '';
+      for (let i = 0; i < numChunks; i++) {
+        const chunk = cache.get(`dados_chunk_${i}`);
+        if (!chunk) return null; // chunk expirou antes do timestamp
+        dadosStr += chunk;
+      }
       const dados = JSON.parse(dadosStr);
       const idade = Date.now() - parseInt(timestamp);
-      Logger.log(`📦 Cache hit! Idade: ${Math.floor(idade/1000)}s`);
+      Logger.log(`📦 Cache hit! ${numChunks} chunk(s), ${Math.floor(dadosStr.length/1024)}KB, Idade: ${Math.floor(idade/1000)}s`);
+      return dados;
+    }
+
+    // Fallback: formato antigo (chave única)
+    const dadosStr = cache.get('dados_completos');
+    if (dadosStr) {
+      const dados = JSON.parse(dadosStr);
+      const idade = Date.now() - parseInt(timestamp);
+      Logger.log(`📦 Cache hit (legado)! Idade: ${Math.floor(idade/1000)}s`);
       return dados;
     }
   } catch (e) {
@@ -1787,13 +1804,22 @@ function salvarDadosCache(dados) {
   try {
     const cache = CacheService.getScriptCache();
     const dadosStr = JSON.stringify(dados);
-    if (dadosStr.length > 100000) {
-      Logger.log("⚠️ Dados muito grandes para cache");
+
+    if (dadosStr.length > CACHE_MAX_TOTAL) {
+      Logger.log(`⚠️ Dados muito grandes para cache (${Math.floor(dadosStr.length/1024)}KB > ${CACHE_MAX_TOTAL/1024}KB)`);
       return false;
     }
-    cache.put('dados_completos', dadosStr, CACHE_DURATION);
-    cache.put('timestamp_dados', Date.now().toString(), CACHE_DURATION);
-    Logger.log(`💾 Cache salvo (${Math.floor(dadosStr.length/1024)}KB, válido por ${CACHE_DURATION/60}min)`);
+
+    const numChunks = Math.ceil(dadosStr.length / CACHE_CHUNK_SIZE);
+    const cacheData = {
+      'dados_chunks_count': numChunks.toString(),
+      'timestamp_dados': Date.now().toString()
+    };
+    for (let i = 0; i < numChunks; i++) {
+      cacheData[`dados_chunk_${i}`] = dadosStr.substring(i * CACHE_CHUNK_SIZE, (i + 1) * CACHE_CHUNK_SIZE);
+    }
+    cache.putAll(cacheData, CACHE_DURATION);
+    Logger.log(`💾 Cache salvo: ${numChunks} chunk(s), ${Math.floor(dadosStr.length/1024)}KB, válido por ${CACHE_DURATION/60}min`);
     return true;
   } catch (e) {
     Logger.log("⚠️ Erro ao salvar cache: " + e.message);

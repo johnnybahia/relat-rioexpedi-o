@@ -230,6 +230,11 @@
     /* Botão de Etiqueta NF */
     #btn-etiqueta-nf:hover { background: #6d28d9; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
     #btn-etiqueta-nf:active { transform: translateY(0); }
+
+    /* Cabeçalho: logo + título */
+    .header-brand { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .header-logo { height: 60px; width: auto; }
+    .header-version { text-align: center; margin-top: -0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #6b7280; }
   </style>
 </head>
 <body>
@@ -243,11 +248,11 @@
   <div class="container">
     <!-- Header -->
     <div class="header">
-      <div style="display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 0.5rem;">
-        <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" style="height: 60px; width: auto;" onerror="this.style.display='none'">
-        <h1 style="margin: 0;">Relatório Inteligente de Pedidos</h1>
+      <div class="header-brand">
+        <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="Logo Marfim" class="header-logo" onerror="this.style.display='none'">
+        <h1>Relatório Inteligente de Pedidos</h1>
       </div>
-      <div style="text-align: center; margin-top: -0.5rem; margin-bottom: 0.5rem; font-size: 0.75rem; color: #6b7280;">
+      <div class="header-version">
         <div>Autor: Johnny | Versão: 2.5.7 (10/11/2025)</div>
       </div>
       <div class="header-meta">
@@ -440,11 +445,27 @@
         <p id="success-message" class="modal-message"></p>
       </div>
       <div class="modal-footer">
-  <p class="modal-message" style="font-weight:700; text-align:center;">
-    Por favor, clicar em <strong>F5</strong>.
-  </p>
-</div>    
-</div>
+        <p id="success-countdown" class="modal-message" style="font-weight:700; text-align:center; margin:0;">
+          Atualizando em <strong><span id="countdown-seconds">3</span>s</strong>...
+        </p>
+        <button id="success-now-btn" class="modal-btn modal-btn-confirm">Atualizar agora</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Erro -->
+  <div id="errorModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header warning">
+        <h2>❌ Erro</h2>
+      </div>
+      <div class="modal-body">
+        <p id="error-message" class="modal-message warning"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="error-ok-btn" class="modal-btn modal-btn-cancel">OK</button>
+      </div>
+    </div>
   </div>
 
   <!-- Modal de Baixa Parcial -->
@@ -785,6 +806,12 @@
     
     const $successModal = document.getElementById('successModal');
     const $successMessage = document.getElementById('success-message');
+    const $successNowBtn = document.getElementById('success-now-btn');
+    let _successCountdownTimer = null;
+
+    const $errorModal = document.getElementById('errorModal');
+    const $errorMessage = document.getElementById('error-message');
+    const $errorOkBtn = document.getElementById('error-ok-btn');
 
     const $keyboardHint = document.getElementById('keyboard-hint');
 
@@ -839,6 +866,43 @@
             el.classList.add('hidden');
         }
     }
+
+    // Exibe modal de erro (substitui alert() para mensagens de erro)
+    function showError(msg) {
+        if ($errorMessage) $errorMessage.textContent = msg;
+        if ($errorModal) $errorModal.classList.remove('hidden');
+    }
+
+    // Exibe modal de sucesso com countdown e auto-reload
+    function showSuccessModal(msg) {
+        if ($successMessage) $successMessage.textContent = msg;
+        if ($successModal) $successModal.classList.remove('hidden');
+
+        if (_successCountdownTimer) clearInterval(_successCountdownTimer);
+        let seconds = 3;
+        const $sec = document.getElementById('countdown-seconds');
+        if ($sec) $sec.textContent = seconds;
+
+        _successCountdownTimer = setInterval(() => {
+            seconds--;
+            if ($sec) $sec.textContent = seconds;
+            if (seconds <= 0) {
+                clearInterval(_successCountdownTimer);
+                location.reload();
+            }
+        }, 1000);
+    }
+
+    // Fecha modal de erro
+    if ($errorOkBtn) $errorOkBtn.addEventListener('click', () => {
+        if ($errorModal) $errorModal.classList.add('hidden');
+    });
+
+    // Botão "Atualizar agora" do modal de sucesso
+    if ($successNowBtn) $successNowBtn.addEventListener('click', () => {
+        if (_successCountdownTimer) clearInterval(_successCountdownTimer);
+        location.reload();
+    });
     
     function fmtInt(val) {
         const num = Number(val);
@@ -1164,7 +1228,7 @@ ALL_OCS_ITEMS = itemsObj;
                 } else {
                     console.error("❌ Resposta inválida:", response);
                     if (!silentRefresh) {
-                        alert("Erro ao carregar dados: " + (response && response.error ? response.error : "Resposta inválida"));
+                        showError("Erro ao carregar dados: " + (response && response.error ? response.error : "Resposta inválida"));
                     }
                 }
 
@@ -1183,7 +1247,7 @@ ALL_OCS_ITEMS = itemsObj;
 
                 // Só mostra alert se NÃO for silent refresh
                 if (!silentRefresh) {
-                    alert('Falha ao carregar dados: ' + error.message);
+                    showError('Falha ao carregar dados: ' + error.message);
                     $loader.classList.add('hidden');
                 } else {
                     console.error('❌ Erro no auto-refresh silencioso:', error);
@@ -1731,7 +1795,7 @@ ALL_OCS_ITEMS = itemsObj;
         });
 
         if (unmarkedItems.length === 0) {
-            alert('Nenhum item inativo não marcado para excluir.');
+            showError('Nenhum item inativo não marcado para excluir.');
             return;
         }
 
@@ -1757,7 +1821,7 @@ ALL_OCS_ITEMS = itemsObj;
         const items = JSON.parse($deleteAllModal.dataset.items || '[]');
 
         if (items.length === 0) {
-            alert('Nenhum item para excluir.');
+            showError('Nenhum item para excluir.');
             hideDeleteAllModal();
             return;
         }
@@ -1797,12 +1861,12 @@ ALL_OCS_ITEMS = itemsObj;
                     updateInactiveCount();
                     reorderCards();
                 } else {
-                    alert('Erro ao excluir itens: ' + (result.error || 'Erro desconhecido'));
+                    showError('Erro ao excluir itens: ' + (result.error || 'Erro desconhecido'));
                 }
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao excluir:', error);
-                alert('Falha ao excluir itens: ' + error.message);
+                showError('Falha ao excluir itens: ' + error.message);
                 $loader.classList.add('hidden');
             })
             .excluirMultiplosItens(items);
@@ -1993,7 +2057,7 @@ ALL_OCS_ITEMS = itemsObj;
                         })
                         .withFailureHandler(error => {
                             console.error('❌ Erro ao excluir:', error);
-                            alert('Itens faturados com sucesso, mas erro ao excluir os não marcados.');
+                            showError('Itens faturados com sucesso, mas erro ao excluir os não marcados.');
                             $btnFaturarGlobal.disabled = false;
                             $btnFaturarGlobal.textContent = 'Faturado sem finalizar';
                         })
@@ -2079,7 +2143,7 @@ ALL_OCS_ITEMS = itemsObj;
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao faturar:', error);
-                alert('Falha ao faturar itens: ' + error.message);
+                showError('Falha ao faturar itens: ' + error.message);
                 $btnFaturarGlobal.disabled = false;
                 $btnFaturarGlobal.textContent = 'Faturar';
             })
@@ -2133,14 +2197,14 @@ ALL_OCS_ITEMS = itemsObj;
                     
                     updateInactiveCount();
                     reorderCards();
-                    alert('✅ Item finalizado!');
+                    showSuccessModal('Item finalizado com sucesso!');
                 } else {
-                    alert('Erro ao finalizar item: ' + (result.error || 'Erro desconhecido'));
+                    showError('Erro ao finalizar item: ' + (result.error || 'Erro desconhecido'));
                 }
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao finalizar:', error);
-                alert('Falha ao finalizar item: ' + error.message);
+                showError('Falha ao finalizar item: ' + error.message);
             })
             .finalizarItem(uniqueId, linha);
     }
@@ -2163,7 +2227,7 @@ ALL_OCS_ITEMS = itemsObj;
                     }
                     console.log(`✅ Item ${marcar ? 'marcado' : 'desmarcado'} para faturamento!`);
                 } else {
-                    alert('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
+                    showError('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
                     // Reverte checkbox em caso de erro
                     const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
                     if (checkbox) {
@@ -2173,7 +2237,7 @@ ALL_OCS_ITEMS = itemsObj;
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao marcar item:', error);
-                alert('Falha ao marcar item: ' + error.message);
+                showError('Falha ao marcar item: ' + error.message);
                 // Reverte checkbox em caso de erro
                 const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
                 if (checkbox) {
@@ -2310,13 +2374,13 @@ ALL_OCS_ITEMS = itemsObj;
 
     function salvarEdicaoBaixa() {
         if (!currentBaixaItem) {
-            alert('Erro: Item não encontrado');
+            showError('Erro: Item não encontrado');
             return;
         }
 
         const input = $editarBaixaInput.value.trim();
         if (!input) {
-            alert('Digite uma quantidade válida');
+            showError('Digite uma quantidade válida');
             return;
         }
 
@@ -2326,7 +2390,7 @@ ALL_OCS_ITEMS = itemsObj;
             // Reverter: +10 significa adicionar 10 à quantidade aberta
             const reverter = parseInt(input.substring(1), 10);
             if (isNaN(reverter) || reverter <= 0) {
-                alert('Quantidade inválida para reverter');
+                showError('Quantidade inválida para reverter');
                 return;
             }
 
@@ -2334,14 +2398,14 @@ ALL_OCS_ITEMS = itemsObj;
             novaQtdBaixada = qtdBaixadaAtual - reverter;
 
             if (novaQtdBaixada < 0) {
-                alert('Não é possível reverter mais do que foi baixado');
+                showError('Não é possível reverter mais do que foi baixado');
                 return;
             }
         } else {
             // Substituir quantidade
             novaQtdBaixada = parseInt(input, 10);
             if (isNaN(novaQtdBaixada) || novaQtdBaixada <= 0) {
-                alert('Digite uma quantidade válida');
+                showError('Digite uma quantidade válida');
                 return;
             }
         }
@@ -2384,9 +2448,9 @@ ALL_OCS_ITEMS = itemsObj;
                     carregarHistorico(currentBaixaItem.uniqueId);
 
                     esconderEdicaoBaixa();
-                    alert('✅ Baixa editada com sucesso!');
+                    showSuccessModal('Baixa editada com sucesso!');
                 } else {
-                    alert('Erro ao editar baixa: ' + (result.error || 'Erro desconhecido'));
+                    showError('Erro ao editar baixa: ' + (result.error || 'Erro desconhecido'));
                 }
 
                 $salvarEdicaoBtn.disabled = false;
@@ -2394,7 +2458,7 @@ ALL_OCS_ITEMS = itemsObj;
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao editar baixa:', error);
-                alert('Falha ao editar baixa: ' + error.message);
+                showError('Falha ao editar baixa: ' + error.message);
                 $salvarEdicaoBtn.disabled = false;
                 $salvarEdicaoBtn.textContent = 'Salvar';
             })
@@ -2403,13 +2467,13 @@ ALL_OCS_ITEMS = itemsObj;
 
     function aplicarNovaBaixa() {
         if (!currentBaixaItem) {
-            alert('Erro: Item não encontrado');
+            showError('Erro: Item não encontrado');
             return;
         }
 
         const input = $novaBaixaInput.value.trim();
         if (!input) {
-            alert('Digite uma quantidade');
+            showError('Digite uma quantidade');
             return;
         }
 
@@ -2419,24 +2483,24 @@ ALL_OCS_ITEMS = itemsObj;
             // Aumentar: +10 significa adicionar 10 à quantidade aberta (reverter baixa)
             const aumentar = parseInt(input.substring(1), 10);
             if (isNaN(aumentar) || aumentar <= 0) {
-                alert('Quantidade inválida');
+                showError('Quantidade inválida');
                 return;
             }
 
             // Para aumentar, usamos o botão Editar no histórico
-            alert('⚠️ Para reverter/aumentar quantidade:\n\n1. Veja o "📋 Histórico de Baixas" acima\n2. Clique no botão "✏️ Editar" da última baixa\n3. Digite +' + aumentar + ' para reverter\n\nSe não houver histórico, faça uma baixa primeiro.');
+            showError('Para reverter/aumentar quantidade:\n\n1. Veja o "📋 Histórico de Baixas" acima\n2. Clique no botão "✏️ Editar" da última baixa\n3. Digite +' + aumentar + ' para reverter\n\nSe não houver histórico, faça uma baixa primeiro.');
             return;
         } else {
             // Baixa normal
             qtdBaixa = parseInt(input, 10);
             if (isNaN(qtdBaixa) || qtdBaixa <= 0) {
-                alert('Digite uma quantidade válida');
+                showError('Digite uma quantidade válida');
                 return;
             }
 
             const qtdAberta = currentBaixaItem['QTD. ABERTA'] || 0;
             if (qtdBaixa > qtdAberta) {
-                alert(`Quantidade de baixa (${qtdBaixa}) maior que disponível (${qtdAberta})`);
+                showError(`Quantidade de baixa (${qtdBaixa}) maior que disponível (${qtdAberta})`);
                 return;
             }
         }
@@ -2467,12 +2531,10 @@ ALL_OCS_ITEMS = itemsObj;
                     $novaBaixaInput.value = '';
 
                     if (result.zerou) {
-                        alert('✅ Baixa aplicada! Item zerado e marcado como Faturado.');
                         hideBaixaModal();
-                        // Recarrega a página
-                        location.reload();
+                        showSuccessModal('Baixa aplicada! Item zerado e marcado como Faturado.');
                     } else {
-                        alert('✅ Baixa aplicada com sucesso!');
+                        showSuccessModal('Baixa aplicada com sucesso!');
 
                         // Atualiza a linha na tabela
                         const row = document.getElementById(`item-linha-${currentBaixaItem.planilhaLinha}`);
@@ -2493,7 +2555,7 @@ ALL_OCS_ITEMS = itemsObj;
                         updateTotaisGerais();
                     }
                 } else {
-                    alert('Erro ao aplicar baixa: ' + (result.error || 'Erro desconhecido'));
+                    showError('Erro ao aplicar baixa: ' + (result.error || 'Erro desconhecido'));
                 }
 
                 $baixaConfirmBtn.disabled = false;
@@ -2501,7 +2563,7 @@ ALL_OCS_ITEMS = itemsObj;
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao aplicar baixa:', error);
-                alert('Falha ao aplicar baixa: ' + error.message);
+                showError('Falha ao aplicar baixa: ' + error.message);
                 $baixaConfirmBtn.disabled = false;
                 $baixaConfirmBtn.textContent = 'Adicionar Baixa';
             })
@@ -2670,7 +2732,7 @@ ALL_OCS_ITEMS = itemsObj;
         const disponivel = qtdOriginal - totalAlocado;
 
         if (disponivel <= 0) {
-            alert('Toda a quantidade já foi alocada em etiquetas!');
+            showError('Toda a quantidade já foi alocada em etiquetas!');
             return;
         }
 
@@ -2755,7 +2817,7 @@ ALL_OCS_ITEMS = itemsObj;
 
     function gerarPDFEtiquetas() {
         if (!currentEtiquetaItem) {
-            alert('Erro: Item não encontrado');
+            showError('Erro: Item não encontrado');
             return;
         }
 
@@ -2763,12 +2825,12 @@ ALL_OCS_ITEMS = itemsObj;
         const totalAlocado = etiquetas.reduce((sum, e) => sum + (parseInt(e.quantidade) || 0), 0);
 
         if (totalAlocado > qtdOriginal) {
-            alert('A soma das quantidades excede a quantidade original do item!');
+            showError('A soma das quantidades excede a quantidade original do item!');
             return;
         }
 
         if (etiquetas.length === 0 || totalAlocado === 0) {
-            alert('Adicione pelo menos uma etiqueta com quantidade válida!');
+            showError('Adicione pelo menos uma etiqueta com quantidade válida!');
             return;
         }
 
@@ -3026,7 +3088,7 @@ ALL_OCS_ITEMS = itemsObj;
     // Gerar relatório
     $relatorioGerarBtn.addEventListener('click', function() {
         if (ocsSelecionadas.size === 0) {
-            alert('Selecione ao menos uma Ordem de Compra para gerar o relatório.');
+            showError('Selecione ao menos uma Ordem de Compra para gerar o relatório.');
             return;
         }
         gerarRelatorioProducao();
@@ -3393,21 +3455,20 @@ ALL_OCS_ITEMS = itemsObj;
 
                 // Validação robusta da resposta
                 if (!result || result === null || result === undefined) {
-                    alert('ERRO: A coluna MARCAR_FATURAR não existe na planilha Relatorio_DB.\n\n' +
-                          'SOLUÇÃO: Clique no botão "Atualizar" para sincronizar e criar a coluna automaticamente.');
+                    showError('ERRO: A coluna MARCAR_FATURAR não existe na planilha Relatorio_DB.\n\nSOLUÇÃO: Clique no botão "Atualizar" para sincronizar e criar a coluna automaticamente.');
                     console.error('❌ Resposta nula do backend - coluna MARCAR_FATURAR pode não existir');
                     return;
                 }
 
                 if (!result.success) {
-                    alert('Erro ao obter itens marcados: ' + (result.error || 'Erro desconhecido'));
+                    showError('Erro ao obter itens marcados: ' + (result.error || 'Erro desconhecido'));
                     return;
                 }
 
                 const itensMarcados = result.items || [];
 
                 if (itensMarcados.length === 0) {
-                    alert('Nenhum item está marcado para faturamento. Marque ao menos um item antes de gerar o relatório.');
+                    showError('Nenhum item está marcado para faturamento. Marque ao menos um item antes de gerar o relatório.');
                     return;
                 }
 
@@ -3564,7 +3625,7 @@ ALL_OCS_ITEMS = itemsObj;
             .withFailureHandler(function(error) {
                 show($loader, false);
                 console.error('❌ Erro ao gerar relatório:', error);
-                alert('Falha ao gerar relatório: ' + error.message);
+                showError('Falha ao gerar relatório: ' + error.message);
             })
             .obterItensMarcadosParaFaturar();
     }
@@ -3653,19 +3714,19 @@ ALL_OCS_ITEMS = itemsObj;
         const cliente = $nfCliente.value.trim();
 
         if (!numeroNF) {
-            alert('Por favor, insira o número da Nota Fiscal.');
+            showError('Por favor, insira o número da Nota Fiscal.');
             $nfNumero.focus();
             return;
         }
 
         if (!volumes || volumes < 1 || volumes > 999) {
-            alert('Por favor, insira uma quantidade de volumes válida (1 a 999).');
+            showError('Por favor, insira uma quantidade de volumes válida (1 a 999).');
             $nfVolumes.focus();
             return;
         }
 
         if (!cliente) {
-            alert('Por favor, insira o nome do cliente.');
+            showError('Por favor, insira o nome do cliente.');
             $nfCliente.focus();
             return;
         }
