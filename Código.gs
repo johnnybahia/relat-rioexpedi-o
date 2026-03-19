@@ -1010,6 +1010,15 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
  * 3. Log detalhado de performance
  */
 function processoAutomaticoCompleto() {
+  // Previne execuções simultâneas que causam duplicação de dados no DB
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000); // Aguarda até 30s para adquirir o lock
+  } catch (e) {
+    Logger.log("⚠️ Não foi possível adquirir o lock - outra execução já está em andamento. Abortando.");
+    return;
+  }
+
   const inicioProcesso = Date.now();
   Logger.log("=" .repeat(70));
   Logger.log(`⏰ PROCESSO AUTOMÁTICO INICIADO - ${new Date().toLocaleString('pt-BR')}`);
@@ -1092,6 +1101,8 @@ function processoAutomaticoCompleto() {
     //   subject: "⚠️ Erro no Processo Automático",
     //   body: `Erro: ${erro.message}\n\nDetalhes: ${erro.stack}`
     // });
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -1649,6 +1660,16 @@ function sincronizarDados() {
     
     // Novos itens que estão em PEDIDOS mas não em Relatorio_DB
     for (let [id, fonteRow] of fonteMap.entries()) {
+      // Proteção extra: verifica por impressão digital mesmo que o ID seja "novo".
+      // Evita duplicação quando sincronizarPedidosComFonte gera ID diferente para
+      // um item que já existe no DB (ex: por inconsistência de dados na source).
+      const impressaoFonte = _criarImpressaoDigital_(fonteRow);
+      if (dbImpressoes.has(impressaoFonte)) {
+        const existente = dbImpressoes.get(impressaoFonte);
+        Logger.log(`   ⚠️ DUPLICATA EVITADA POR FINGERPRINT: ID="${id}" já existe no DB como ID="${existente.id}" - ignorado`);
+        continue;
+      }
+
       Logger.log(`   🆕 Novo item: ID="${id}" está em PEDIDOS mas não em Relatorio_DB - será adicionado como Ativo`);
       Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
 
