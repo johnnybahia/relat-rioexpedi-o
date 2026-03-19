@@ -1779,6 +1779,42 @@ function sincronizarDados() {
   }
 }
 
+// ====== COMPACTAR DB ======
+/**
+ * Remove linhas completamente vazias (sem ID na coluna A) do Relatorio_DB.
+ * Deleta as linhas de baixo pra cima para não deslocar os índices durante a remoção.
+ */
+function compactarDB() {
+  Logger.clear();
+  Logger.log("=== COMPACTAR Relatorio_DB ===");
+
+  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  if (!sheet) { Logger.log("❌ Aba não encontrada"); return; }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log("ℹ️ DB vazio, nada a fazer"); return; }
+
+  const colA = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const linhasVazias = [];
+
+  for (let i = colA.length - 1; i >= 0; i--) {
+    if (String(colA[i][0]).trim() === '') {
+      linhasVazias.push(i + 2); // linha real na planilha (1-indexed, +1 cabeçalho, +1 0-index)
+    }
+  }
+
+  if (linhasVazias.length === 0) {
+    Logger.log("✅ Nenhuma linha vazia encontrada");
+    return;
+  }
+
+  // Deleta linha a linha de baixo pra cima (índices já estão em ordem decrescente)
+  linhasVazias.forEach(linha => sheet.deleteRow(linha));
+
+  limparCache();
+  Logger.log(`✅ ${linhasVazias.length} linha(s) vazia(s) removida(s)`);
+}
+
 // ====== CACHE ======
 // Tamanho máximo por chave do CacheService (Apps Script limita a 100KB por chave)
 const CACHE_CHUNK_SIZE = 90000;  // 90KB por chunk com margem de segurança
