@@ -1363,18 +1363,27 @@ function gerarIdsFaltantes() {
  * Cria uma "impressão digital" única dos dados para identificar itens.
  * Usado para comparar itens mesmo quando IDs mudam (devido ao IMPORTRANGE).
  *
- * Retorna uma string única baseada em: CARTELA + CLIENTE + PEDIDO + MARFIM + OC + OS + DATA
+ * @param {Array} row - linha de dados
+ * @param {boolean} isDbRow - true se a row vier do Relatorio_DB (layout sem gap da col D de PEDIDOS)
+ * Retorna uma string única baseada em: CLIENTE + PEDIDO + MARFIM + OC + OS + DATA
  */
-function _criarImpressaoDigital_(row) {
-  // FIX: CARTELA removida - é campo mutável (pode ser atualizado na origem).
-  // Mantém apenas campos estáveis que identificam o pedido de forma única.
+function _criarImpressaoDigital_(row, isDbRow) {
+  // PEDIDOS tem um "gap" na coluna D (índice 3) que não é gravado no Relatorio_DB.
+  // Por isso os índices no DB são -1 em relação aos do PEDIDOS a partir de PEDIDO_COL.
+  // isDbRow=true → usa índices relativos ao layout do Relatorio_DB.
+  const pedidoIdx = isDbRow ? 3  : PEDIDO_COL;   // PEDIDOS=4, DB=3
+  const marfimIdx = isDbRow ? 5  : MARFIM_COL;   // PEDIDOS=6, DB=5
+  const ocIdx     = isDbRow ? 8  : OC_COL;       // PEDIDOS=9, DB=8
+  const osIdx     = isDbRow ? 10 : OS_COL;       // PEDIDOS=11, DB=10
+  const dtrecIdx  = isDbRow ? 11 : DTREC_COL;    // PEDIDOS=12, DB=11
+
   const partes = [
-    String(row[CLIENTE_COL] || '').trim(),
-    String(row[PEDIDO_COL] || '').trim(),
-    String(row[MARFIM_COL] || '').trim(),
-    String(row[OC_COL] || '').trim(),
-    String(row[OS_COL] || '').trim(),
-    row[DTREC_COL] instanceof Date ? _toISOStringSafe_(row[DTREC_COL]) : String(row[DTREC_COL] || '')
+    String(row[CLIENTE_COL] || '').trim(),        // índice 2 em ambos
+    String(row[pedidoIdx]   || '').trim(),
+    String(row[marfimIdx]   || '').trim(),
+    String(row[ocIdx]       || '').trim(),
+    String(row[osIdx]       || '').trim(),
+    row[dtrecIdx] instanceof Date ? _toISOStringSafe_(row[dtrecIdx]) : String(row[dtrecIdx] || '')
   ];
   return partes.join('|');
 }
@@ -1386,7 +1395,7 @@ function _criarImpressaoDigital_(row) {
 function _criarMapImpressoes_(dbData) {
   const map = new Map();
   dbData.forEach((row, idx) => {
-    const impressao = _criarImpressaoDigital_(row);
+    const impressao = _criarImpressaoDigital_(row, true); // rows do Relatorio_DB
     if (impressao && impressao !== '||||||') { // ignora linhas vazias
       map.set(impressao, {
         id: row[ID_COL],
@@ -1510,7 +1519,7 @@ function sincronizarDados() {
     // Map<impressao, {id, linha, row}> para Relatorio_DB
     const dbImpressoes = new Map();
     for (let [id, dbItem] of dbMap.entries()) {
-      const impressao = _criarImpressaoDigital_(dbItem.row);
+      const impressao = _criarImpressaoDigital_(dbItem.row, true); // rows do Relatorio_DB
       dbImpressoes.set(impressao, { id: id, linha: dbItem.linha, row: dbItem.row });
     }
     Logger.log(`   ✓ ${dbImpressoes.size} impressões digitais criadas para Relatorio_DB`);
@@ -1576,7 +1585,7 @@ function sincronizarDados() {
 
       } else {
         // SEGUNDA TENTATIVA: Buscar por IMPRESSÃO DIGITAL (dados)
-        const impressaoDB = _criarImpressaoDigital_(dbItem.row);
+        const impressaoDB = _criarImpressaoDigital_(dbItem.row, true); // row do Relatorio_DB
         const fonteItem = fonteImpressoes.get(impressaoDB);
 
         if (fonteItem) {
@@ -1657,7 +1666,6 @@ function sincronizarDados() {
     Logger.log(`   🆕 Novos: ${novos.length}`);
     Logger.log(`   📝 Atualizar: ${updates.length}`);
     Logger.log(`   🔄 IDs Atualizados: ${idsAtualizados.length}`);
-    Logger.log(`   ⚠️ Marcar Inativo: ${marcaInativos.length}`);
 
     // 4) VALIDAÇÃO ANTI-DUPLICATA
     Logger.log("\n🔍 3.5. VALIDAÇÃO ANTI-DUPLICATA");
