@@ -285,9 +285,33 @@ function obterHistoricoBaixas(uniqueId) {
 
     Logger.log(`📋 Encontrados: ${historico.length} registros`);
 
+    // Lê QTD. ABERTA atual da planilha (fresh) para garantir que o modal mostre valor correto
+    let qtdAbertaAtual = null;
+    try {
+      const ssLive = SpreadsheetApp.openById("1qPJ8c7cq7qb86VJJ-iByeiaPnALOBcDPrPMeL75N2EI");
+      const dbSheet = ssLive.getSheetByName(DB_SHEET_NAME);
+      if (dbSheet) {
+        const dbHeaders = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
+        const dbColMap = _getColumnIndexes_(dbHeaders);
+        const idCol = dbColMap['ID_UNICO'];
+        const qtdCol = dbColMap['QTD. ABERTA'];
+        if (idCol !== undefined && qtdCol !== undefined) {
+          const lastDbRow = dbSheet.getLastRow();
+          if (lastDbRow >= 2) {
+            const dbData = dbSheet.getRange(2, 1, lastDbRow - 1, dbSheet.getLastColumn()).getValues();
+            const row = dbData.find(r => String(r[idCol]).trim() === idBusca);
+            if (row) qtdAbertaAtual = _toNumber_(row[qtdCol]);
+          }
+        }
+      }
+    } catch (dbErr) {
+      Logger.log(`⚠️ Não foi possível ler QTD. ABERTA: ${dbErr.message}`);
+    }
+
     const resultado = {
       success: true,
-      historico: historico
+      historico: historico,
+      qtdAbertaAtual: qtdAbertaAtual
     };
 
     // Testa serialização
@@ -393,7 +417,9 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada) {
 
 function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa) {
   try {
-    const sheet = SS.getSheetByName(DB_SHEET_NAME);
+    // Abre fresh para evitar leitura em cache de container do Apps Script
+    const ssLive = SpreadsheetApp.openById("1qPJ8c7cq7qb86VJJ-iByeiaPnALOBcDPrPMeL75N2EI");
+    const sheet = ssLive.getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
 
     if (!sheet) throw new Error("Aba DB não encontrada");

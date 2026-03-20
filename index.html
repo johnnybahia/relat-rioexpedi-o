@@ -2178,6 +2178,16 @@ ALL_OCS_ITEMS = itemsObj;
                 if (result.success && result.historico) {
                     console.log('   → Renderizando histórico...');
                     renderizarHistorico(result.historico);
+
+                    // Atualiza QTD. ABERTA no modal com valor fresh da planilha
+                    if (result.qtdAbertaAtual !== null && result.qtdAbertaAtual !== undefined && currentBaixaItem) {
+                        const qtdFresh = result.qtdAbertaAtual;
+                        currentBaixaItem['QTD. ABERTA'] = qtdFresh;
+                        $baixaQtdAberta.textContent = fmtInt(qtdFresh);
+                        $baixaMaxQtd.textContent = fmtInt(qtdFresh);
+                        console.log(`✅ QTD. ABERTA atualizada no modal: ${qtdFresh}`);
+                    }
+
                     console.log('   → Histórico exibido!');
                 } else {
                     console.log('   → Erro ao carregar histórico ou histórico vazio');
@@ -2314,6 +2324,7 @@ ALL_OCS_ITEMS = itemsObj;
                     esconderEdicaoBaixa();
                     hideBaixaModal();
                     showSuccessModal('Baixa editada com sucesso!', { noReload: true });
+                    setTimeout(() => carregarListaOcs(true, true), 2100);
                 } else {
                     showError('Erro ao editar baixa: ' + (result.error || 'Erro desconhecido'));
                 }
