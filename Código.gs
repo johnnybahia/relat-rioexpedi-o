@@ -556,7 +556,60 @@ function onOpen() {
     .addItem('2. Ativar Geração Automática (a cada 5 min)', 'instalarTriggerAutomatico')
     .addItem('3. Desativar Geração Automática', 'desinstalarTriggerAutomatico')
     .addItem('4. Status do Trigger', 'mostrarStatusTrigger')
+    .addSeparator()
+    .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
     .addToUi();
+}
+
+/**
+ * Reset completo: limpa o Relatorio_DB, limpa os IDs antigos da aba PEDIDOS
+ * e roda o processo completo para gerar tudo do zero com a fórmula atual de IDs.
+ */
+function resetarEReprocessar() {
+  const ui = SpreadsheetApp.getUi();
+  const resp = ui.alert(
+    '⚠️ RESET COMPLETO',
+    'Isso irá:\n\n' +
+    '1. Apagar TODOS os dados do Relatorio_DB\n' +
+    '2. Apagar os IDs antigos da aba PEDIDOS\n' +
+    '3. Regenerar todos os IDs com a nova fórmula\n' +
+    '4. Repopular o Relatorio_DB do zero\n\n' +
+    'Deseja continuar?',
+    ui.ButtonSet.YES_NO
+  );
+  if (resp !== ui.Button.YES) {
+    Logger.log('Reset cancelado pelo usuário.');
+    return;
+  }
+
+  Logger.log('=== RESET COMPLETO INICIADO ===');
+
+  // 1. Limpa Relatorio_DB (mantém cabeçalho na linha 1)
+  const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
+  if (dbSheet && dbSheet.getLastRow() > 1) {
+    dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, dbSheet.getLastColumn()).clearContent();
+    SpreadsheetApp.flush();
+    Logger.log('✅ Relatorio_DB limpo.');
+  } else {
+    Logger.log('ℹ️ Relatorio_DB já estava vazio.');
+  }
+  limparCache();
+
+  // 2. Limpa coluna A (IDs) da aba PEDIDOS para forçar regeneração com nova fórmula
+  const pedidosSheet = SS.getSheetByName(FONTE_SHEET_NAME);
+  if (pedidosSheet && pedidosSheet.getLastRow() >= FONTE_DATA_START_ROW) {
+    const numLinhas = pedidosSheet.getLastRow() - FONTE_DATA_START_ROW + 1;
+    pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, numLinhas, 1).clearContent();
+    SpreadsheetApp.flush();
+    Logger.log('✅ IDs antigos removidos da aba PEDIDOS.');
+  }
+
+  // 3. Roda processo completo (sincroniza PEDIDOS + gera IDs + popula DB)
+  Logger.log('🔄 Iniciando processo completo...');
+  processoAutomaticoCompleto();
+
+  Logger.log('=== RESET COMPLETO FINALIZADO ===');
+  ui.alert('✅ Reset concluído!', 'IDs regenerados e Relatorio_DB repopulado com sucesso.', ui.ButtonSet.OK);
 }
 
 /**
