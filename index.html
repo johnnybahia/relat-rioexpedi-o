@@ -1200,7 +1200,7 @@ const itemsObj = {};
 if (response.ordCompras) {
   response.ordCompras.forEach(oc => {
     const key = oc.ordCompra || oc.ordCompraId;
-    itemsObj[key] = { ok: true, items: oc.items || [] };
+    itemsObj[key] = { ok: true, items: oc.items || [], cliente: oc.cliente || '' };
 
     // Debug: Mostrar campos disponíveis no primeiro item da primeira OC
     if (oc.items && oc.items.length > 0 && Object.keys(itemsObj).length === 1) {
