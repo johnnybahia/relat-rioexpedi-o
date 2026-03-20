@@ -35,6 +35,7 @@ const TIMESTAMP_COL = 15; // P (na aba PEDIDOS) - Timestamp de criação do ID
 
 // Índices de colunas - ABA Relatorio_DB
 // Status é sempre a coluna O (índice 14 no array, coluna 15 na planilha)
+const DB_QTD_COL = 9;    // J (índice 9) - QTD. ABERTA no Relatorio_DB (≠ QTD_COL=10 que é da aba PEDIDOS)
 const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
 const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova coluna para marcar itens para faturamento
 
@@ -109,6 +110,7 @@ function _fmtBRDateTime_(d) {
 
 function _toNumber_(v) {
   if (typeof v === 'number') return v;
+  if (v instanceof Date) return 0; // Date objects produzem strings enormes após regex → sempre 0
   const s = String(v || '').replace(/[^\d,.-]/g, '').replace(',', '.');
   const n = parseFloat(s);
   return isNaN(n) ? 0 : n;
@@ -1572,9 +1574,9 @@ function sincronizarDados() {
           fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
           fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
           fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
-          dbItem.row[QTD_COL],   fonteRow[OS_COL],      fonteRow[DTREC_COL],
+          dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
           fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
-        ]; // QTD. ABERTA preservada do DB (gerida pelo usuário via baixas)
+        ]; // QTD. ABERTA preservada do DB via DB_QTD_COL=9 (índice correto no Relatorio_DB)
 
         let mudou = false;
         // Compara as 14 primeiras colunas (0-13), excluindo Status e MARCAR_FATURAR
@@ -1612,9 +1614,9 @@ function sincronizarDados() {
             novoId,                fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
             fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
-            dbItem.row[QTD_COL],   fonteRow[OS_COL],      fonteRow[DTREC_COL],
+            dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
-          ]; // QTD. ABERTA preservada do DB (gerida pelo usuário via baixas)
+          ]; // QTD. ABERTA preservada do DB via DB_QTD_COL=9 (índice correto no Relatorio_DB)
 
           // FIX: preserva "Faturado" e "Finalizado" na atualização por fingerprint também
           const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
@@ -2091,6 +2093,8 @@ function fetchAllDataUnified(cacheBuster) {
     }
     
     Logger.log("📊 Cache miss - lendo planilha...");
+    // Garante headers antes de ler — evita colMap vazio quando DB foi limpo e sincronização inseriu dados sem header
+    _garantirHeadersRelatorio_DB_();
     const { headers, rows, displayRows } = _readAllData_();
     
     if (rows.length === 0) {
