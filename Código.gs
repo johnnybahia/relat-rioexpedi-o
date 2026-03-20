@@ -1851,6 +1851,7 @@ function sincronizarDados() {
     }
     
     // Novos itens que estão em PEDIDOS mas não em Relatorio_DB
+    const duplicatasDebug = []; // acumula itens descartados para auditoria
     for (let [id, fonteRow] of fonteMap.entries()) {
       // Proteção extra: verifica por impressão digital mesmo que o ID seja "novo".
       // Evita duplicação quando sincronizarPedidosComFonte gera ID diferente para
@@ -1859,6 +1860,11 @@ function sincronizarDados() {
       if (dbImpressoes.has(impressaoFonte)) {
         const existente = dbImpressoes.get(impressaoFonte);
         Logger.log(`   ⚠️ DUPLICATA EVITADA POR FINGERPRINT: ID="${id}" já existe no DB como ID="${existente.id}" - ignorado`);
+        duplicatasDebug.push([
+          new Date(), 'Fingerprint idêntica ao DB', id, existente.id,
+          fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL], fonteRow[PEDIDO_COL],
+          fonteRow[OC_COL], fonteRow[DESC_COL], fonteRow[TAM_COL]
+        ]);
         continue;
       }
 
@@ -1894,16 +1900,23 @@ function sincronizarDados() {
 
     novos.forEach(item => {
       const id = String(item[ID_COL]).trim();
+      // helper inline para registrar rejeição no debug (usa DB layout: OC=[8], DESC=[6], TAM=[7])
+      const _regDebug_ = (motivo, idExistente) => duplicatasDebug.push([
+        new Date(), motivo, id, idExistente || '',
+        item[1], item[2], item[3], item[8], item[6], item[7]
+      ]);
 
       // Verifica se já existe no DB por ID
       if (idsExistentes.has(id)) {
         Logger.log(`   ⚠️ DUPLICATA EVITADA (ID): ID="${id}" já existe no Relatorio_DB`);
+        _regDebug_('ID já existe no DB');
         return;
       }
 
       // Verifica se já foi adicionado nesta rodada por ID
       if (idsJaAdicionados.has(id)) {
         Logger.log(`   ⚠️ DUPLICATA EVITADA (ID rodada): ID="${id}" já foi processado nesta sincronização`);
+        _regDebug_('ID duplicado na mesma rodada');
         return;
       }
 
@@ -1911,12 +1924,14 @@ function sincronizarDados() {
       const fp = _criarImpressaoDigital_(item);
       if (fingerprintsExistentes.has(fp)) {
         Logger.log(`   ⚠️ DUPLICATA EVITADA (fingerprint): ID="${id}" tem mesmos dados de item já existente no DB`);
+        _regDebug_('Fingerprint idêntica (validação final)');
         return;
       }
 
       // Valida se tem dados essenciais
       if (!item[CARTELA_COL] || String(item[CARTELA_COL]).trim() === '') {
         Logger.log(`   ⚠️ ITEM REJEITADO: ID="${id}" sem CARTELA`);
+        _regDebug_('Sem CARTELA');
         return;
       }
 
@@ -1993,6 +2008,9 @@ function sincronizarDados() {
     if (semCartela > 0) Logger.log(`   ⚠️ ${semCartela} linhas em PEDIDOS sem CARTELA (ignoradas)`);
     Logger.log("=".repeat(70));
 
+    // Grava aba de auditoria de duplicatas (sempre, para refletir estado atual)
+    _gravarDuplicatasDebug_(duplicatasDebug);
+
     // Retorna contadores para o processo automático decidir se limpa cache
     return {
       novos: novosValidados.length,
@@ -2006,6 +2024,35 @@ function sincronizarDados() {
     Logger.log("\n❌ ERRO: " + error.message);
     throw error;
   }
+}
+
+// ====== AUDITORIA DE DUPLICATAS ======
+/**
+ * Grava (ou limpa) a aba "Duplicatas_Debug" com os itens descartados na última sincronização.
+ * Se não houver duplicatas, a aba fica com apenas o cabeçalho para indicar "tudo ok".
+ * @param {Array[]} rows - Array de linhas [[timestamp, motivo, id, idExistente, cartela, cliente, pedido, oc, desc, tam]]
+ */
+function _gravarDuplicatasDebug_(rows) {
+  const SHEET_NAME = 'Duplicatas_Debug';
+  let sheet = SS.getSheetByName(SHEET_NAME);
+  if (!sheet) {
+    sheet = SS.insertSheet(SHEET_NAME);
+  }
+  sheet.clearContents();
+
+  const cabecalho = [
+    'TIMESTAMP_EXEC', 'MOTIVO', 'ID_DESCARTADO', 'ID_EXISTENTE_NO_DB',
+    'CARTELA', 'CLIENTE', 'PEDIDO', 'OC', 'DESC', 'TAMANHO'
+  ];
+  sheet.getRange(1, 1, 1, cabecalho.length).setValues([cabecalho]);
+
+  if (rows && rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, cabecalho.length).setValues(rows);
+    Logger.log(`📋 Duplicatas_Debug: ${rows.length} item(ns) registrado(s)`);
+  } else {
+    Logger.log('📋 Duplicatas_Debug: nenhuma duplicata nesta sincronização');
+  }
+  SpreadsheetApp.flush();
 }
 
 // ====== COMPACTAR DB ======
