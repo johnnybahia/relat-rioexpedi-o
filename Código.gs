@@ -1587,7 +1587,26 @@ function sincronizarDados() {
 
     for (let [id, dbItem] of dbMap.entries()) {
       const statusAtual = dbItem.row[STATUS_COL];  // Coluna O (índice 14)
-      if (statusAtual === "Excluido") continue;
+
+      // Se item está Excluido mas voltou ao PEDIDOS: reativa e remove do fonteMap
+      // (sem isso, fonteMap.delete nunca seria chamado e o item seria duplicado)
+      if (statusAtual === "Excluido") {
+        if (fonteMap.has(id)) {
+          Logger.log(`   ♻️ ID="${id}" estava Excluido mas voltou ao PEDIDOS - reativando como Ativo`);
+          const fonteRow = fonteMap.get(id);
+          const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
+          const novaLinha = [
+            fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
+            fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
+            fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
+            fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
+            fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               marcarFaturarAtual
+          ];
+          updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: "Ativo", id: id });
+          fonteMap.delete(id);
+        }
+        continue;
+      }
 
       // PRIMEIRA TENTATIVA: Buscar por ID
       if (fonteMap.has(id)) {
