@@ -613,6 +613,41 @@ function resetarEReprocessar() {
 }
 
 /**
+ * Mesma lógica de resetarEReprocessar() mas SEM alertas de UI.
+ * Execute esta função diretamente pelo Apps Script Editor (▶ Executar).
+ * Acompanhe o progresso em: Ver > Registros de execução (Ctrl+Enter).
+ */
+function resetarEReprocessarSilencioso() {
+  Logger.log('=== RESET COMPLETO INICIADO (modo silencioso) ===');
+
+  // 1. Limpa Relatorio_DB (mantém cabeçalho na linha 1)
+  const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
+  if (dbSheet && dbSheet.getLastRow() > 1) {
+    dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, dbSheet.getLastColumn()).clearContent();
+    SpreadsheetApp.flush();
+    Logger.log('✅ Relatorio_DB limpo.');
+  } else {
+    Logger.log('ℹ️ Relatorio_DB já estava vazio.');
+  }
+  limparCache();
+
+  // 2. Limpa coluna A (IDs) da aba PEDIDOS para forçar regeneração com nova fórmula
+  const pedidosSheet = SS.getSheetByName(FONTE_SHEET_NAME);
+  if (pedidosSheet && pedidosSheet.getLastRow() >= FONTE_DATA_START_ROW) {
+    const numLinhas = pedidosSheet.getLastRow() - FONTE_DATA_START_ROW + 1;
+    pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, numLinhas, 1).clearContent();
+    SpreadsheetApp.flush();
+    Logger.log('✅ IDs antigos removidos da aba PEDIDOS.');
+  }
+
+  // 3. Roda processo completo (sincroniza PEDIDOS + gera IDs + popula DB)
+  Logger.log('🔄 Iniciando processo completo...');
+  processoAutomaticoCompleto();
+
+  Logger.log('=== RESET COMPLETO FINALIZADO ===');
+}
+
+/**
  * Função principal para gerar os IDs únicos e estáticos com sufixo numérico.
  * Esta função é chamada manualmente ou pelo trigger automático.
  *
