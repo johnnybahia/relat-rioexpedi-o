@@ -1721,8 +1721,11 @@ function sincronizarDados() {
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus });
           idsAtualizados.push({ de: id, para: novoId, linha: dbItem.linha });
 
-          // Remove do fonteMap para não adicionar como novo depois
+          // Remove do fonteMap E do fonteImpressoes para não adicionar como novo depois
+          // e para impedir que outro item do DB reutilize a mesma fingerprint (causaria
+          // "ghost match" onde um item fantasma no DB aparece como ativo para sempre).
           fonteMap.delete(novoId);
+          fonteImpressoes.delete(impressaoDB);
 
         } else {
           // NÃO ENCONTROU nem por ID nem por dados - item saiu do DADOS_IMPORTADOS
