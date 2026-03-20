@@ -1570,6 +1570,7 @@ function sincronizarDados() {
     let updates = [];
     let avisos = [];
     let idsAtualizados = [];
+    let autoExcluidos = 0;
 
     // Precarrega IDs com histórico de baixas para detectar itens parcializados removidos
     const idsBaixados = new Set();
@@ -1668,7 +1669,7 @@ function sincronizarDados() {
             Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
           } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
             if (idsBaixados.has(id)) {
-              Logger.log(`   ⚠️ Item com baixa removido de PEDIDOS - gerando aviso para o usuário`);
+              Logger.log(`   ⚠️ Item com baixa removido de PEDIDOS - gerando aviso e marcando como Excluido`);
               avisos.push({
                 id: id,
                 cartela: dbItem.row[CARTELA_COL],
@@ -1677,8 +1678,13 @@ function sincronizarDados() {
                 timestamp: new Date().toISOString()
               });
             } else {
-              Logger.log(`   ℹ️ Item removido de PEDIDOS sem histórico de baixas - sem ação`);
+              Logger.log(`   ℹ️ Item removido de PEDIDOS sem histórico de baixas - marcando como Excluido`);
             }
+            // Marca como Excluido no DB (saiu do PEDIDOS e não está aguardando NF)
+            const linhaExcluir = [...dbItem.row];
+            linhaExcluir[STATUS_COL] = "Excluido";
+            updates.push({ linha: dbItem.linha, dados: linhaExcluir, de: statusAtual, para: "Excluido", id: id });
+            autoExcluidos++;
           } else {
             Logger.log(`   ℹ️ Não alterado (status: ${statusAtual})`);
           }
@@ -1802,6 +1808,7 @@ function sincronizarDados() {
     Logger.log(`   • ${totalDB} itens lidos de Relatorio_DB`);
     Logger.log(`   • ${novosValidados.length} novos itens adicionados ao Relatorio_DB como Ativo`);
     Logger.log(`   • ${updates.length} itens atualizados no Relatorio_DB (QTD. ABERTA preservada do DB)`);
+    Logger.log(`   • ${autoExcluidos} itens marcados como Excluido (saíram do PEDIDOS)`);
     Logger.log(`   • ${avisos.length} aviso(s) de itens com baixa removidos de PEDIDOS`);
     if (idsAtualizados.length > 0) {
       Logger.log(`   🔄 ${idsAtualizados.length} IDs atualizados (por mudança de posição no IMPORTRANGE):`);
@@ -1818,6 +1825,7 @@ function sincronizarDados() {
     return {
       novos: novosValidados.length,
       updates: updates.length,
+      inativos: autoExcluidos,
       avisos: avisos.length,
       idsAtualizados: idsAtualizados.length
     };
