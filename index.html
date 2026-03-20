@@ -797,24 +797,43 @@
         if ($errorModal) $errorModal.classList.remove('hidden');
     }
 
-    // Exibe modal de sucesso com countdown e auto-reload
-    function showSuccessModal(msg) {
+    // Exibe modal de sucesso.
+    // Sem opções (padrão): countdown 3s + location.reload().
+    // Com { noReload: true }: apenas fecha o modal após 2s sem recarregar a página.
+    function showSuccessModal(msg, opts) {
+        const noReload = opts && opts.noReload;
         if ($successMessage) $successMessage.textContent = msg;
         if ($successModal) $successModal.classList.remove('hidden');
 
-        if (_successCountdownTimer) clearInterval(_successCountdownTimer);
-        let seconds = 3;
+        const $countdown = document.getElementById('success-countdown');
+        const $nowBtn = document.getElementById('success-now-btn');
         const $sec = document.getElementById('countdown-seconds');
-        if ($sec) $sec.textContent = seconds;
 
-        _successCountdownTimer = setInterval(() => {
-            seconds--;
+        if (_successCountdownTimer) clearInterval(_successCountdownTimer);
+
+        if (noReload) {
+            // Esconde elementos de reload — desnecessários quando DOM já foi atualizado
+            if ($countdown) $countdown.style.display = 'none';
+            if ($nowBtn) $nowBtn.style.display = 'none';
+            _successCountdownTimer = setTimeout(() => {
+                if ($successModal) $successModal.classList.add('hidden');
+                if ($countdown) $countdown.style.display = '';
+                if ($nowBtn) $nowBtn.style.display = '';
+            }, 2000);
+        } else {
+            if ($countdown) $countdown.style.display = '';
+            if ($nowBtn) $nowBtn.style.display = '';
+            let seconds = 3;
             if ($sec) $sec.textContent = seconds;
-            if (seconds <= 0) {
-                clearInterval(_successCountdownTimer);
-                location.reload();
-            }
-        }, 1000);
+            _successCountdownTimer = setInterval(() => {
+                seconds--;
+                if ($sec) $sec.textContent = seconds;
+                if (seconds <= 0) {
+                    clearInterval(_successCountdownTimer);
+                    location.reload();
+                }
+            }, 1000);
+        }
     }
 
     // Fecha modal de erro
@@ -2203,7 +2222,7 @@ ALL_OCS_ITEMS = itemsObj;
 
                     esconderEdicaoBaixa();
                     hideBaixaModal();
-                    showSuccessModal('Baixa editada com sucesso!');
+                    showSuccessModal('Baixa editada com sucesso!', { noReload: true });
                 } else {
                     showError('Erro ao editar baixa: ' + (result.error || 'Erro desconhecido'));
                 }
@@ -2287,10 +2306,10 @@ ALL_OCS_ITEMS = itemsObj;
 
                     if (result.zerou) {
                         hideBaixaModal();
-                        showSuccessModal('Baixa aplicada! Item zerado e marcado como Faturado.');
+                        showSuccessModal('Baixa aplicada! Item zerado e marcado como Faturado.', { noReload: true });
                     } else {
                         hideBaixaModal();
-                        showSuccessModal('Baixa aplicada com sucesso!');
+                        showSuccessModal('Baixa aplicada com sucesso!', { noReload: true });
 
                         // Atualiza a linha na tabela
                         const row = document.getElementById(`item-linha-${currentBaixaItem.planilhaLinha}`);
