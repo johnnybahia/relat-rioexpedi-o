@@ -835,18 +835,29 @@ function sincronizarPedidosComFonte() {
     let itensAtualizados = 0;
     let itensComMudancaReal = 0;
 
-    // BUG FIX: Pré-carrega TODOS os IDs do Relatorio_DB no Set de IDs usados.
-    // Sem isso, um novo item pode receber o mesmo ID de um item removido que ainda
-    // existe no Relatorio_DB, herdando incorretamente seu status (ex: Faturado).
+    // Pré-carrega IDs do Relatorio_DB no Set (previne colisões) E
+    // constrói mapa fingerprint→ID para RECUPERAR IDs quando PEDIDOS perde a coluna A.
+    // Isso evita que itens ganhem novos IDs após o usuário apagar PEDIDOS e o IMPORTRANGE
+    // repopular só as colunas B-O (sem a coluna A que é gerenciada por script).
     const idsUsados = new Set();
+    const dbFingerprintMap = new Map(); // fingerprint → id (recuperação de ID)
     const dbSheetRef = SS.getSheetByName(DB_SHEET_NAME);
     if (dbSheetRef && dbSheetRef.getLastRow() >= 2) {
-      const dbIdsRange = dbSheetRef.getRange(2, 1, dbSheetRef.getLastRow() - 1, 1).getValues();
-      dbIdsRange.forEach(dbIdRow => {
-        const dbId = String(dbIdRow[0] || '').trim();
-        if (dbId) idsUsados.add(dbId);
+      const numDbRows = dbSheetRef.getLastRow() - 1;
+      // Lê 12 colunas (A até L) — suficiente para ID (col A) e todos os campos da fingerprint
+      const dbRange = dbSheetRef.getRange(2, 1, numDbRows, 12).getValues();
+      dbRange.forEach(dbRow => {
+        const dbId = String(dbRow[0] || '').trim();
+        if (dbId) {
+          idsUsados.add(dbId);
+          const fp = _criarImpressaoDigital_(dbRow, true);
+          if (fp && !dbFingerprintMap.has(fp)) {
+            dbFingerprintMap.set(fp, dbId); // primeiro ID encontrado para este fingerprint
+          }
+        }
       });
-      Logger.log(`🔒 ${idsUsados.size} IDs do Relatorio_DB carregados para prevenir colisões de ID`);
+      Logger.log(`🔒 ${idsUsados.size} IDs do Relatorio_DB carregados (colisões + recuperação)`);
+      Logger.log(`🔑 ${dbFingerprintMap.size} fingerprints do DB indexadas para recuperação de ID`);
     }
 
     fonteData.forEach((fonteRow, idx) => {
@@ -868,37 +879,59 @@ function sincronizarPedidosComFonte() {
       let isNovo = false;
 
       if (matches && matches.length > 0) {
-        // TEM MATCH(ES) - Reusar ID existente
+        // TEM MATCH(ES) em PEDIDOS - Reusar ID existente
 
         // Encontra primeiro match não usado
         let matchEscolhido = matches.find(m => !m.usado);
 
         if (!matchEscolhido) {
           // Todos os matches já foram usados (mais itens na fonte que em PEDIDOS)
-          // Gerar novo ID
           isNovo = true;
         } else {
-          // Marca como usado
           matchEscolhido.usado = true;
-          idFinal = matchEscolhido.id;
-          timestampFinal = matchEscolhido.timestamp;
-          itensAtualizados++;
 
-          // BUG FIX: Detecta se houve mudança REAL nos dados do item.
-          // fonteRow[0..13] corresponde a pedidosRow[1..14] (offset 1 pelo ID na col A de PEDIDOS).
-          // Antes, qualquer item correspondido era contado como "mudança", causando
-          // limpeza desnecessária de cache e re-sincronização mesmo sem alterações.
-          for (let fi = 0; fi <= 13; fi++) {
-            const fv = fonteRow[fi];
-            const pv = matchEscolhido.row[fi + 1];
-            const fStr = fv instanceof Date ? _toISOStringSafe_(fv) : String(fv || '');
-            const pStr = pv instanceof Date ? _toISOStringSafe_(pv) : String(pv || '');
-            if (fStr !== pStr) { itensComMudancaReal++; break; }
+          // Se a coluna A do PEDIDOS estava vazia (usuário apagou o PEDIDOS e o IMPORTRANGE
+          // trouxe de volta só os dados B-O), tenta recuperar o ID do Relatorio_DB antes de
+          // gerar um novo — evita que itens existentes ganhem novos IDs.
+          const idExistente = String(matchEscolhido.id || '').trim();
+          if (!idExistente) {
+            const idRecuperado = dbFingerprintMap.get(impressao);
+            if (idRecuperado) {
+              Logger.log(`   🔄 ID recuperado do DB para item sem ID em PEDIDOS: "${idRecuperado}"`);
+              idFinal = idRecuperado;
+              timestampFinal = matchEscolhido.timestamp || new Date();
+            } else {
+              isNovo = true; // nunca esteve no DB: gerar novo ID normalmente
+            }
+          } else {
+            idFinal = idExistente;
+            timestampFinal = matchEscolhido.timestamp;
+          }
+
+          if (!isNovo) {
+            itensAtualizados++;
+            // Detecta mudança real nos dados
+            for (let fi = 0; fi <= 13; fi++) {
+              const fv = fonteRow[fi];
+              const pv = matchEscolhido.row[fi + 1];
+              const fStr = fv instanceof Date ? _toISOStringSafe_(fv) : String(fv || '');
+              const pStr = pv instanceof Date ? _toISOStringSafe_(pv) : String(pv || '');
+              if (fStr !== pStr) { itensComMudancaReal++; break; }
+            }
           }
         }
       } else {
-        // NÃO TEM MATCH - Item novo
-        isNovo = true;
+        // NÃO TEM MATCH em PEDIDOS - pode ser item novo ou PEDIDOS estava vazio
+        // Tenta recuperar ID do DB pela fingerprint antes de gerar novo
+        const idRecuperado = dbFingerprintMap.get(impressao);
+        if (idRecuperado) {
+          Logger.log(`   🔄 ID recuperado do DB (sem match em PEDIDOS): "${idRecuperado}"`);
+          idFinal = idRecuperado;
+          timestampFinal = new Date();
+          itensAtualizados++;
+        } else {
+          isNovo = true;
+        }
       }
 
       // Se é novo item, gera ID e timestamp
