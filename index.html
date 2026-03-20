@@ -2921,10 +2921,22 @@ ALL_OCS_ITEMS = itemsObj;
         }
         .lote-os-label { font-size: 8px; font-weight: 700; display: block; margin-bottom: 0.5mm; color: #555; }
         .lote-totais { font-size: 18px; font-weight: 900; text-align: center; margin-top: 1.5mm; }
+        .etiqueta-cliente {
+            width: 100mm; height: 50mm; padding: 3mm;
+            page-break-after: always;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            border: 1px solid #000;
+        }
+        .cliente-nome-grande {
+            font-size: 22px; font-weight: 900; text-align: center;
+            line-height: 1.25; word-break: keep-all; overflow-wrap: break-word;
+            hyphens: none;
+        }
         @media print {
             body { margin: 0; }
             .etiqueta { border: none; }
             .etiqueta-lote { border: none; }
+            .etiqueta-cliente { border: none; }
         }
     </style>
 </head>
@@ -3008,6 +3020,15 @@ ALL_OCS_ITEMS = itemsObj;
     </div>
 </div>`;
             });
+        });
+
+        // Etiqueta(s) de cliente — uma por cliente único no lote
+        const clientesUnicos = [...new Set(loteItens.map(e => e.cliente).filter(Boolean))];
+        clientesUnicos.forEach(nomeCliente => {
+            html += `
+<div class="etiqueta-cliente">
+    <div class="cliente-nome-grande">${nomeCliente}</div>
+</div>`;
         });
 
         // Etiqueta mestra LOTE
