@@ -738,7 +738,7 @@
     let autocompleteIndex = -1;
 
     // ==== AUTO-REFRESH CONFIGURATION ====
-    const AUTO_REFRESH_INTERVAL = 30000; // 30 segundos
+    const AUTO_REFRESH_INTERVAL = 5000; // 5 segundos
     let autoRefreshTimer = null;
     let autoRefreshEnabled = true;
     let lastRefreshTime = null;
@@ -4201,7 +4201,7 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         if (secondsRemaining !== undefined) {
-            $autoRefreshIndicator.textContent = `Próximo refresh em ${secondsRemaining}s`;
+            $autoRefreshIndicator.textContent = `Auto-refresh ativo`;
             $autoRefreshIndicator.classList.add('active');
             $autoRefreshIndicator.classList.remove('paused');
         } else if (lastRefreshTime) {
