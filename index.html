@@ -2826,7 +2826,6 @@ ALL_OCS_ITEMS = itemsObj;
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         @page { size: 100mm 50mm; margin: 0; }
-        @page lote-page { size: 100mm 100mm; margin: 0; }
         body { font-family: Arial, sans-serif; font-size: 8px; font-weight: bold; }
         .etiqueta {
             width: 100mm; height: 50mm; padding: 2mm;
@@ -2835,11 +2834,10 @@ ALL_OCS_ITEMS = itemsObj;
             border: 1px solid #000;
         }
         .etiqueta-lote {
-            page: lote-page;
-            width: 100mm; height: 100mm; padding: 4mm;
+            width: 100mm; height: 50mm; padding: 2mm;
             page-break-after: auto;
             display: flex; flex-direction: column; justify-content: space-between;
-            border: 2px solid #000;
+            border: 1px solid #000;
         }
         .dados { flex: 1; display: flex; flex-direction: column; justify-content: center; }
         .linha { margin-bottom: 1.5mm; line-height: 1.3; font-size: 13px; }
@@ -2864,16 +2862,20 @@ ALL_OCS_ITEMS = itemsObj;
         .footer-logo { max-width: 25mm; max-height: 8mm; flex-shrink: 0; }
         .footer-text { flex: 1; }
         .lote-titulo {
-            font-size: 44px; text-align: center; letter-spacing: 5mm;
-            font-weight: 900; border-bottom: 3px solid #000;
-            padding-bottom: 3mm; margin-bottom: 4mm;
+            font-size: 22px; text-align: center; letter-spacing: 4mm;
+            font-weight: 900; border-bottom: 2px solid #000;
+            padding-bottom: 1.5mm; margin-bottom: 2mm;
         }
-        .lote-os { font-size: 11px; margin-bottom: 3mm; line-height: 1.5; }
-        .lote-totais { font-size: 15px; font-weight: 700; margin-top: 2mm; }
+        .lote-os {
+            font-size: 15px; text-align: center; font-weight: 800;
+            margin-bottom: 1mm; line-height: 1.4;
+        }
+        .lote-os-label { font-size: 8px; font-weight: 700; display: block; margin-bottom: 0.5mm; color: #555; }
+        .lote-totais { font-size: 18px; font-weight: 900; text-align: center; margin-top: 1.5mm; }
         @media print {
             body { margin: 0; }
             .etiqueta { border: none; }
-            .etiqueta-lote { border: 2px solid #000; }
+            .etiqueta-lote { border: none; }
         }
     </style>
 </head>
@@ -2947,8 +2949,11 @@ ALL_OCS_ITEMS = itemsObj;
 <div class="etiqueta-lote">
     <div class="dados">
         <div class="lote-titulo">LOTE</div>
-        <div class="lote-os"><span class="label">OS:</span> ${osText}</div>
-        <div class="lote-totais">Total: ${totaisHtml || 'N/A'}</div>
+        <div class="lote-os">
+            <span class="lote-os-label">OS</span>
+            ${osText}
+        </div>
+        <div class="lote-totais">${totaisHtml || 'N/A'}</div>
     </div>
     <div class="footer">
         <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
