@@ -2935,6 +2935,28 @@ ALL_OCS_ITEMS = itemsObj;
             <div>CNPJ: 19.542.918/0001-90</div>
         </div>
     </div>
+</div>
+<div class="etiqueta">
+    <div class="dados">
+        <div class="cliente-titulo">
+            <span class="etiqueta-numero">${numeroEtiqueta}/${totalEtiquetas}</span>
+            <span>${cliente}</span>
+            <span class="etiqueta-par">PAR ${letraPar}</span>
+        </div>
+        <div class="linha"><span class="label">OC:</span>${oc}</div>
+        <div class="linha"><span class="label">Descrição:</span>${item.DESCRIÇÃO || 'N/A'}</div>
+        <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
+        <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
+        ${observacoes ? `<div class="obs"><span class="label">Obs:</span> ${observacoes}</div>` : ''}
+    </div>
+    <div class="footer">
+        <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
+        <div class="footer-text">
+            <div><strong>MARFIM IND. TÊXTIL DO CEARÁ LTDA.</strong></div>
+            <div>Av. José Amora de Sá, 1086 - Autódromo, Eusébio - CE</div>
+            <div>CNPJ: 19.542.918/0001-90</div>
+        </div>
+    </div>
 </div>`;
             });
         });
