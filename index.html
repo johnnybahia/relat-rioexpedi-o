@@ -2901,6 +2901,7 @@ ALL_OCS_ITEMS = itemsObj;
         </div>
         <div class="linha"><span class="label">Cód. Cliente:</span>${item['CÓD. CLIENTE'] || 'N/A'}</div>
         <div class="linha"><span class="label">Cód. OS:</span>${item['CÓD. OS'] || 'N/A'}</div>
+        <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
         <div class="linha"><span class="label">Quantidade:</span>${fmtInt(etiq.quantidade)}</div>
         <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
     </div>
@@ -3120,6 +3121,10 @@ ALL_OCS_ITEMS = itemsObj;
 
                     <div class="linha">
                         <span class="label">Cód. OS:</span>${currentEtiquetaItem['CÓD. OS'] || 'N/A'}
+                    </div>
+
+                    <div class="linha">
+                        <span class="label">Tamanho:</span>${currentEtiquetaItem.TAMANHO || 'N/A'}
                     </div>
 
                     <div class="linha">
