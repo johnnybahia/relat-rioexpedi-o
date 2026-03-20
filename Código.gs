@@ -1010,22 +1010,19 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
   // pelo sistema de origem. Usar CARTELA causava falsos "novos itens" quando
   // ela mudava, perdendo todo o histórico e marcações do item no Relatorio_DB.
   //
-  // Campos estáveis usados como identidade:
-  // DADOS_IMPORTADOS (offset=0): CLIENTE=1, PEDIDO=3, MARFIM=5, OC=8, OS=10, DATA=11
-  // PEDIDOS          (offset=1): CLIENTE=2, PEDIDO=4, MARFIM=6, OC=9, OS=11, DATA=12
+  // Campos estáveis usados como identidade (inclui TAMANHO para distinguir tamanhos):
+  // DADOS_IMPORTADOS (offset=0): CLIENTE=1, PEDIDO=3, MARFIM=5, TAM=7, OC=8, OS=10, DATA=11
+  // PEDIDOS          (offset=1): CLIENTE=2, PEDIDO=4, MARFIM=6, TAM=8, OC=9, OS=11, DATA=12
 
   const cliente = String(row[1 + offset] || '').trim();
   const pedido  = String(row[3 + offset] || '').trim();
   const marfim  = String(row[5 + offset] || '').trim();
+  const tam     = String(row[7 + offset] || '').trim();  // TAMANHO — diferencia itens do mesmo pedido em tamanhos distintos
   const oc      = String(row[8 + offset] || '').trim();
   const os      = String(row[10 + offset] || '').trim();
-  const dataReceb = row[11 + offset];
+  const dataStr = _normalizarData_(row[11 + offset]);    // normalizado para Date e número serial
 
-  const dataStr = dataReceb instanceof Date ?
-    _toISOStringSafe_(dataReceb) :
-    String(dataReceb || '');
-
-  return `${cliente}|${pedido}|${marfim}|${oc}|${os}|${dataStr}`;
+  return `${cliente}|${pedido}|${marfim}|${tam}|${oc}|${os}|${dataStr}`;
 }
 
 /**
@@ -1406,12 +1403,31 @@ function gerarIdsFaltantes() {
  * @param {boolean} isDbRow - true se a row vier do Relatorio_DB (layout sem gap da col D de PEDIDOS)
  * Retorna uma string única baseada em: CLIENTE + PEDIDO + MARFIM + OC + OS + DATA
  */
+function _normalizarData_(val) {
+  // Normaliza datas para string comparável, independente do tipo (Date, número serial ou string).
+  // O IMPORTRANGE pode entregar datas como números seriais (ex: 45123) enquanto o PEDIDOS
+  // as lê de volta como objetos Date. Sem normalização, a fingerprint muda a cada sync.
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    return Utilities.formatDate(val, TZ, 'yyyyMMdd');
+  }
+  if (typeof val === 'number' && val > 40000) {
+    // Número serial do Sheets → converter para Date e formatar
+    try {
+      const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+      return Utilities.formatDate(d, TZ, 'yyyyMMdd');
+    } catch (e) { return String(val); }
+  }
+  return String(val || '').trim();
+}
+
 function _criarImpressaoDigital_(row, isDbRow) {
   // PEDIDOS tem um "gap" na coluna D (índice 3) que não é gravado no Relatorio_DB.
   // Por isso os índices no DB são -1 em relação aos do PEDIDOS a partir de PEDIDO_COL.
   // isDbRow=true → usa índices relativos ao layout do Relatorio_DB.
   const pedidoIdx = isDbRow ? 3  : PEDIDO_COL;   // PEDIDOS=4, DB=3
   const marfimIdx = isDbRow ? 5  : MARFIM_COL;   // PEDIDOS=6, DB=5
+  const tamIdx    = isDbRow ? 7  : TAM_COL;       // PEDIDOS=8, DB=7  ← NOVO: inclui TAMANHO
   const ocIdx     = isDbRow ? 8  : OC_COL;       // PEDIDOS=9, DB=8
   const osIdx     = isDbRow ? 10 : OS_COL;       // PEDIDOS=11, DB=10
   const dtrecIdx  = isDbRow ? 11 : DTREC_COL;    // PEDIDOS=12, DB=11
@@ -1420,9 +1436,10 @@ function _criarImpressaoDigital_(row, isDbRow) {
     String(row[CLIENTE_COL] || '').trim(),        // índice 2 em ambos
     String(row[pedidoIdx]   || '').trim(),
     String(row[marfimIdx]   || '').trim(),
+    String(row[tamIdx]      || '').trim(),         // TAMANHO — distingue itens do mesmo pedido em tamanhos diferentes
     String(row[ocIdx]       || '').trim(),
     String(row[osIdx]       || '').trim(),
-    row[dtrecIdx] instanceof Date ? _toISOStringSafe_(row[dtrecIdx]) : String(row[dtrecIdx] || '')
+    _normalizarData_(row[dtrecIdx])                // normalizado para lidar com Date e número serial
   ];
   return partes.join('|');
 }
@@ -1747,18 +1764,31 @@ function sincronizarDados() {
     const idsExistentes = new Set(dbMap.keys());
     const idsJaAdicionados = new Set();
 
+    // Fingerprints de todos os itens já existentes no DB (inclui updates pendentes que mudaram dados)
+    const fingerprintsExistentes = new Set();
+    for (const [, dbItem] of dbMap.entries()) {
+      fingerprintsExistentes.add(_criarImpressaoDigital_(dbItem.row, true));
+    }
+
     novos.forEach(item => {
       const id = String(item[ID_COL]).trim();
 
-      // Verifica se já existe no DB
+      // Verifica se já existe no DB por ID
       if (idsExistentes.has(id)) {
-        Logger.log(`   ⚠️ DUPLICATA EVITADA: ID="${id}" já existe no Relatorio_DB`);
+        Logger.log(`   ⚠️ DUPLICATA EVITADA (ID): ID="${id}" já existe no Relatorio_DB`);
         return;
       }
 
-      // Verifica se já foi adicionado nesta rodada
+      // Verifica se já foi adicionado nesta rodada por ID
       if (idsJaAdicionados.has(id)) {
-        Logger.log(`   ⚠️ DUPLICATA EVITADA: ID="${id}" já foi processado nesta sincronização`);
+        Logger.log(`   ⚠️ DUPLICATA EVITADA (ID rodada): ID="${id}" já foi processado nesta sincronização`);
+        return;
+      }
+
+      // Verifica se já existe no DB por fingerprint (detecta mesmo item com ID diferente)
+      const fp = _criarImpressaoDigital_(item);
+      if (fingerprintsExistentes.has(fp)) {
+        Logger.log(`   ⚠️ DUPLICATA EVITADA (fingerprint): ID="${id}" tem mesmos dados de item já existente no DB`);
         return;
       }
 
@@ -1768,9 +1798,10 @@ function sincronizarDados() {
         return;
       }
 
-      // Item válido - adiciona
+      // Item válido - adiciona; registra fingerprint para evitar duplicata entre os próprios novos
       novosValidados.push(item);
       idsJaAdicionados.add(id);
+      fingerprintsExistentes.add(fp);
     });
 
     const duplicatasEvitadas = novos.length - novosValidados.length;
