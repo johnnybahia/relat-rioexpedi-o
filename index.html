@@ -2687,6 +2687,7 @@ ALL_OCS_ITEMS = itemsObj;
         document.getElementById('lote-obs').value = '';
         renderizarItensLote();
         document.getElementById('loteModal').classList.remove('hidden');
+        document.getElementById('lote-floating-bar').style.display = 'none';
     }
 
     function renderizarItensLote() {
@@ -2775,6 +2776,7 @@ ALL_OCS_ITEMS = itemsObj;
     function fecharModalLote() {
         document.getElementById('loteModal').classList.add('hidden');
         loteItens = [];
+        atualizarBarraLote();
     }
 
     function gerarPDFEtiquetasLote() {
