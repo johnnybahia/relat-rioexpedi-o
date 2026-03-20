@@ -625,9 +625,8 @@ function gerarIDsUnicos() {
       String(linha[2] || '').trim() + // Coluna C - CLIENTE
       String(linha[3] || '').trim() + // Coluna D - CÓD. FILIAL
       String(linha[4] || '').trim() + // Coluna E - PEDIDO
-      String(linha[5] || '').trim() + // Coluna F - CÓD. CLIENTE
-      String(linha[8] || '').trim() + // Coluna I - TAMANHO
       String(linha[6] || '').trim() + // Coluna G - CÓD. MARFIM
+      String(linha[8] || '').trim() + // Coluna I - TAMANHO
       String(linha[9] || '').trim() + // Coluna J - ORD. COMPRA
       String(linha[11] || '').trim() + // Coluna L - CÓD. OS
       dataFormatada;  // Coluna M - DATA RECEB. (formatada)
@@ -949,12 +948,11 @@ function sincronizarPedidosComFonte() {
           String(fonteRow[1] || '').trim() +  // CLIENTE
           String(fonteRow[2] || '').trim() +  // CÓD. FILIAL
           String(fonteRow[3] || '').trim() +  // PEDIDO
-          String(fonteRow[4] || '').trim() +  // CÓD. CLIENTE
-          String(fonteRow[7] || '').trim() +  // TAMANHO
           String(fonteRow[5] || '').trim() +  // CÓD. MARFIM
+          String(fonteRow[7] || '').trim() +  // TAMANHO
           String(fonteRow[8] || '').trim() +  // ORD. COMPRA
           String(fonteRow[10] || '').trim() + // CÓD. OS
-          dataFormatada;
+          dataFormatada;                       // DATA RECEBIMENTO (col M)
 
         // Gera sufixo único
         let sufixo = 1;
