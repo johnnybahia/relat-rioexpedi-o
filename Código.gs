@@ -1974,7 +1974,9 @@ function _garantirHeadersRelatorio_DB_() {
 }
 
 function _readAllData_() {
-  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  // Abre a planilha fresh a cada leitura para evitar cache de container do Apps Script
+  const ss = SpreadsheetApp.openById("1qPJ8c7cq7qb86VJJ-iByeiaPnALOBcDPrPMeL75N2EI");
+  const sheet = ss.getSheetByName(DB_SHEET_NAME);
   if (!sheet) throw new Error(`Aba '${DB_SHEET_NAME}' não encontrada`);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return { headers: [], rows: [], displayRows: [] };
