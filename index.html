@@ -2009,15 +2009,6 @@ ALL_OCS_ITEMS = itemsObj;
             })
             .marcarParaFaturar(uniqueId, linha, marcar);
     }
-    
-    function showSuccessModal(message) {
-        $successMessage.textContent = message;
-        $successModal.classList.remove('hidden');
-    }
-    
-    function hideSuccessModal() {
-        $successModal.classList.add('hidden');
-    }
 
     // ==== MODAL DE BAIXA PARCIAL ====
 
@@ -2211,6 +2202,7 @@ ALL_OCS_ITEMS = itemsObj;
                     carregarHistorico(currentBaixaItem.uniqueId);
 
                     esconderEdicaoBaixa();
+                    hideBaixaModal();
                     showSuccessModal('Baixa editada com sucesso!');
                 } else {
                     showError('Erro ao editar baixa: ' + (result.error || 'Erro desconhecido'));
@@ -2297,6 +2289,7 @@ ALL_OCS_ITEMS = itemsObj;
                         hideBaixaModal();
                         showSuccessModal('Baixa aplicada! Item zerado e marcado como Faturado.');
                     } else {
+                        hideBaixaModal();
                         showSuccessModal('Baixa aplicada com sucesso!');
 
                         // Atualiza a linha na tabela
