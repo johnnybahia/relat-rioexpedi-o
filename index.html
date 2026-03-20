@@ -94,6 +94,8 @@
     .item-table tr:last-child td { border-bottom: none; }
     
     .item-table td.status-prazo { font-weight: 600; text-align: center; }
+    .item-table th.qtd-aberta { color: #b91c1c; background-color: #fef2f2; }
+    .item-table td.qtd-aberta { color: #b91c1c; font-weight: 700; background-color: #fff5f5; }
     .item-table tr.item-faturado { background-color: #dcfce7; font-weight: 500; }
     .item-table tr.item-marcado-faturar { background-color: #90EE90 !important; font-weight: 600; }
 
@@ -1509,7 +1511,7 @@ ALL_OCS_ITEMS = itemsObj;
         if (items.length > 0) {
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
                             <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
-                            <th>Tamanho</th><th>Qtd. Original</th><th>Qtd. Aberta</th><th>OS</th>
+                            <th>Tamanho</th><th>Qtd. Original</th><th class="qtd-aberta">Qtd. Aberta</th><th>OS</th>
                             <th>Dt. Recebimento</th><th>Dt. Entrega</th><th class="status-prazo">Prazo</th>
                             <th title="Selecionar para lote de etiquetas">📦 Lote</th><th>Ações</th></tr></thead><tbody>`;
             
@@ -1532,7 +1534,7 @@ ALL_OCS_ITEMS = itemsObj;
                         <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
                         <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
                         <td class="nowrap">${fmtInt(qtdOriginal)}</td>
-                        <td class="nowrap">${fmtInt(qtdAberta)}</td>
+                        <td class="nowrap qtd-aberta">${fmtInt(qtdAberta)}</td>
                         <td class="nowrap">${item['CÓD. OS'] ?? 'N/A'}</td>
                         <td class="nowrap">${formatarData(item['DATA RECEB.'])}</td>
                         <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
