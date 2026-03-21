@@ -1708,6 +1708,10 @@ function sincronizarDados() {
     let idsAtualizados = [];
     let autoExcluidos = 0;
 
+    // Rastreia fingerprints de itens do DB que foram "consumidos" (matched por ID ou por fingerprint).
+    // Usado para liberar a mesma fingerprint a novos itens legítimos (ex: vários itens iguais na mesma OC).
+    const consumedFingerprints = new Set();
+
     // Precarrega IDs com histórico de baixas para detectar itens parcializados removidos
     const idsBaixados = new Set();
     try {
@@ -1777,6 +1781,7 @@ function sincronizarDados() {
         }
 
         fonteMap.delete(id);
+        consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
 
       } else {
         // SEGUNDA TENTATIVA: Buscar por IMPRESSÃO DIGITAL (dados)
@@ -1812,6 +1817,7 @@ function sincronizarDados() {
           // "ghost match" onde um item fantasma no DB aparece como ativo para sempre).
           fonteMap.delete(novoId);
           fonteImpressoes.delete(impressaoDB);
+          consumedFingerprints.add(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
 
         } else {
           // NÃO ENCONTROU nem por ID nem por dados - item saiu do DADOS_IMPORTADOS
@@ -1857,7 +1863,10 @@ function sincronizarDados() {
       // Evita duplicação quando sincronizarPedidosComFonte gera ID diferente para
       // um item que já existe no DB (ex: por inconsistência de dados na source).
       const impressaoFonte = _criarImpressaoDigital_(fonteRow);
-      if (dbImpressoes.has(impressaoFonte)) {
+      // Só rejeita se o item do DB com esta fingerprint NÃO foi consumido (matched).
+      // Se foi consumido, a "vaga" foi usada pelo item correspondente e este é um novo item legítimo
+      // (ex: segunda unidade de um item idêntico dentro da mesma OC).
+      if (dbImpressoes.has(impressaoFonte) && !consumedFingerprints.has(impressaoFonte)) {
         const existente = dbImpressoes.get(impressaoFonte);
         Logger.log(`   ⚠️ DUPLICATA EVITADA POR FINGERPRINT: ID="${id}" já existe no DB como ID="${existente.id}" - ignorado`);
         duplicatasDebug.push([
@@ -1892,10 +1901,16 @@ function sincronizarDados() {
     const idsExistentes = new Set(dbMap.keys());
     const idsJaAdicionados = new Set();
 
-    // Fingerprints de todos os itens já existentes no DB (inclui updates pendentes que mudaram dados)
-    const fingerprintsExistentes = new Set();
+    // Conta quantas vezes cada fingerprint aparece no DB, descontando itens já consumidos
+    // (matched por ID ou por fingerprint na fase anterior). Cada "slot" disponível representa
+    // uma vaga de duplicata no DB que já está coberta. Itens com fingerprint além dessas vagas
+    // são novos legítimos (ex: segunda unidade idêntica na mesma OC).
+    const fpDisponiveisDB = new Map(); // fingerprint → quantidade de itens NÃO consumidos no DB
     for (const [, dbItem] of dbMap.entries()) {
-      fingerprintsExistentes.add(_criarImpressaoDigital_(dbItem.row, true));
+      const fp = _criarImpressaoDigital_(dbItem.row, true);
+      if (!consumedFingerprints.has(fp)) {
+        fpDisponiveisDB.set(fp, (fpDisponiveisDB.get(fp) || 0) + 1);
+      }
     }
 
     novos.forEach(item => {
@@ -1920,11 +1935,15 @@ function sincronizarDados() {
         return;
       }
 
-      // Verifica se já existe no DB por fingerprint (detecta mesmo item com ID diferente)
+      // Verifica se ainda há vagas no DB para esta fingerprint (itens idênticos não consumidos).
+      // Se vagas > 0 o item do DB já cobre esta "instância" → rejeita como duplicata real.
+      // Se vagas = 0 (todos consumidos/matched) → é um novo item legítimo e pode ser adicionado.
       const fp = _criarImpressaoDigital_(item);
-      if (fingerprintsExistentes.has(fp)) {
-        Logger.log(`   ⚠️ DUPLICATA EVITADA (fingerprint): ID="${id}" tem mesmos dados de item já existente no DB`);
+      const vagasDB = fpDisponiveisDB.get(fp) || 0;
+      if (vagasDB > 0) {
+        Logger.log(`   ⚠️ DUPLICATA EVITADA (fingerprint): ID="${id}" tem mesmos dados de item já existente no DB (vagas=${vagasDB})`);
         _regDebug_('Fingerprint idêntica (validação final)');
+        fpDisponiveisDB.set(fp, vagasDB - 1); // consome a vaga para não bloquear mais do que o necessário
         return;
       }
 
@@ -1935,10 +1954,9 @@ function sincronizarDados() {
         return;
       }
 
-      // Item válido - adiciona; registra fingerprint para evitar duplicata entre os próprios novos
+      // Item válido - adiciona
       novosValidados.push(item);
       idsJaAdicionados.add(id);
-      fingerprintsExistentes.add(fp);
     });
 
     const duplicatasEvitadas = novos.length - novosValidados.length;
