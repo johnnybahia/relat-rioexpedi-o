@@ -2510,9 +2510,20 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     // NÚMEROS/DATA cruas
     'QTD. ABERTA': qtdAberta,
     'QTD. ORIGINAL': calcularQtdOriginal(uniqueId, qtdAberta),
-    'PRAZO': get('PRAZO', null),
     'DT. ENTREGA': get('DT. ENTREGA', null),
     'DATA RECEB.': get('DATA RECEB.', null),
+    // PRAZO em dias: positivo = dias restantes, negativo = dias de atraso
+    'PRAZO': (() => {
+      const dtEnt = get('DT. ENTREGA', null);
+      if (!dtEnt) return null;
+      const dtDate = dtEnt instanceof Date ? dtEnt : new Date(dtEnt);
+      if (isNaN(dtDate.getTime())) return null;
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+      const dtNorm = new Date(dtDate.getTime());
+      dtNorm.setHours(0, 0, 0, 0);
+      return Math.round((dtNorm - hoje) / 86400000);
+    })(),
 
     Status: getDisp('Status', 'Desconhecido'),
     MARCAR_FATURAR: getDisp('MARCAR_FATURAR', '') // Nova coluna para marcação de faturamento
