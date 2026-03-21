@@ -2949,7 +2949,7 @@ function obterItensMarcadosParaFaturar() {
             PEDIDO: item.PEDIDO,
             'QTD. ABERTA': item['QTD. ABERTA'],
             'QTD. ORIGINAL': item['QTD. ORIGINAL'],
-            'PRAZO': _fmtBR_(item['PRAZO']),              // Converte Date para string
+            'PRAZO': item['PRAZO'],                         // Número de dias (positivo=a vencer, negativo=atrasado)
             'DT. ENTREGA': _fmtBR_(item['DT. ENTREGA']),  // Converte Date para string
             'DATA RECEB.': _fmtBR_(item['DATA RECEB.']),  // Converte Date para string
             Status: item.Status,
