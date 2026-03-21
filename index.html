@@ -1191,6 +1191,15 @@
         return '';
     }
     
+    function formatarPrazoDias(prazo) {
+      if (prazo === null || prazo === undefined) return 'N/A';
+      const n = Number(prazo);
+      if (isNaN(n)) return 'N/A';
+      if (n === 0)  return 'Hoje';
+      const unidade = Math.abs(n) === 1 ? 'dia' : 'dias';
+      return n > 0 ? `+${n} ${unidade}` : `${n} ${unidade}`;
+    }
+
     function formatarData(dataInput) {
       if (!dataInput) return 'N/A';
       try {
@@ -1616,7 +1625,7 @@ ALL_OCS_ITEMS = itemsObj;
                         <td class="nowrap">${item['CÓD. OS'] ?? 'N/A'}</td>
                         <td class="nowrap">${formatarData(item['DATA RECEB.'])}</td>
                         <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
-                        <td class="status-prazo nowrap">${item.PRAZO ?? 'N/A'}</td>
+                        <td class="status-prazo nowrap">${formatarPrazoDias(item.PRAZO)}</td>
                         <td class="nowrap" style="text-align:center;">
                             <input type="checkbox" class="checkbox-lote" ${itensSelecionadosLote.has(item.uniqueId) ? 'checked' : ''}
                                 onchange='toggleLoteItem("${item.uniqueId}", ${JSON.stringify(item).replace(/'/g, "&apos;")}, "${ocInfo.ordCompra}", "${ocInfo.cliente}", this.checked)'
@@ -3739,7 +3748,7 @@ ALL_OCS_ITEMS = itemsObj;
                 const dtEntrega = formatarData(item['DT. ENTREGA']);
 
                 // MESMA LÓGICA DOS CARDS - usar ?? (nullish coalescing)
-                const prazo = item.PRAZO ?? 'N/A';
+                const prazo = formatarPrazoDias(item.PRAZO);
                 const codOS = item['CÓD. OS'] ?? 'N/A';
 
                 // Log para debug apenas se N/A (dados realmente ausentes)
@@ -3930,7 +3939,7 @@ ALL_OCS_ITEMS = itemsObj;
                         const saldo = item.SALDO || 0; // SALDO = soma das baixas
                         const dtRecebimento = formatarData(item['DATA RECEB.']);
                         const dtEntrega = formatarData(item['DT. ENTREGA']);
-                        const prazo = item.PRAZO ?? 'N/A';
+                        const prazo = formatarPrazoDias(item.PRAZO);
                         const codOS = item['CÓD. OS'] ?? 'N/A';
 
                         html += `
