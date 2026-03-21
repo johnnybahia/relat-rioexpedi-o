@@ -1724,6 +1724,11 @@ function sincronizarDados() {
     let idsAtualizados = [];
     let autoExcluidos = 0;
 
+    // Itens que saíram do PEDIDOS e precisam ser marcados Faturado.
+    // São coletados primeiro e processados depois, ordenados por QTD.ABERTA crescente,
+    // garantindo que QTD=0 (totalmente baixados) sejam tratados antes dos parciais.
+    const itensFaturarPendentes = [];
+
     // Rastreia fingerprints de itens do DB que foram "consumidos" (matched por ID ou por fingerprint).
     // Usado para liberar a mesma fingerprint a novos itens legítimos (ex: vários itens iguais na mesma OC).
     const consumedFingerprints = new Set();
@@ -1848,31 +1853,17 @@ function sincronizarDados() {
           if (aguardandoNF) {
             Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
           } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
-            // Item saiu do PEDIDOS → sempre marca como Faturado (não Excluido)
-            const qtdAberta = Number(dbItem.row[DB_QTD_COL] || 0);
-            const linhaFaturar = [...dbItem.row];
-            linhaFaturar[STATUS_COL] = "Faturado";
-            linhaFaturar[DATA_STATUS_COL] = new Date();
-            updates.push({ linha: dbItem.linha, dados: linhaFaturar, de: statusAtual, para: "Faturado", id: id });
-            autoExcluidos++; // reutiliza contador (representa "itens processados automaticamente")
-
-            if (qtdAberta > 0) {
-              // QTD ainda aberta → registra alerta para o usuário resolver no HTML
-              Logger.log(`   ⚠️ Item sumiu com QTD.ABERTA=${qtdAberta} → Faturado + ALERTA gerado`);
-              _registrarAlertaFaturamento_({
-                id: id,
-                cartela: String(dbItem.row[CARTELA_COL] || ''),
-                cliente: String(dbItem.row[CLIENTE_COL] || ''),
-                pedido: String(dbItem.row[PEDIDO_COL] || ''),
-                oc: String(dbItem.row[OC_COL] || ''),
-                desc: String(dbItem.row[DESC_COL] || ''),
-                tam: String(dbItem.row[TAM_COL] || ''),
-                qtdAberta: qtdAberta,
-                dataEvento: new Date().toISOString()
-              });
-            } else {
-              Logger.log(`   ✅ Item sumiu com QTD.ABERTA=0 → Faturado silencioso`);
-            }
+            // Coleta para processar depois, ordenado por QTD.ABERTA crescente.
+            // Isso garante que, entre itens idênticos (mesma OC), os totalmente
+            // baixados (QTD=0) sejam marcados Faturado silenciosamente primeiro,
+            // e os parciais (QTD>0) gerem alerta apenas se a conta bater.
+            itensFaturarPendentes.push({
+              id: id,
+              linha: dbItem.linha,
+              row: dbItem.row,
+              statusAtual: statusAtual,
+              qtdAberta: Number(dbItem.row[DB_QTD_COL] || 0)
+            });
           } else {
             Logger.log(`   ℹ️ Não alterado (status: ${statusAtual})`);
           }
@@ -1880,6 +1871,41 @@ function sincronizarDados() {
       }
     }
     
+    // === PROCESSAR ITENS QUE SAÍRAM DO PEDIDOS (ordenado por QTD.ABERTA crescente) ===
+    // Ordena: QTD=0 primeiro (faturamento silencioso), QTD>0 por último (gera alerta).
+    // Com múltiplos itens idênticos na mesma OC, isso garante que os totalmente
+    // baixados sejam os primeiros a sair, e só gera alerta se realmente há QTD parcial.
+    itensFaturarPendentes.sort((a, b) => a.qtdAberta - b.qtdAberta);
+
+    if (itensFaturarPendentes.length > 0) {
+      Logger.log(`\n🔄 Processando ${itensFaturarPendentes.length} item(ns) que saíram do PEDIDOS (ordenado por QTD.ABERTA):`);
+    }
+
+    itensFaturarPendentes.forEach(({ id, linha, row, statusAtual, qtdAberta }) => {
+      const linhaFaturar = [...row];
+      linhaFaturar[STATUS_COL] = "Faturado";
+      linhaFaturar[DATA_STATUS_COL] = new Date();
+      updates.push({ linha: linha, dados: linhaFaturar, de: statusAtual, para: "Faturado", id: id });
+      autoExcluidos++;
+
+      if (qtdAberta > 0) {
+        Logger.log(`   ⚠️ QTD.ABERTA=${qtdAberta} → Faturado + ALERTA (ID="${id}")`);
+        _registrarAlertaFaturamento_({
+          id: id,
+          cartela: String(row[CARTELA_COL] || ''),
+          cliente: String(row[CLIENTE_COL] || ''),
+          pedido: String(row[PEDIDO_COL] || ''),
+          oc: String(row[OC_COL] || ''),
+          desc: String(row[DESC_COL] || ''),
+          tam: String(row[TAM_COL] || ''),
+          qtdAberta: qtdAberta,
+          dataEvento: new Date().toISOString()
+        });
+      } else {
+        Logger.log(`   ✅ QTD.ABERTA=0 → Faturado silencioso (ID="${id}")`);
+      }
+    });
+
     // Novos itens que estão em PEDIDOS mas não em Relatorio_DB
     const duplicatasDebug = []; // acumula itens descartados para auditoria
     for (let [id, fonteRow] of fonteMap.entries()) {
