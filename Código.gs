@@ -1848,24 +1848,31 @@ function sincronizarDados() {
           if (aguardandoNF) {
             Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
           } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
-            if (idsBaixados.has(id)) {
-              Logger.log(`   ⚠️ Item com baixa removido de PEDIDOS - gerando aviso e marcando como Excluido`);
-              avisos.push({
+            // Item saiu do PEDIDOS → sempre marca como Faturado (não Excluido)
+            const qtdAberta = Number(dbItem.row[DB_QTD_COL] || 0);
+            const linhaFaturar = [...dbItem.row];
+            linhaFaturar[STATUS_COL] = "Faturado";
+            linhaFaturar[DATA_STATUS_COL] = new Date();
+            updates.push({ linha: dbItem.linha, dados: linhaFaturar, de: statusAtual, para: "Faturado", id: id });
+            autoExcluidos++; // reutiliza contador (representa "itens processados automaticamente")
+
+            if (qtdAberta > 0) {
+              // QTD ainda aberta → registra alerta para o usuário resolver no HTML
+              Logger.log(`   ⚠️ Item sumiu com QTD.ABERTA=${qtdAberta} → Faturado + ALERTA gerado`);
+              _registrarAlertaFaturamento_({
                 id: id,
-                cartela: dbItem.row[CARTELA_COL],
-                cliente: dbItem.row[CLIENTE_COL],
-                pedido: dbItem.row[PEDIDO_COL],
-                timestamp: new Date().toISOString()
+                cartela: String(dbItem.row[CARTELA_COL] || ''),
+                cliente: String(dbItem.row[CLIENTE_COL] || ''),
+                pedido: String(dbItem.row[PEDIDO_COL] || ''),
+                oc: String(dbItem.row[OC_COL] || ''),
+                desc: String(dbItem.row[DESC_COL] || ''),
+                tam: String(dbItem.row[TAM_COL] || ''),
+                qtdAberta: qtdAberta,
+                dataEvento: new Date().toISOString()
               });
             } else {
-              Logger.log(`   ℹ️ Item removido de PEDIDOS sem histórico de baixas - marcando como Excluido`);
+              Logger.log(`   ✅ Item sumiu com QTD.ABERTA=0 → Faturado silencioso`);
             }
-            // Marca como Excluido no DB (saiu do PEDIDOS e não está aguardando NF)
-            const linhaExcluir = [...dbItem.row];
-            linhaExcluir[STATUS_COL] = "Excluido";
-            linhaExcluir[DATA_STATUS_COL] = new Date(); // registra quando foi excluído
-            updates.push({ linha: dbItem.linha, dados: linhaExcluir, de: statusAtual, para: "Excluido", id: id });
-            autoExcluidos++;
           } else {
             Logger.log(`   ℹ️ Não alterado (status: ${statusAtual})`);
           }
@@ -2058,6 +2065,93 @@ function sincronizarDados() {
   } catch (error) {
     Logger.log("\n❌ ERRO: " + error.message);
     throw error;
+  }
+}
+
+// ====== ALERTAS DE FATURAMENTO ======
+const ALERTAS_PROP_KEY = 'ALERTAS_FATURAMENTO';
+
+/**
+ * Lê a senha de controle da aba SENHA, célula A2.
+ */
+function _getSenha_() {
+  try {
+    const sheet = SS.getSheetByName('SENHA');
+    if (!sheet) return null;
+    const val = sheet.getRange('A2').getValue();
+    return val ? String(val).trim() : null;
+  } catch (e) {
+    Logger.log('⚠️ _getSenha_: ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * Registra um novo alerta de faturamento com QTD aberta.
+ * Cada alerta recebe um ID único baseado em timestamp + ID do item.
+ */
+function _registrarAlertaFaturamento_(dados) {
+  try {
+    const sp = PropertiesService.getScriptProperties();
+    const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+    // Evita duplicata: não registra se já existe alerta para o mesmo ID de item
+    if (!lista.some(a => a.itemId === dados.id)) {
+      lista.push({
+        alertaId: `ALT-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        itemId: dados.id,
+        cartela: dados.cartela,
+        cliente: dados.cliente,
+        pedido: dados.pedido,
+        oc: dados.oc,
+        desc: dados.desc,
+        tam: dados.tam,
+        qtdAberta: dados.qtdAberta,
+        dataEvento: dados.dataEvento
+      });
+      sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(lista));
+      Logger.log(`🔔 Alerta registrado para item ID="${dados.id}", QTD.ABERTA=${dados.qtdAberta}`);
+    }
+  } catch (e) {
+    Logger.log('⚠️ _registrarAlertaFaturamento_: ' + e.message);
+  }
+}
+
+/**
+ * Retorna a lista de alertas pendentes de faturamento para o HTML.
+ */
+function obterAlertasPendentes() {
+  try {
+    const sp = PropertiesService.getScriptProperties();
+    return JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+  } catch (e) {
+    Logger.log('⚠️ obterAlertasPendentes: ' + e.message);
+    return [];
+  }
+}
+
+/**
+ * Valida a senha e, se correta, remove o alerta da lista.
+ * Retorna { success, erro } para o HTML.
+ */
+function confirmarAlerta(alertaId, senhaDigitada) {
+  try {
+    const senhaCorreta = _getSenha_();
+    if (!senhaCorreta) {
+      return { success: false, erro: 'Aba SENHA ou célula A2 não encontrada. Configure a senha primeiro.' };
+    }
+    if (String(senhaDigitada).trim() !== senhaCorreta) {
+      return { success: false, erro: 'Senha incorreta.' };
+    }
+    // Senha correta → remove o alerta
+    const sp = PropertiesService.getScriptProperties();
+    const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+    const nova = lista.filter(a => a.alertaId !== alertaId);
+    sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(nova));
+    Logger.log(`✅ Alerta ${alertaId} confirmado e removido.`);
+    return { success: true, restantes: nova.length };
+  } catch (e) {
+    Logger.log('⚠️ confirmarAlerta: ' + e.message);
+    return { success: false, erro: e.message };
   }
 }
 
