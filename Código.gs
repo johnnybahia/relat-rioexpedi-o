@@ -38,6 +38,8 @@ const TIMESTAMP_COL = 15; // P (na aba PEDIDOS) - Timestamp de criação do ID
 const DB_QTD_COL = 9;    // J (índice 9) - QTD. ABERTA no Relatorio_DB (≠ QTD_COL=10 que é da aba PEDIDOS)
 const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
 const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova coluna para marcar itens para faturamento
+const DATA_STATUS_COL = 16;    // Q (coluna 17) - Data em que o status foi alterado para Faturado/Finalizado/Excluido
+const DIAS_RETENCAO = 15;      // Itens com status final são purgados após este número de dias
 
 // ====== BAIXAS PARCIAIS ======
 const BAIXAS_SHEET_NAME = "Baixas_Historico";
@@ -1209,8 +1211,22 @@ function processoAutomaticoCompleto() {
       Logger.log(`   ✓ Nenhuma mudança - dados já sincronizados`);
     }
 
-    // ETAPA 3: Limpar cache APENAS se houve mudanças
-    Logger.log("\n🗑️ ETAPA 3: Limpeza de cache");
+    // ETAPA 3: Purgar itens finalizados com mais de DIAS_RETENCAO dias
+    Logger.log(`\n🗑️ ETAPA 3: Purga de itens finalizados (>${DIAS_RETENCAO} dias)`);
+    try {
+      const resultadoPurga = purgarItensFinalizados();
+      if (resultadoPurga.purgados > 0) {
+        Logger.log(`   ✅ ${resultadoPurga.purgados} item(ns) purgado(s) do DB`);
+        houveMudancas = true;
+      } else {
+        Logger.log(`   ✓ Nenhum item para purgar`);
+      }
+    } catch (ePurga) {
+      Logger.log(`   ⚠️ Erro na purga (não crítico): ${ePurga.message}`);
+    }
+
+    // ETAPA 4: Limpar cache APENAS se houve mudanças
+    Logger.log("\n🗑️ ETAPA 4: Limpeza de cache");
     if (houveMudancas) {
       limparCache();
       Logger.log("   ✅ Cache limpo (houve mudanças)");
@@ -1847,6 +1863,7 @@ function sincronizarDados() {
             // Marca como Excluido no DB (saiu do PEDIDOS e não está aguardando NF)
             const linhaExcluir = [...dbItem.row];
             linhaExcluir[STATUS_COL] = "Excluido";
+            linhaExcluir[DATA_STATUS_COL] = new Date(); // registra quando foi excluído
             updates.push({ linha: dbItem.linha, dados: linhaExcluir, de: statusAtual, para: "Excluido", id: id });
             autoExcluidos++;
           } else {
@@ -2044,6 +2061,72 @@ function sincronizarDados() {
   }
 }
 
+// ====== PURGA DE ITENS FINALIZADOS ======
+/**
+ * Remove do Relatorio_DB itens com status Faturado, Finalizado ou Excluido
+ * cuja DATA_STATUS (coluna Q) seja anterior a hoje - DIAS_RETENCAO (padrão: 15 dias).
+ *
+ * Itens sem DATA_STATUS preenchida são ignorados com segurança (não há risco de
+ * apagar algo que não sabemos quando foi alterado).
+ *
+ * Chamada automaticamente pelo processoAutomaticoCompleto().
+ * Pode também ser executada manualmente pelo editor (sem UI).
+ */
+function purgarItensFinalizados() {
+  const STATUS_FINAIS = new Set(['Faturado', 'Finalizado', 'Excluido']);
+  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('ℹ️ purgarItensFinalizados: DB vazio, nada a fazer.');
+    return { purgados: 0 };
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const colMap = _getColumnIndexes_(headers);
+  const statusCol = colMap['Status'];           // índice 0-based
+  const dataStatusCol = colMap['DATA_STATUS'];  // índice 0-based
+
+  if (statusCol === undefined || dataStatusCol === undefined) {
+    Logger.log('⚠️ purgarItensFinalizados: colunas Status ou DATA_STATUS não encontradas — verifique os cabeçalhos do DB.');
+    return { purgados: 0 };
+  }
+
+  const numCols = sheet.getLastColumn();
+  const numRows = sheet.getLastRow() - 1; // sem cabeçalho
+  const dados = sheet.getRange(2, 1, numRows, numCols).getValues();
+
+  const limiteData = new Date();
+  limiteData.setDate(limiteData.getDate() - DIAS_RETENCAO);
+
+  // Coleta linhas para deletar de baixo pra cima (evita deslocamento de índice)
+  const linhasParaDeletar = [];
+  for (let i = dados.length - 1; i >= 0; i--) {
+    const status = String(dados[i][statusCol] || '').trim();
+    if (!STATUS_FINAIS.has(status)) continue;
+
+    const dataStatus = dados[i][dataStatusCol];
+    if (!dataStatus || !(dataStatus instanceof Date) || isNaN(dataStatus.getTime())) {
+      // Sem data registrada → não apaga (segurança)
+      continue;
+    }
+
+    if (dataStatus < limiteData) {
+      linhasParaDeletar.push(i + 2); // +1 cabeçalho, +1 base-1
+    }
+  }
+
+  if (linhasParaDeletar.length === 0) {
+    Logger.log(`ℹ️ purgarItensFinalizados: nenhum item com mais de ${DIAS_RETENCAO} dias para purgar.`);
+    return { purgados: 0 };
+  }
+
+  // Deleta de baixo pra cima para não deslocar índices
+  linhasParaDeletar.forEach(linha => sheet.deleteRow(linha));
+  SpreadsheetApp.flush();
+  limparCache();
+  Logger.log(`🗑️ purgarItensFinalizados: ${linhasParaDeletar.length} item(ns) com mais de ${DIAS_RETENCAO} dias purgado(s) do DB.`);
+  return { purgados: linhasParaDeletar.length };
+}
+
 // ====== AUDITORIA DE DUPLICATAS ======
 /**
  * Grava (ou limpa) a aba "Duplicatas_Debug" com os itens descartados na última sincronização.
@@ -2200,7 +2283,8 @@ function salvarDadosCache(dados) {
 const RELATORIO_DB_HEADERS = [
   'ID_UNICO', 'CARTELA', 'CLIENTE', 'PEDIDO', 'CÓD. CLIENTE',
   'CÓD. MARFIM', 'DESCRIÇÃO', 'TAMANHO', 'ORD. COMPRA', 'QTD. ABERTA',
-  'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR'
+  'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR',
+  'DATA_STATUS' // Q - data em que o status foi alterado para Faturado/Finalizado/Excluido
 ];
 
 /**
@@ -2500,8 +2584,9 @@ function marcarFaturado(uniqueId, planilhaLinha) {
     }
 
     sheet.getRange(linhaNum, statusCol + 1).setValue("Faturado");
+    sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
     limparCache();
-    Logger.log(`💰 ${uniqueId || 'sem-id'} → Faturado (linha ${linhaNum}, coluna ${statusCol + 1})`);
+    Logger.log(`💰 ${uniqueId || 'sem-id'} → Faturado (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
     Logger.log(`❌ marcarFaturado: ${e.message}`);
@@ -2528,8 +2613,9 @@ function excluirItem(uniqueId, planilhaLinha) {
     }
 
     sheet.getRange(linhaNum, statusCol + 1).setValue("Excluido");
+    sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
     limparCache();
-    Logger.log(`🗑️ ${uniqueId || 'sem-id'} → Excluido (linha ${linhaNum}, coluna ${statusCol + 1})`);
+    Logger.log(`🗑️ ${uniqueId || 'sem-id'} → Excluido (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
     Logger.log(`❌ excluirItem: ${e.message}`);
@@ -2556,8 +2642,9 @@ function finalizarItem(uniqueId, planilhaLinha) {
     }
 
     sheet.getRange(linhaNum, statusCol + 1).setValue("Finalizado");
+    sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
     limparCache();
-    Logger.log(`✅ ${uniqueId || 'sem-id'} → Finalizado (linha ${linhaNum}, coluna ${statusCol + 1})`);
+    Logger.log(`✅ ${uniqueId || 'sem-id'} → Finalizado (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
     Logger.log(`❌ finalizarItem: ${e.message}`);
