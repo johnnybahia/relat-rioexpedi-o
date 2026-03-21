@@ -38,6 +38,8 @@ const TIMESTAMP_COL = 15; // P (na aba PEDIDOS) - Timestamp de criação do ID
 const DB_QTD_COL = 9;    // J (índice 9) - QTD. ABERTA no Relatorio_DB (≠ QTD_COL=10 que é da aba PEDIDOS)
 const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
 const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova coluna para marcar itens para faturamento
+const DATA_STATUS_COL = 16;    // Q (coluna 17) - Data em que o status foi alterado para Faturado/Finalizado/Excluido
+const DIAS_RETENCAO = 15;      // Itens com status final são purgados após este número de dias
 
 // ====== BAIXAS PARCIAIS ======
 const BAIXAS_SHEET_NAME = "Baixas_Historico";
@@ -1209,8 +1211,22 @@ function processoAutomaticoCompleto() {
       Logger.log(`   ✓ Nenhuma mudança - dados já sincronizados`);
     }
 
-    // ETAPA 3: Limpar cache APENAS se houve mudanças
-    Logger.log("\n🗑️ ETAPA 3: Limpeza de cache");
+    // ETAPA 3: Purgar itens finalizados com mais de DIAS_RETENCAO dias
+    Logger.log(`\n🗑️ ETAPA 3: Purga de itens finalizados (>${DIAS_RETENCAO} dias)`);
+    try {
+      const resultadoPurga = purgarItensFinalizados();
+      if (resultadoPurga.purgados > 0) {
+        Logger.log(`   ✅ ${resultadoPurga.purgados} item(ns) purgado(s) do DB`);
+        houveMudancas = true;
+      } else {
+        Logger.log(`   ✓ Nenhum item para purgar`);
+      }
+    } catch (ePurga) {
+      Logger.log(`   ⚠️ Erro na purga (não crítico): ${ePurga.message}`);
+    }
+
+    // ETAPA 4: Limpar cache APENAS se houve mudanças
+    Logger.log("\n🗑️ ETAPA 4: Limpeza de cache");
     if (houveMudancas) {
       limparCache();
       Logger.log("   ✅ Cache limpo (houve mudanças)");
@@ -1708,6 +1724,15 @@ function sincronizarDados() {
     let idsAtualizados = [];
     let autoExcluidos = 0;
 
+    // Itens que saíram do PEDIDOS e precisam ser marcados Faturado.
+    // São coletados primeiro e processados depois, ordenados por QTD.ABERTA crescente,
+    // garantindo que QTD=0 (totalmente baixados) sejam tratados antes dos parciais.
+    const itensFaturarPendentes = [];
+
+    // Rastreia fingerprints de itens do DB que foram "consumidos" (matched por ID ou por fingerprint).
+    // Usado para liberar a mesma fingerprint a novos itens legítimos (ex: vários itens iguais na mesma OC).
+    const consumedFingerprints = new Set();
+
     // Precarrega IDs com histórico de baixas para detectar itens parcializados removidos
     const idsBaixados = new Set();
     try {
@@ -1777,6 +1802,7 @@ function sincronizarDados() {
         }
 
         fonteMap.delete(id);
+        consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
 
       } else {
         // SEGUNDA TENTATIVA: Buscar por IMPRESSÃO DIGITAL (dados)
@@ -1812,6 +1838,7 @@ function sincronizarDados() {
           // "ghost match" onde um item fantasma no DB aparece como ativo para sempre).
           fonteMap.delete(novoId);
           fonteImpressoes.delete(impressaoDB);
+          consumedFingerprints.add(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
 
         } else {
           // NÃO ENCONTROU nem por ID nem por dados - item saiu do DADOS_IMPORTADOS
@@ -1826,23 +1853,17 @@ function sincronizarDados() {
           if (aguardandoNF) {
             Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
           } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
-            if (idsBaixados.has(id)) {
-              Logger.log(`   ⚠️ Item com baixa removido de PEDIDOS - gerando aviso e marcando como Excluido`);
-              avisos.push({
-                id: id,
-                cartela: dbItem.row[CARTELA_COL],
-                cliente: dbItem.row[CLIENTE_COL],
-                pedido: dbItem.row[PEDIDO_COL],
-                timestamp: new Date().toISOString()
-              });
-            } else {
-              Logger.log(`   ℹ️ Item removido de PEDIDOS sem histórico de baixas - marcando como Excluido`);
-            }
-            // Marca como Excluido no DB (saiu do PEDIDOS e não está aguardando NF)
-            const linhaExcluir = [...dbItem.row];
-            linhaExcluir[STATUS_COL] = "Excluido";
-            updates.push({ linha: dbItem.linha, dados: linhaExcluir, de: statusAtual, para: "Excluido", id: id });
-            autoExcluidos++;
+            // Coleta para processar depois, ordenado por QTD.ABERTA crescente.
+            // Isso garante que, entre itens idênticos (mesma OC), os totalmente
+            // baixados (QTD=0) sejam marcados Faturado silenciosamente primeiro,
+            // e os parciais (QTD>0) gerem alerta apenas se a conta bater.
+            itensFaturarPendentes.push({
+              id: id,
+              linha: dbItem.linha,
+              row: dbItem.row,
+              statusAtual: statusAtual,
+              qtdAberta: Number(dbItem.row[DB_QTD_COL] || 0)
+            });
           } else {
             Logger.log(`   ℹ️ Não alterado (status: ${statusAtual})`);
           }
@@ -1850,6 +1871,41 @@ function sincronizarDados() {
       }
     }
     
+    // === PROCESSAR ITENS QUE SAÍRAM DO PEDIDOS (ordenado por QTD.ABERTA crescente) ===
+    // Ordena: QTD=0 primeiro (faturamento silencioso), QTD>0 por último (gera alerta).
+    // Com múltiplos itens idênticos na mesma OC, isso garante que os totalmente
+    // baixados sejam os primeiros a sair, e só gera alerta se realmente há QTD parcial.
+    itensFaturarPendentes.sort((a, b) => a.qtdAberta - b.qtdAberta);
+
+    if (itensFaturarPendentes.length > 0) {
+      Logger.log(`\n🔄 Processando ${itensFaturarPendentes.length} item(ns) que saíram do PEDIDOS (ordenado por QTD.ABERTA):`);
+    }
+
+    itensFaturarPendentes.forEach(({ id, linha, row, statusAtual, qtdAberta }) => {
+      const linhaFaturar = [...row];
+      linhaFaturar[STATUS_COL] = "Faturado";
+      linhaFaturar[DATA_STATUS_COL] = new Date();
+      updates.push({ linha: linha, dados: linhaFaturar, de: statusAtual, para: "Faturado", id: id });
+      autoExcluidos++;
+
+      if (qtdAberta > 0) {
+        Logger.log(`   ⚠️ QTD.ABERTA=${qtdAberta} → Faturado + ALERTA (ID="${id}")`);
+        _registrarAlertaFaturamento_({
+          id: id,
+          cartela: String(row[CARTELA_COL] || ''),
+          cliente: String(row[CLIENTE_COL] || ''),
+          pedido: String(row[PEDIDO_COL] || ''),
+          oc: String(row[OC_COL] || ''),
+          desc: String(row[DESC_COL] || ''),
+          tam: String(row[TAM_COL] || ''),
+          qtdAberta: qtdAberta,
+          dataEvento: new Date().toISOString()
+        });
+      } else {
+        Logger.log(`   ✅ QTD.ABERTA=0 → Faturado silencioso (ID="${id}")`);
+      }
+    });
+
     // Novos itens que estão em PEDIDOS mas não em Relatorio_DB
     const duplicatasDebug = []; // acumula itens descartados para auditoria
     for (let [id, fonteRow] of fonteMap.entries()) {
@@ -1857,7 +1913,10 @@ function sincronizarDados() {
       // Evita duplicação quando sincronizarPedidosComFonte gera ID diferente para
       // um item que já existe no DB (ex: por inconsistência de dados na source).
       const impressaoFonte = _criarImpressaoDigital_(fonteRow);
-      if (dbImpressoes.has(impressaoFonte)) {
+      // Só rejeita se o item do DB com esta fingerprint NÃO foi consumido (matched).
+      // Se foi consumido, a "vaga" foi usada pelo item correspondente e este é um novo item legítimo
+      // (ex: segunda unidade de um item idêntico dentro da mesma OC).
+      if (dbImpressoes.has(impressaoFonte) && !consumedFingerprints.has(impressaoFonte)) {
         const existente = dbImpressoes.get(impressaoFonte);
         Logger.log(`   ⚠️ DUPLICATA EVITADA POR FINGERPRINT: ID="${id}" já existe no DB como ID="${existente.id}" - ignorado`);
         duplicatasDebug.push([
@@ -1892,10 +1951,16 @@ function sincronizarDados() {
     const idsExistentes = new Set(dbMap.keys());
     const idsJaAdicionados = new Set();
 
-    // Fingerprints de todos os itens já existentes no DB (inclui updates pendentes que mudaram dados)
-    const fingerprintsExistentes = new Set();
+    // Conta quantas vezes cada fingerprint aparece no DB, descontando itens já consumidos
+    // (matched por ID ou por fingerprint na fase anterior). Cada "slot" disponível representa
+    // uma vaga de duplicata no DB que já está coberta. Itens com fingerprint além dessas vagas
+    // são novos legítimos (ex: segunda unidade idêntica na mesma OC).
+    const fpDisponiveisDB = new Map(); // fingerprint → quantidade de itens NÃO consumidos no DB
     for (const [, dbItem] of dbMap.entries()) {
-      fingerprintsExistentes.add(_criarImpressaoDigital_(dbItem.row, true));
+      const fp = _criarImpressaoDigital_(dbItem.row, true);
+      if (!consumedFingerprints.has(fp)) {
+        fpDisponiveisDB.set(fp, (fpDisponiveisDB.get(fp) || 0) + 1);
+      }
     }
 
     novos.forEach(item => {
@@ -1920,11 +1985,15 @@ function sincronizarDados() {
         return;
       }
 
-      // Verifica se já existe no DB por fingerprint (detecta mesmo item com ID diferente)
+      // Verifica se ainda há vagas no DB para esta fingerprint (itens idênticos não consumidos).
+      // Se vagas > 0 o item do DB já cobre esta "instância" → rejeita como duplicata real.
+      // Se vagas = 0 (todos consumidos/matched) → é um novo item legítimo e pode ser adicionado.
       const fp = _criarImpressaoDigital_(item);
-      if (fingerprintsExistentes.has(fp)) {
-        Logger.log(`   ⚠️ DUPLICATA EVITADA (fingerprint): ID="${id}" tem mesmos dados de item já existente no DB`);
+      const vagasDB = fpDisponiveisDB.get(fp) || 0;
+      if (vagasDB > 0) {
+        Logger.log(`   ⚠️ DUPLICATA EVITADA (fingerprint): ID="${id}" tem mesmos dados de item já existente no DB (vagas=${vagasDB})`);
         _regDebug_('Fingerprint idêntica (validação final)');
+        fpDisponiveisDB.set(fp, vagasDB - 1); // consome a vaga para não bloquear mais do que o necessário
         return;
       }
 
@@ -1935,10 +2004,9 @@ function sincronizarDados() {
         return;
       }
 
-      // Item válido - adiciona; registra fingerprint para evitar duplicata entre os próprios novos
+      // Item válido - adiciona
       novosValidados.push(item);
       idsJaAdicionados.add(id);
-      fingerprintsExistentes.add(fp);
     });
 
     const duplicatasEvitadas = novos.length - novosValidados.length;
@@ -2024,6 +2092,159 @@ function sincronizarDados() {
     Logger.log("\n❌ ERRO: " + error.message);
     throw error;
   }
+}
+
+// ====== ALERTAS DE FATURAMENTO ======
+const ALERTAS_PROP_KEY = 'ALERTAS_FATURAMENTO';
+
+/**
+ * Lê a senha de controle da aba SENHA, célula A2.
+ */
+function _getSenha_() {
+  try {
+    const sheet = SS.getSheetByName('SENHA');
+    if (!sheet) return null;
+    const val = sheet.getRange('A2').getValue();
+    return val ? String(val).trim() : null;
+  } catch (e) {
+    Logger.log('⚠️ _getSenha_: ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * Registra um novo alerta de faturamento com QTD aberta.
+ * Cada alerta recebe um ID único baseado em timestamp + ID do item.
+ */
+function _registrarAlertaFaturamento_(dados) {
+  try {
+    const sp = PropertiesService.getScriptProperties();
+    const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+    // Evita duplicata: não registra se já existe alerta para o mesmo ID de item
+    if (!lista.some(a => a.itemId === dados.id)) {
+      lista.push({
+        alertaId: `ALT-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        itemId: dados.id,
+        cartela: dados.cartela,
+        cliente: dados.cliente,
+        pedido: dados.pedido,
+        oc: dados.oc,
+        desc: dados.desc,
+        tam: dados.tam,
+        qtdAberta: dados.qtdAberta,
+        dataEvento: dados.dataEvento
+      });
+      sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(lista));
+      Logger.log(`🔔 Alerta registrado para item ID="${dados.id}", QTD.ABERTA=${dados.qtdAberta}`);
+    }
+  } catch (e) {
+    Logger.log('⚠️ _registrarAlertaFaturamento_: ' + e.message);
+  }
+}
+
+/**
+ * Retorna a lista de alertas pendentes de faturamento para o HTML.
+ */
+function obterAlertasPendentes() {
+  try {
+    const sp = PropertiesService.getScriptProperties();
+    return JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+  } catch (e) {
+    Logger.log('⚠️ obterAlertasPendentes: ' + e.message);
+    return [];
+  }
+}
+
+/**
+ * Valida a senha e, se correta, remove o alerta da lista.
+ * Retorna { success, erro } para o HTML.
+ */
+function confirmarAlerta(alertaId, senhaDigitada) {
+  try {
+    const senhaCorreta = _getSenha_();
+    if (!senhaCorreta) {
+      return { success: false, erro: 'Aba SENHA ou célula A2 não encontrada. Configure a senha primeiro.' };
+    }
+    if (String(senhaDigitada).trim() !== senhaCorreta) {
+      return { success: false, erro: 'Senha incorreta.' };
+    }
+    // Senha correta → remove o alerta
+    const sp = PropertiesService.getScriptProperties();
+    const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+    const nova = lista.filter(a => a.alertaId !== alertaId);
+    sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(nova));
+    Logger.log(`✅ Alerta ${alertaId} confirmado e removido.`);
+    return { success: true, restantes: nova.length };
+  } catch (e) {
+    Logger.log('⚠️ confirmarAlerta: ' + e.message);
+    return { success: false, erro: e.message };
+  }
+}
+
+// ====== PURGA DE ITENS FINALIZADOS ======
+/**
+ * Remove do Relatorio_DB itens com status Faturado, Finalizado ou Excluido
+ * cuja DATA_STATUS (coluna Q) seja anterior a hoje - DIAS_RETENCAO (padrão: 15 dias).
+ *
+ * Itens sem DATA_STATUS preenchida são ignorados com segurança (não há risco de
+ * apagar algo que não sabemos quando foi alterado).
+ *
+ * Chamada automaticamente pelo processoAutomaticoCompleto().
+ * Pode também ser executada manualmente pelo editor (sem UI).
+ */
+function purgarItensFinalizados() {
+  const STATUS_FINAIS = new Set(['Faturado', 'Finalizado', 'Excluido']);
+  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('ℹ️ purgarItensFinalizados: DB vazio, nada a fazer.');
+    return { purgados: 0 };
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const colMap = _getColumnIndexes_(headers);
+  const statusCol = colMap['Status'];           // índice 0-based
+  const dataStatusCol = colMap['DATA_STATUS'];  // índice 0-based
+
+  if (statusCol === undefined || dataStatusCol === undefined) {
+    Logger.log('⚠️ purgarItensFinalizados: colunas Status ou DATA_STATUS não encontradas — verifique os cabeçalhos do DB.');
+    return { purgados: 0 };
+  }
+
+  const numCols = sheet.getLastColumn();
+  const numRows = sheet.getLastRow() - 1; // sem cabeçalho
+  const dados = sheet.getRange(2, 1, numRows, numCols).getValues();
+
+  const limiteData = new Date();
+  limiteData.setDate(limiteData.getDate() - DIAS_RETENCAO);
+
+  // Coleta linhas para deletar de baixo pra cima (evita deslocamento de índice)
+  const linhasParaDeletar = [];
+  for (let i = dados.length - 1; i >= 0; i--) {
+    const status = String(dados[i][statusCol] || '').trim();
+    if (!STATUS_FINAIS.has(status)) continue;
+
+    const dataStatus = dados[i][dataStatusCol];
+    if (!dataStatus || !(dataStatus instanceof Date) || isNaN(dataStatus.getTime())) {
+      // Sem data registrada → não apaga (segurança)
+      continue;
+    }
+
+    if (dataStatus < limiteData) {
+      linhasParaDeletar.push(i + 2); // +1 cabeçalho, +1 base-1
+    }
+  }
+
+  if (linhasParaDeletar.length === 0) {
+    Logger.log(`ℹ️ purgarItensFinalizados: nenhum item com mais de ${DIAS_RETENCAO} dias para purgar.`);
+    return { purgados: 0 };
+  }
+
+  // Deleta de baixo pra cima para não deslocar índices
+  linhasParaDeletar.forEach(linha => sheet.deleteRow(linha));
+  SpreadsheetApp.flush();
+  limparCache();
+  Logger.log(`🗑️ purgarItensFinalizados: ${linhasParaDeletar.length} item(ns) com mais de ${DIAS_RETENCAO} dias purgado(s) do DB.`);
+  return { purgados: linhasParaDeletar.length };
 }
 
 // ====== AUDITORIA DE DUPLICATAS ======
@@ -2182,7 +2403,8 @@ function salvarDadosCache(dados) {
 const RELATORIO_DB_HEADERS = [
   'ID_UNICO', 'CARTELA', 'CLIENTE', 'PEDIDO', 'CÓD. CLIENTE',
   'CÓD. MARFIM', 'DESCRIÇÃO', 'TAMANHO', 'ORD. COMPRA', 'QTD. ABERTA',
-  'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR'
+  'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR',
+  'DATA_STATUS' // Q - data em que o status foi alterado para Faturado/Finalizado/Excluido
 ];
 
 /**
@@ -2482,8 +2704,9 @@ function marcarFaturado(uniqueId, planilhaLinha) {
     }
 
     sheet.getRange(linhaNum, statusCol + 1).setValue("Faturado");
+    sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
     limparCache();
-    Logger.log(`💰 ${uniqueId || 'sem-id'} → Faturado (linha ${linhaNum}, coluna ${statusCol + 1})`);
+    Logger.log(`💰 ${uniqueId || 'sem-id'} → Faturado (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
     Logger.log(`❌ marcarFaturado: ${e.message}`);
@@ -2510,8 +2733,9 @@ function excluirItem(uniqueId, planilhaLinha) {
     }
 
     sheet.getRange(linhaNum, statusCol + 1).setValue("Excluido");
+    sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
     limparCache();
-    Logger.log(`🗑️ ${uniqueId || 'sem-id'} → Excluido (linha ${linhaNum}, coluna ${statusCol + 1})`);
+    Logger.log(`🗑️ ${uniqueId || 'sem-id'} → Excluido (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
     Logger.log(`❌ excluirItem: ${e.message}`);
@@ -2538,8 +2762,9 @@ function finalizarItem(uniqueId, planilhaLinha) {
     }
 
     sheet.getRange(linhaNum, statusCol + 1).setValue("Finalizado");
+    sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
     limparCache();
-    Logger.log(`✅ ${uniqueId || 'sem-id'} → Finalizado (linha ${linhaNum}, coluna ${statusCol + 1})`);
+    Logger.log(`✅ ${uniqueId || 'sem-id'} → Finalizado (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
     Logger.log(`❌ finalizarItem: ${e.message}`);
