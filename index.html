@@ -289,7 +289,7 @@
           </label>
         </div>
         <div id="autoRefreshIndicator" class="auto-refresh-indicator">
-          Próximo refresh em 30s
+          Próximo refresh em 5s
         </div>
       </div>
     </div>
@@ -1388,7 +1388,7 @@ ALL_OCS_ITEMS = itemsObj;
             filtered = filtered.filter(oc => {
                 const ocData = ALL_OCS_ITEMS[oc.ordCompra];
                 if (!ocData || !ocData.items) return false;
-                return ocData.items.some(item => item.Status === 'Faturado');
+                return ocData.items.some(item => item.Status?.toLowerCase() === 'faturado');
             });
         }
         
@@ -1470,7 +1470,7 @@ ALL_OCS_ITEMS = itemsObj;
     const ocData = ALL_OCS_ITEMS[ocInfo.ordCompra];
     if (!ocData || !ocData.items || ocData.items.length === 0) return;
 
-    let items = ocData.items.filter(i => i.Status !== 'Excluido');
+    let items = ocData.items.filter(i => i.Status?.toLowerCase() !== 'excluido');
 
     // Aplicar filtro de tipo (METROS/PARES) aos itens
     if (tipoFilter !== 'all') {
@@ -1487,7 +1487,7 @@ ALL_OCS_ITEMS = itemsObj;
 
     if (items.length === 0) return;
 
-    const hasFaturados  = items.some(i => i.Status === 'Faturado');
+    const hasFaturados  = items.some(i => i.Status?.toLowerCase() === 'faturado');
     const prazoMin      = calcularPrazoMinimo(items);
     const prazoKey      = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
     const groupRank     = hasFaturados ? 0 : 1;
@@ -1548,8 +1548,8 @@ ALL_OCS_ITEMS = itemsObj;
         let hasFaturadosItems = false;
 
         if (itemResponse && itemResponse.ok === true && itemResponse.items && itemResponse.items.length > 0) {
-            items = itemResponse.items.filter(item => item.Status !== 'Excluido');
-            hasFaturadosItems = items.some(item => item.Status === 'Faturado');
+            items = itemResponse.items.filter(item => item.Status?.toLowerCase() !== 'excluido');
+            hasFaturadosItems = items.some(item => item.Status?.toLowerCase() === 'faturado');
             console.log(`🔧 Renderizando OC ${ocInfo.ordCompra}: ${items.length} itens visíveis`);
         }
 
@@ -1607,7 +1607,7 @@ ALL_OCS_ITEMS = itemsObj;
                 if (!item) return;
                 const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
                 const itemId = `item-linha-${item.planilhaLinha}`;
-                const isFaturado = item.Status === 'Faturado';
+                const isFaturado = item.Status?.toLowerCase() === 'faturado';
                 const isMarcadoFaturar = item.MARCAR_FATURAR && String(item.MARCAR_FATURAR).toUpperCase() === 'SIM';
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
@@ -1682,7 +1682,7 @@ ALL_OCS_ITEMS = itemsObj;
         FILTERED_OCS_INFO.forEach(ocInfo => {
             const itemResponse = ALL_OCS_ITEMS[ocInfo.ordCompra];
             if (itemResponse && itemResponse.ok && itemResponse.items) {
-                const items = itemResponse.items.filter(item => item.Status !== 'Excluido');
+                const items = itemResponse.items.filter(item => item.Status?.toLowerCase() !== 'excluido');
                 const totais = calcularTotais(items);
                 totalMetros += totais.metros;
                 totalPares += totais.pares;
@@ -1990,7 +1990,7 @@ ALL_OCS_ITEMS = itemsObj;
                                     if (ocInfo) {
                                         const itemResponse = ALL_OCS_ITEMS[ocId];
                                         if (itemResponse && itemResponse.ok) {
-                                            const items = itemResponse.items.filter(item => item.Status !== 'Excluido');
+                                            const items = itemResponse.items.filter(item => item.Status?.toLowerCase() !== 'excluido');
                                             const totaisCard = calcularTotais(items);
                                             
                                             // Atualiza o totalizador do card
@@ -3513,8 +3513,8 @@ ALL_OCS_ITEMS = itemsObj;
             if (itensFiltrados.length === 0) return;
 
             // Verificar se tem itens inativos ou faturados
-            const temInativos = ocData.items.some(item => item.Status === 'Inativo');
-            const temFaturados = ocData.items.some(item => item.Status === 'Faturado');
+            const temInativos = ocData.items.some(item => item.Status?.toLowerCase() === 'inativo');
+            const temFaturados = ocData.items.some(item => item.Status?.toLowerCase() === 'faturado');
 
             let avisos = '';
             let estilo = '';
@@ -3653,13 +3653,13 @@ ALL_OCS_ITEMS = itemsObj;
             if (!ocData || !ocData.items) return;
 
             const ocInfo = ALL_OCS_INFO.find(oc => oc.ordCompra === ocNum);
-            const items = ocData.items.filter(i => i.Status !== 'Excluido');
+            const items = ocData.items.filter(i => i.Status?.toLowerCase() !== 'excluido');
 
             if (items.length === 0) return;
 
             // Calcular metadados (mesma lógica dos cards)
-            const hasInativos = items.some(i => i.Status === 'Inativo');
-            const hasFaturados = items.some(i => i.Status === 'Faturado');
+            const hasInativos = items.some(i => i.Status?.toLowerCase() === 'inativo');
+            const hasFaturados = items.some(i => i.Status?.toLowerCase() === 'faturado');
             const prazoMin = calcularPrazoMinimo(items);
             const prazoKey = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
             const groupRank = hasInativos ? 0 : (hasFaturados ? 1 : 2);
@@ -3719,8 +3719,8 @@ ALL_OCS_ITEMS = itemsObj;
             }
 
             // Verificar avisos
-            const temInativos = ocData.items.some(item => item.Status === 'Inativo');
-            const temFaturados = ocData.items.some(item => item.Status === 'Faturado');
+            const temInativos = ocData.items.some(item => item.Status?.toLowerCase() === 'inativo');
+            const temFaturados = ocData.items.some(item => item.Status?.toLowerCase() === 'faturado');
 
             let avisos = [];
             if (temFaturados) avisos.push('⚠️ Contém itens Faturados');
