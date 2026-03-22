@@ -820,9 +820,11 @@
 
     // ==== AUTO-REFRESH CONFIGURATION ====
     const AUTO_REFRESH_INTERVAL = 30000; // 30 segundos
+    const AUTO_REFRESH_TIMEOUT  = 25000; // watchdog: desiste após 25s sem resposta
     let autoRefreshEnabled = true;
     let _arTimeoutId   = null;  // setTimeout do próximo refresh
     let _arCountdownId = null;  // setInterval da contagem visual
+    let _arWatchdogId  = null;  // watchdog: reinicia se GAS travar
     let _arScheduledAt = null;  // quando o próximo refresh foi agendado
 
     // ==== ELEMENTOS DO DOM ====
@@ -4296,6 +4298,7 @@ ALL_OCS_ITEMS = itemsObj;
     function _arClear() {
         if (_arTimeoutId)   { clearTimeout(_arTimeoutId);   _arTimeoutId   = null; }
         if (_arCountdownId) { clearInterval(_arCountdownId); _arCountdownId = null; }
+        if (_arWatchdogId)  { clearTimeout(_arWatchdogId);  _arWatchdogId  = null; }
         _arScheduledAt = null;
     }
 
@@ -4333,7 +4336,13 @@ ALL_OCS_ITEMS = itemsObj;
                     $autoRefreshIndicator.textContent = 'Atualizando...';
                     $autoRefreshIndicator.className = 'auto-refresh-indicator refreshing';
                 }
-                carregarListaOcs(true, true); // scheduleAutoRefresh() chamado no finally
+                // Watchdog: se o GAS não responder em AUTO_REFRESH_TIMEOUT, reagenda sozinho
+                _arWatchdogId = setTimeout(() => {
+                    console.warn('⚠️ Auto-refresh timeout (GAS sem resposta) — reagendando');
+                    _arWatchdogId = null;
+                    scheduleAutoRefresh();
+                }, AUTO_REFRESH_TIMEOUT);
+                carregarListaOcs(true, true); // scheduleAutoRefresh() chamado no finally (limpa o watchdog)
             } else {
                 // Modal aberto ou loader visível — tenta novamente em 3s
                 console.log('⏸️ Auto-refresh adiado (modal ou loader ativo)');
