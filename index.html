@@ -4310,7 +4310,9 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         if (secondsRemaining !== undefined) {
-            $autoRefreshIndicator.textContent = `Auto-refresh ativo`;
+            $autoRefreshIndicator.textContent = secondsRemaining > 0
+                ? `Próximo refresh em ${secondsRemaining}s`
+                : `Atualizando...`;
             $autoRefreshIndicator.classList.add('active');
             $autoRefreshIndicator.classList.remove('paused');
         } else if (lastRefreshTime) {
