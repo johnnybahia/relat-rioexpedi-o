@@ -98,6 +98,7 @@
     .item-table td.qtd-aberta { color: #b91c1c; font-weight: 700; background-color: #fff5f5; }
     .item-table tr.item-faturado { background-color: #dcfce7; font-weight: 500; }
     .item-table tr.item-marcado-faturar { background-color: #90EE90 !important; font-weight: 600; }
+    .badge-faturado { display: inline-block; background-color: #16a34a; color: white; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 0.25rem; letter-spacing: 0.05em; vertical-align: middle; }
 
     .item-table tr.keyboard-focus { outline: 3px solid #3b82f6; outline-offset: -3px; }
     .item-table tbody tr { cursor: pointer; transition: background-color 0.15s; }
@@ -1642,7 +1643,7 @@ ALL_OCS_ITEMS = itemsObj;
                     const checkedAttr = isMarcadoFaturar ? 'checked' : '';
                     bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="Marcar para faturamento">`;
                 } else {
-                    bodyHtml += ` <button class="btn-finalizar" title="Finalizar item" onclick="handleFinalizar('${item.uniqueId}', ${item.planilhaLinha}, '${cardId}')">Finalizado</button>`;
+                    bodyHtml += ` <span class="badge-faturado">FATURADO</span>`;
                 }
 
                 bodyHtml += `</td></tr>`;
@@ -1919,9 +1920,12 @@ ALL_OCS_ITEMS = itemsObj;
                                 if (row) {
                                     row.classList.remove('item-inativo');
                                     row.classList.add('item-faturado');
-                                    const checkbox = row.querySelector('.item-checkbox');
-                                    if (checkbox) {
-                                        checkbox.closest('td').innerHTML = '';
+                                    // Remove todos os controles indevidos para item Faturado
+                                    row.querySelectorAll('.btn-baixa, .checkbox-faturar, .btn-finalizar, .item-checkbox').forEach(el => el.remove());
+                                    // Adiciona badge FATURADO na célula de ações
+                                    const acoesTd = row.querySelector('td:last-child');
+                                    if (acoesTd && !acoesTd.querySelector('.badge-faturado')) {
+                                        acoesTd.insertAdjacentHTML('beforeend', ' <span class="badge-faturado">FATURADO</span>');
                                     }
                                     cardIds.add(row.dataset.oc);
 
@@ -2044,9 +2048,12 @@ ALL_OCS_ITEMS = itemsObj;
                         if (row) {
                             row.classList.remove('item-inativo');
                             row.classList.add('item-faturado');
-                            const checkbox = row.querySelector('.item-checkbox');
-                            if (checkbox) {
-                                checkbox.closest('td').innerHTML = '';
+                            // Remove todos os controles indevidos para item Faturado
+                            row.querySelectorAll('.btn-baixa, .checkbox-faturar, .btn-finalizar, .item-checkbox').forEach(el => el.remove());
+                            // Adiciona badge FATURADO na célula de ações
+                            const acoesTd = row.querySelector('td:last-child');
+                            if (acoesTd && !acoesTd.querySelector('.badge-faturado')) {
+                                acoesTd.insertAdjacentHTML('beforeend', ' <span class="badge-faturado">FATURADO</span>');
                             }
                             cardIds.add(row.dataset.oc);
 
