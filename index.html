@@ -819,13 +819,11 @@
     let autocompleteIndex = -1;
 
     // ==== AUTO-REFRESH CONFIGURATION ====
-    const AUTO_REFRESH_INTERVAL = 5000; // 5 segundos
-    let autoRefreshTimer = null;
+    const AUTO_REFRESH_INTERVAL = 30000; // 30 segundos
     let autoRefreshEnabled = true;
-    let lastRefreshTime = null;
-    let countdownTimer = null;
-    let lastUserActivity = Date.now();
-    let isUserInteracting = false;
+    let _arTimeoutId   = null;  // setTimeout do próximo refresh
+    let _arCountdownId = null;  // setInterval da contagem visual
+    let _arScheduledAt = null;  // quando o próximo refresh foi agendado
 
     // ==== ELEMENTOS DO DOM ====
     const $loader = document.getElementById('loader');
@@ -4275,212 +4273,130 @@ ALL_OCS_ITEMS = itemsObj;
         $nfModal.classList.add('hidden');
     }
 
-    // ==== AUTO-REFRESH SYSTEM ====
+    // ==== AUTO-REFRESH SYSTEM (redesigned) ====
 
-    // Verifica se há modais abertos ou usuário está interagindo
+    // Verifica se há modais abertos (única condição que bloqueia o refresh)
     function canAutoRefresh() {
-        // Obter elementos de modais que podem não existir no início
         const $relatorioModal = document.getElementById('relatorioModal');
         const $nfModal = document.getElementById('nfModal');
-
-        const hasOpenModal = !$confirmModal.classList.contains('hidden') ||
-                           !$warningModal.classList.contains('hidden') ||
-                           !$deleteAllModal.classList.contains('hidden') ||
-                           !$successModal.classList.contains('hidden') ||
-                           !$baixaModal.classList.contains('hidden') ||
-                           !$etiquetaModal.classList.contains('hidden') ||
-                           ($relatorioModal && !$relatorioModal.classList.contains('hidden')) ||
-                           ($nfModal && !$nfModal.classList.contains('hidden'));
-
+        const hasOpenModal =
+            !$confirmModal.classList.contains('hidden') ||
+            !$warningModal.classList.contains('hidden') ||
+            !$deleteAllModal.classList.contains('hidden') ||
+            !$successModal.classList.contains('hidden') ||
+            !$baixaModal.classList.contains('hidden') ||
+            !$etiquetaModal.classList.contains('hidden') ||
+            ($relatorioModal && !$relatorioModal.classList.contains('hidden')) ||
+            ($nfModal && !$nfModal.classList.contains('hidden'));
         const isLoading = !$loader.classList.contains('hidden');
-
-        return !hasOpenModal && !isLoading && !isUserInteracting;
+        return !hasOpenModal && !isLoading;
     }
 
-    // Atualiza o indicador visual
-    function updateAutoRefreshIndicator(secondsRemaining) {
+    // Limpa timers pendentes
+    function _arClear() {
+        if (_arTimeoutId)   { clearTimeout(_arTimeoutId);   _arTimeoutId   = null; }
+        if (_arCountdownId) { clearInterval(_arCountdownId); _arCountdownId = null; }
+        _arScheduledAt = null;
+    }
+
+    // Atualiza o badge visual baseado no tempo restante real
+    function _arTick() {
+        if (!$autoRefreshIndicator || !_arScheduledAt) return;
+        const remaining = Math.max(0, Math.ceil((AUTO_REFRESH_INTERVAL - (Date.now() - _arScheduledAt)) / 1000));
+        $autoRefreshIndicator.textContent = remaining > 0 ? `Próximo refresh em ${remaining}s` : 'Atualizando...';
+        $autoRefreshIndicator.className = 'auto-refresh-indicator active';
+    }
+
+    // Agenda o próximo refresh (única função de controle)
+    function scheduleAutoRefresh() {
+        _arClear();
         if (!autoRefreshEnabled) {
-            $autoRefreshIndicator.textContent = 'Auto-refresh desabilitado';
-            $autoRefreshIndicator.classList.remove('active', 'paused');
-            return;
-        }
-
-        if (!canAutoRefresh()) {
-            $autoRefreshIndicator.textContent = 'Auto-refresh pausado';
-            $autoRefreshIndicator.classList.remove('active');
-            $autoRefreshIndicator.classList.add('paused');
-            return;
-        }
-
-        if (secondsRemaining !== undefined) {
-            $autoRefreshIndicator.textContent = secondsRemaining > 0
-                ? `Próximo refresh em ${secondsRemaining}s`
-                : `Atualizando...`;
-            $autoRefreshIndicator.classList.add('active');
-            $autoRefreshIndicator.classList.remove('paused');
-        } else if (lastRefreshTime) {
-            const elapsed = Math.floor((Date.now() - lastRefreshTime) / 1000);
-            $autoRefreshIndicator.textContent = `Último refresh há ${elapsed}s`;
-            $autoRefreshIndicator.classList.remove('active', 'paused');
-        }
-    }
-
-    // Inicia o countdown visual
-    function startCountdown() {
-        if (countdownTimer) {
-            clearInterval(countdownTimer);
-        }
-
-        // Remover classe de refreshing se estiver presente
-        if ($autoRefreshIndicator) {
-            $autoRefreshIndicator.classList.remove('refreshing');
-        }
-
-        let secondsRemaining = Math.floor(AUTO_REFRESH_INTERVAL / 1000);
-        updateAutoRefreshIndicator(secondsRemaining);
-
-        countdownTimer = setInterval(() => {
-            secondsRemaining--;
-            if (secondsRemaining >= 0) {
-                updateAutoRefreshIndicator(secondsRemaining);
+            if ($autoRefreshIndicator) {
+                $autoRefreshIndicator.textContent = 'Auto-refresh desabilitado';
+                $autoRefreshIndicator.className = 'auto-refresh-indicator';
             }
-        }, 1000);
-    }
-
-    // Para o countdown
-    function stopCountdown() {
-        if (countdownTimer) {
-            clearInterval(countdownTimer);
-            countdownTimer = null;
-        }
-    }
-
-    // Executa o auto-refresh
-    function performAutoRefresh() {
-        if (!autoRefreshEnabled) {
             return;
         }
 
-        if (canAutoRefresh()) {
-            console.log('🔄 Auto-refresh silencioso executado');
-            lastRefreshTime = Date.now();
-            // Passa silentRefresh = true para não mostrar o loader
-            carregarListaOcs(true, true);
-            // startCountdown será chamado após o carregamento completar
-        } else {
-            console.log('⏸️ Auto-refresh pausado (modal aberto ou usuário interagindo)');
-            updateAutoRefreshIndicator();
-        }
-    }
+        _arScheduledAt = Date.now();
+        _arTick(); // exibe imediatamente o tempo inicial
 
-    // Inicia o timer de auto-refresh
-    function startAutoRefresh() {
-        stopAutoRefresh(); // Para qualquer timer existente
+        // Countdown visual atualizado a cada 1s (baseado em elapsed real, imune a throttle)
+        _arCountdownId = setInterval(_arTick, 1000);
 
-        if (!autoRefreshEnabled) {
-            return;
-        }
-
-        console.log(`✅ Auto-refresh iniciado (intervalo: ${AUTO_REFRESH_INTERVAL / 1000}s)`);
-        startCountdown();
-
-        autoRefreshTimer = setInterval(() => {
-            performAutoRefresh();
+        // Dispara o refresh após o intervalo
+        _arTimeoutId = setTimeout(() => {
+            _arClear();
+            if (!autoRefreshEnabled) return;
+            if (canAutoRefresh()) {
+                if ($autoRefreshIndicator) {
+                    $autoRefreshIndicator.textContent = 'Atualizando...';
+                    $autoRefreshIndicator.className = 'auto-refresh-indicator refreshing';
+                }
+                carregarListaOcs(true, true); // scheduleAutoRefresh() chamado no finally
+            } else {
+                // Modal aberto ou loader visível — tenta novamente em 3s
+                console.log('⏸️ Auto-refresh adiado (modal ou loader ativo)');
+                setTimeout(scheduleAutoRefresh, 3000);
+            }
         }, AUTO_REFRESH_INTERVAL);
     }
 
-    // Para o auto-refresh
-    function stopAutoRefresh() {
-        if (autoRefreshTimer) {
-            clearInterval(autoRefreshTimer);
-            autoRefreshTimer = null;
-        }
-        stopCountdown();
-        console.log('⏹️ Auto-refresh parado');
-    }
-
-    // Reseta o timer (útil quando usuário faz refresh manual)
-    function resetAutoRefresh() {
-        if (autoRefreshEnabled) {
-            lastRefreshTime = Date.now();
-            stopCountdown();
-            startAutoRefresh();
-        }
-    }
-
-    // Detecta atividade do usuário
-    function trackUserActivity() {
-        lastUserActivity = Date.now();
-    }
-
-    // Detecta quando usuário está interagindo com inputs
-    function onInputFocus() {
-        isUserInteracting = true;
-        updateAutoRefreshIndicator();
-    }
-
-    function onInputBlur() {
-        isUserInteracting = false;
-        updateAutoRefreshIndicator();
-    }
+    // Aliases mantidos para compatibilidade com o código existente
+    function startCountdown()  { scheduleAutoRefresh(); }
+    function stopCountdown()   { _arClear(); }
+    function startAutoRefresh(){ scheduleAutoRefresh(); }
+    function stopAutoRefresh() { _arClear(); if ($autoRefreshIndicator) { $autoRefreshIndicator.textContent = 'Auto-refresh desabilitado'; $autoRefreshIndicator.className = 'auto-refresh-indicator'; } console.log('⏹️ Auto-refresh parado'); }
+    function resetAutoRefresh(){ if (autoRefreshEnabled) scheduleAutoRefresh(); }
+    function updateAutoRefreshIndicator() { _arTick(); }
 
     // Toggle do auto-refresh
     function toggleAutoRefresh() {
         autoRefreshEnabled = $autoRefreshToggle.checked;
-
         if (autoRefreshEnabled) {
-            console.log('✅ Auto-refresh habilitado pelo usuário');
-            startAutoRefresh();
+            console.log('✅ Auto-refresh habilitado');
+            scheduleAutoRefresh();
         } else {
-            console.log('❌ Auto-refresh desabilitado pelo usuário');
+            console.log('❌ Auto-refresh desabilitado');
             stopAutoRefresh();
-            updateAutoRefreshIndicator();
         }
-
-        // Salvar preferência no localStorage
-        try {
-            localStorage.setItem('autoRefreshEnabled', autoRefreshEnabled);
-        } catch (e) {
-            console.warn('Não foi possível salvar preferência de auto-refresh:', e);
-        }
+        try { localStorage.setItem('autoRefreshEnabled', autoRefreshEnabled); } catch (e) {}
     }
+
+    // Page Visibility API: ao voltar para a aba, atualiza imediatamente se já passou o intervalo
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && autoRefreshEnabled) {
+            const elapsed = _arScheduledAt ? (Date.now() - _arScheduledAt) : Infinity;
+            if (elapsed >= AUTO_REFRESH_INTERVAL) {
+                console.log('👁️ Aba visível novamente — refresh imediato');
+                _arClear();
+                if (canAutoRefresh()) {
+                    carregarListaOcs(true, true);
+                } else {
+                    scheduleAutoRefresh();
+                }
+            }
+        }
+    });
 
     // Inicializa o sistema de auto-refresh
     function initAutoRefresh() {
-        // Restaurar preferência do localStorage
         try {
             const savedPref = localStorage.getItem('autoRefreshEnabled');
             if (savedPref !== null) {
                 autoRefreshEnabled = savedPref === 'true';
                 $autoRefreshToggle.checked = autoRefreshEnabled;
             }
-        } catch (e) {
-            console.warn('Não foi possível restaurar preferência de auto-refresh:', e);
-        }
+        } catch (e) {}
 
-        // Event listener para o toggle
         $autoRefreshToggle.addEventListener('change', toggleAutoRefresh);
 
-        // Event listeners para detectar atividade do usuário
-        document.addEventListener('click', trackUserActivity);
-        document.addEventListener('keypress', trackUserActivity);
-        document.addEventListener('scroll', trackUserActivity);
-
-        // Detectar foco em inputs (para pausar auto-refresh durante digitação)
-        const inputs = document.querySelectorAll('input, textarea, select');
-        inputs.forEach(input => {
-            input.addEventListener('focus', onInputFocus);
-            input.addEventListener('blur', onInputBlur);
-        });
-
-        // Iniciar auto-refresh se habilitado
         if (autoRefreshEnabled) {
-            startAutoRefresh();
+            scheduleAutoRefresh();
         } else {
-            updateAutoRefreshIndicator();
+            stopAutoRefresh();
         }
-
-        console.log('🚀 Sistema de auto-refresh inicializado');
+        console.log('🚀 Auto-refresh inicializado (intervalo: ' + (AUTO_REFRESH_INTERVAL/1000) + 's)');
     }
 
     // ==== ALERTAS DE FATURAMENTO ====
