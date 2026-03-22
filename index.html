@@ -1257,7 +1257,7 @@
         google.script.run
             .withSuccessHandler(response => {
                 console.log("✅ Resposta recebida:", response);
-
+                try {
                 if (response && response.success) {
                     // Backend v15.5 retorna: { success, ordCompras, allItems, stats, meta }
                     console.log("🔍 DEBUG - Resposta completa:", response);
@@ -1301,7 +1301,7 @@ ALL_OCS_ITEMS = itemsObj;
  // =======================
 
                     appMeta = response.meta || {};
-                    
+
                     console.log(`✅ ${ALL_OCS_INFO.length} OCs carregadas`);
                     console.log(`✅ ${Object.keys(ALL_OCS_ITEMS).length} OCs com itens`);
                     console.log(`✅ Total de itens: ${response.stats ? response.stats.totalItems : 0}`);
@@ -1309,14 +1309,14 @@ ALL_OCS_ITEMS = itemsObj;
                     if (appMeta.fromCache) {
                         console.log(`📦 Dados do cache`);
                     }
-                    
+
                     // Atualizar metadados
                     if (appMeta.displayTime) {
                         $updatedAt.textContent = 'Atualizado: ' + appMeta.displayTime;
                     } else if (appMeta.timestamp) {
                         $updatedAt.textContent = 'Atualizado: ' + new Date(appMeta.timestamp).toLocaleString('pt-BR');
                     }
-                    
+
                     // Exibe avisos de itens parcializados removidos do PEDIDOS
                     if (response.avisosPendentes && response.avisosPendentes.length > 0) {
                         showAvisosBanner(response.avisosPendentes);
@@ -1332,14 +1332,16 @@ ALL_OCS_ITEMS = itemsObj;
 
                     // Aplicar filtros e renderizar
                     aplicarFiltros();
-                    
+
                 } else {
                     console.error("❌ Resposta inválida:", response);
                     if (!silentRefresh) {
                         showError("Erro ao carregar dados: " + (response && response.error ? response.error : "Resposta inválida"));
                     }
                 }
-
+                } catch (err) {
+                    console.error('❌ Erro interno no handler de carregamento:', err);
+                } finally {
                 // Só oculta loader se NÃO for silent refresh
                 if (!silentRefresh) {
                     $loader.classList.add('hidden');
@@ -1348,6 +1350,7 @@ ALL_OCS_ITEMS = itemsObj;
                     if (typeof startCountdown === 'function') {
                         startCountdown();
                     }
+                }
                 }
             })
             .withFailureHandler(error => {
