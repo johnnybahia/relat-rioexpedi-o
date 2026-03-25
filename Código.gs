@@ -2063,7 +2063,7 @@ function sincronizarDados() {
     Logger.log(`   • ${totalDB} itens lidos de Relatorio_DB`);
     Logger.log(`   • ${novosValidados.length} novos itens adicionados ao Relatorio_DB como Ativo`);
     Logger.log(`   • ${updates.length} itens atualizados no Relatorio_DB (QTD. ABERTA preservada do DB)`);
-    Logger.log(`   • ${autoExcluidos} itens marcados como Excluido (saíram do PEDIDOS)`);
+    Logger.log(`   • ${autoExcluidos} itens marcados como Faturado (saíram do PEDIDOS)`);
     Logger.log(`   • ${avisos.length} aviso(s) de itens com baixa removidos de PEDIDOS`);
     if (idsAtualizados.length > 0) {
       Logger.log(`   🔄 ${idsAtualizados.length} IDs atualizados (por mudança de posição no IMPORTRANGE):`);
