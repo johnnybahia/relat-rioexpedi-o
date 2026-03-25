@@ -2063,7 +2063,7 @@ function sincronizarDados() {
     Logger.log(`   • ${totalDB} itens lidos de Relatorio_DB`);
     Logger.log(`   • ${novosValidados.length} novos itens adicionados ao Relatorio_DB como Ativo`);
     Logger.log(`   • ${updates.length} itens atualizados no Relatorio_DB (QTD. ABERTA preservada do DB)`);
-    Logger.log(`   • ${autoExcluidos} itens marcados como Excluido (saíram do PEDIDOS)`);
+    Logger.log(`   • ${autoExcluidos} itens marcados como Faturado (saíram do PEDIDOS)`);
     Logger.log(`   • ${avisos.length} aviso(s) de itens com baixa removidos de PEDIDOS`);
     if (idsAtualizados.length > 0) {
       Logger.log(`   🔄 ${idsAtualizados.length} IDs atualizados (por mudança de posição no IMPORTRANGE):`);
@@ -2144,11 +2144,38 @@ function _registrarAlertaFaturamento_(dados) {
 
 /**
  * Retorna a lista de alertas pendentes de faturamento para o HTML.
+ * Auto-limpa alertas cujo item não existe mais como Faturado no Relatorio_DB.
  */
 function obterAlertasPendentes() {
   try {
     const sp = PropertiesService.getScriptProperties();
-    return JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+    const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+    if (lista.length === 0) return [];
+
+    // Coleta IDs com status Faturado no Relatorio_DB
+    const faturadosNoDb = new Set();
+    try {
+      const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
+      if (dbSheet && dbSheet.getLastRow() > 1) {
+        const dados = dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, STATUS_COL + 1).getValues();
+        dados.forEach(row => {
+          if (String(row[STATUS_COL] || '').trim() === 'Faturado') {
+            faturadosNoDb.add(String(row[ID_COL] || '').trim());
+          }
+        });
+      }
+    } catch (eDb) {
+      Logger.log('⚠️ obterAlertasPendentes: erro ao ler DB - ' + eDb.message);
+      return lista; // se não conseguiu ler o DB, retorna sem filtrar
+    }
+
+    const validos = lista.filter(a => faturadosNoDb.has(String(a.itemId || '').trim()));
+    const removidos = lista.length - validos.length;
+    if (removidos > 0) {
+      sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(validos));
+      Logger.log(`🧹 obterAlertasPendentes: ${removidos} alerta(s) obsoleto(s) removido(s) automaticamente`);
+    }
+    return validos;
   } catch (e) {
     Logger.log('⚠️ obterAlertasPendentes: ' + e.message);
     return [];
