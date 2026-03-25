@@ -2036,7 +2036,7 @@ function sincronizarDados() {
     }
     if (updates.length > 0) {
       updates.forEach(u => {
-        dbSheet.getRange(u.linha, 1, 1, 16).setValues([u.dados]);
+        dbSheet.getRange(u.linha, 1, 1, u.dados.length).setValues([u.dados]);
         Logger.log(`   ✅ Linha ${u.linha}: ${u.de} → ${u.para} | ID: ${u.id}`);
       });
     }
