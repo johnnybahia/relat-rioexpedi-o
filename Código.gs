@@ -1810,6 +1810,26 @@ function sincronizarDados() {
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus, id: id });
         }
 
+        // Detecta divergência de QTD: PEDIDOS reduziu sem baixa correspondente no relatório online
+        const pedidosQtd = Number(fonteRow[QTD_COL] || 0);
+        const dbQtd      = Number(dbItem.row[DB_QTD_COL] || 0);
+        if (pedidosQtd < dbQtd && statusAtual !== "Faturado" && statusAtual !== "Finalizado") {
+          Logger.log(`   ⚠️ DIVERGÊNCIA QTD: ID="${id}" PEDIDOS=${pedidosQtd} < DB=${dbQtd} — faturamento parcial sem baixa no relatório`);
+          _registrarAlertaFaturamento_({
+            tipo: 'divergencia_qtd',
+            id: id,
+            cartela: String(dbItem.row[CARTELA_COL]   || ''),
+            cliente: String(dbItem.row[CLIENTE_COL]   || ''),
+            pedido:  String(dbItem.row[DB_PEDIDO_COL] || ''),
+            oc:      String(dbItem.row[DB_OC_COL]     || ''),
+            desc:    String(dbItem.row[DB_DESC_COL]   || ''),
+            tam:     String(dbItem.row[DB_TAM_COL]    || ''),
+            pedidosQtd: pedidosQtd,
+            dbQtd:      dbQtd,
+            dataEvento: new Date().toISOString()
+          });
+        }
+
         fonteMap.delete(id);
         consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
 
@@ -2122,29 +2142,39 @@ function _getSenha_() {
 }
 
 /**
- * Registra um novo alerta de faturamento com QTD aberta.
+ * Registra um novo alerta (faturado_sem_baixa ou divergencia_qtd).
  * Cada alerta recebe um ID único baseado em timestamp + ID do item.
+ * Evita duplicata por itemId + tipo.
  */
 function _registrarAlertaFaturamento_(dados) {
   try {
+    const tipo = dados.tipo || 'faturado_sem_baixa';
     const sp = PropertiesService.getScriptProperties();
     const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
-    // Evita duplicata: não registra se já existe alerta para o mesmo ID de item
-    if (!lista.some(a => a.itemId === dados.id)) {
-      lista.push({
-        alertaId: `ALT-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-        itemId: dados.id,
-        cartela: dados.cartela,
-        cliente: dados.cliente,
-        pedido: dados.pedido,
-        oc: dados.oc,
-        desc: dados.desc,
-        tam: dados.tam,
-        qtdAberta: dados.qtdAberta,
+    // Evita duplicata: não registra se já existe alerta do mesmo tipo para o mesmo ID
+    if (!lista.some(a => a.itemId === dados.id && (a.tipo || 'faturado_sem_baixa') === tipo)) {
+      const entrada = {
+        alertaId:   `ALT-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        tipo:       tipo,
+        itemId:     dados.id,
+        cartela:    dados.cartela,
+        cliente:    dados.cliente,
+        pedido:     dados.pedido,
+        oc:         dados.oc,
+        desc:       dados.desc,
+        tam:        dados.tam,
         dataEvento: dados.dataEvento
-      });
+      };
+      if (tipo === 'faturado_sem_baixa') {
+        entrada.qtdAberta = dados.qtdAberta;
+        Logger.log(`🔔 Alerta faturado_sem_baixa: ID="${dados.id}", QTD.ABERTA=${dados.qtdAberta}`);
+      } else if (tipo === 'divergencia_qtd') {
+        entrada.pedidosQtd = dados.pedidosQtd;
+        entrada.dbQtd      = dados.dbQtd;
+        Logger.log(`🔔 Alerta divergencia_qtd: ID="${dados.id}", PEDIDOS=${dados.pedidosQtd} < DB=${dados.dbQtd}`);
+      }
+      lista.push(entrada);
       sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(lista));
-      Logger.log(`🔔 Alerta registrado para item ID="${dados.id}", QTD.ABERTA=${dados.qtdAberta}`);
     }
   } catch (e) {
     Logger.log('⚠️ _registrarAlertaFaturamento_: ' + e.message);
@@ -2152,8 +2182,11 @@ function _registrarAlertaFaturamento_(dados) {
 }
 
 /**
- * Retorna a lista de alertas pendentes de faturamento para o HTML.
- * Auto-limpa alertas cujo item não existe mais como Faturado no Relatorio_DB.
+ * Retorna a lista de alertas pendentes para o HTML.
+ * Auto-limpa alertas obsoletos conforme o tipo:
+ *   faturado_sem_baixa → limpa se item não está mais como Faturado no DB
+ *   divergencia_qtd    → limpa se item virou Faturado, saiu do DB,
+ *                        ou DB QTD já caiu para <= pedidosQtd do alerta (baixa feita)
  */
 function obterAlertasPendentes() {
   try {
@@ -2161,16 +2194,19 @@ function obterAlertasPendentes() {
     const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
     if (lista.length === 0) return [];
 
-    // Coleta IDs com status Faturado no Relatorio_DB
+    // Lê Relatorio_DB: status e QTD atual por ID
     const faturadosNoDb = new Set();
+    const dbQtdAtual    = new Map(); // itemId → QTD atual no DB
     try {
       const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
       if (dbSheet && dbSheet.getLastRow() > 1) {
         const dados = dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, STATUS_COL + 1).getValues();
         dados.forEach(row => {
-          if (String(row[STATUS_COL] || '').trim() === 'Faturado') {
-            faturadosNoDb.add(String(row[ID_COL] || '').trim());
-          }
+          const itemId = String(row[ID_COL] || '').trim();
+          if (!itemId) return;
+          const status = String(row[STATUS_COL] || '').trim();
+          if (status === 'Faturado') faturadosNoDb.add(itemId);
+          dbQtdAtual.set(itemId, Number(row[DB_QTD_COL] || 0));
         });
       }
     } catch (eDb) {
@@ -2178,7 +2214,25 @@ function obterAlertasPendentes() {
       return lista; // se não conseguiu ler o DB, retorna sem filtrar
     }
 
-    const validos = lista.filter(a => faturadosNoDb.has(String(a.itemId || '').trim()));
+    const validos = lista.filter(a => {
+      const itemId = String(a.itemId || '').trim();
+      const tipo   = a.tipo || 'faturado_sem_baixa';
+      if (tipo === 'faturado_sem_baixa') {
+        // Mantém apenas se ainda está Faturado no DB
+        return faturadosNoDb.has(itemId);
+      }
+      if (tipo === 'divergencia_qtd') {
+        // Limpa se: saiu do DB, virou Faturado, ou DB QTD já foi reduzido (baixa feita)
+        if (!dbQtdAtual.has(itemId)) return false;           // não existe mais no DB
+        if (faturadosNoDb.has(itemId)) return false;          // virou Faturado
+        const qtdDbAgora     = dbQtdAtual.get(itemId);
+        const qtdPedidosAlerta = Number(a.pedidosQtd || 0);
+        if (qtdDbAgora <= qtdPedidosAlerta) return false;     // baixa foi feita, divergência resolvida
+        return true; // divergência ainda existe
+      }
+      return false; // tipo desconhecido → limpa
+    });
+
     const removidos = lista.length - validos.length;
     if (removidos > 0) {
       sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(validos));
