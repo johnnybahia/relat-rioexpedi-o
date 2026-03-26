@@ -734,10 +734,10 @@
   <div id="alertaFaturamentoModal" class="modal-overlay hidden">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>⚠️ Falha no Processo de Faturamento <span class="alerta-contador" id="alertaContadorTexto"></span></h2>
+        <h2 id="alertaModalTitulo">⚠️ Falha no Processo de Faturamento <span class="alerta-contador" id="alertaContadorTexto"></span></h2>
       </div>
       <div class="modal-body">
-        <p style="color:#374151; font-size:0.9rem; margin:0 0 0.5rem 0;">
+        <p id="alertaModalDescricao" style="color:#374151; font-size:0.9rem; margin:0 0 0.5rem 0;">
           O item abaixo <strong>saiu do PEDIDOS</strong> com quantidade ainda em aberto.
           Verifique o motivo antes de confirmar.
         </p>
@@ -766,9 +766,21 @@
             <label>Tamanho</label>
             <span id="alertaCampoTam">—</span>
           </div>
-          <div class="alerta-campo" style="grid-column: span 2;">
+          <!-- Campos exclusivos: faturado_sem_baixa -->
+          <div id="alertaCampoQtdWrap" class="alerta-campo" style="grid-column: span 2;">
             <label>QTD. Aberta que ficou sem baixa</label>
             <span id="alertaCampoQtd" class="alerta-qtd-badge">—</span>
+          </div>
+          <!-- Campos exclusivos: divergencia_qtd -->
+          <div id="alertaCampoDivergenciaWrap" class="alerta-campo" style="grid-column: span 2; display:none;">
+            <label>QTD no Relatório Online (DB) × QTD no PEDIDOS (sistema)</label>
+            <span style="display:flex; align-items:center; gap:0.75rem; margin-top:0.25rem;">
+              <span id="alertaCampoDbQtd" class="alerta-qtd-badge" style="background:#dc2626;">—</span>
+              <span style="color:#6b7280; font-size:0.8rem;">no relatório</span>
+              <span style="color:#6b7280;">→</span>
+              <span id="alertaCampoPedidosQtd" class="alerta-qtd-badge" style="background:#d97706;">—</span>
+              <span style="color:#6b7280; font-size:0.8rem;">no PEDIDOS</span>
+            </span>
           </div>
           <div class="alerta-campo" style="grid-column: span 2;">
             <label>Data do evento</label>
@@ -4432,20 +4444,47 @@ ALL_OCS_ITEMS = itemsObj;
         }
         _alertaAtual = _alertasFila[0];
         const a = _alertaAtual;
+        const tipo = a.tipo || 'faturado_sem_baixa';
 
+        // Campos comuns
         document.getElementById('alertaCampoCliente').textContent = a.cliente || '—';
         document.getElementById('alertaCampoCartela').textContent = a.cartela || '—';
-        document.getElementById('alertaCampoOC').textContent     = a.oc      || '—';
-        document.getElementById('alertaCampoPedido').textContent = a.pedido  || '—';
-        document.getElementById('alertaCampoDesc').textContent   = a.desc    || '—';
-        document.getElementById('alertaCampoTam').textContent    = a.tam     || '—';
-        document.getElementById('alertaCampoQtd').textContent    = a.qtdAberta;
+        document.getElementById('alertaCampoOC').textContent      = a.oc      || '—';
+        document.getElementById('alertaCampoPedido').textContent  = a.pedido  || '—';
+        document.getElementById('alertaCampoDesc').textContent    = a.desc    || '—';
+        document.getElementById('alertaCampoTam').textContent     = a.tam     || '—';
 
         const dataEvento = a.dataEvento ? new Date(a.dataEvento).toLocaleString('pt-BR') : '—';
         document.getElementById('alertaCampoData').textContent = dataEvento;
 
         const total = _alertasFila.length;
         document.getElementById('alertaContadorTexto').textContent = total > 1 ? `(${total} pendentes)` : '';
+
+        // Adapta título, descrição e campos conforme o tipo
+        const $titulo       = document.getElementById('alertaModalTitulo');
+        const $descricao    = document.getElementById('alertaModalDescricao');
+        const $qtdWrap      = document.getElementById('alertaCampoQtdWrap');
+        const $divWrap      = document.getElementById('alertaCampoDivergenciaWrap');
+
+        if (tipo === 'divergencia_qtd') {
+            $titulo.innerHTML = '⚠️ Divergência de Quantidade — Faturamento Parcial <span class="alerta-contador" id="alertaContadorTexto">' +
+                (total > 1 ? `(${total} pendentes)` : '') + '</span>';
+            $descricao.innerHTML = 'O item abaixo teve uma <strong>redução de quantidade no PEDIDOS</strong> ' +
+                'sem que uma baixa correspondente tenha sido lançada no Relatório Online. ' +
+                'Verifique se a baixa precisa ser feita antes de confirmar.';
+            $qtdWrap.style.display = 'none';
+            $divWrap.style.display = '';
+            document.getElementById('alertaCampoDbQtd').textContent     = a.dbQtd      ?? '—';
+            document.getElementById('alertaCampoPedidosQtd').textContent = a.pedidosQtd ?? '—';
+        } else {
+            $titulo.innerHTML = '⚠️ Falha no Processo de Faturamento <span class="alerta-contador" id="alertaContadorTexto">' +
+                (total > 1 ? `(${total} pendentes)` : '') + '</span>';
+            $descricao.innerHTML = 'O item abaixo <strong>saiu do PEDIDOS</strong> com quantidade ainda em aberto. ' +
+                'Verifique o motivo antes de confirmar.';
+            $qtdWrap.style.display = '';
+            $divWrap.style.display = 'none';
+            document.getElementById('alertaCampoQtd').textContent = a.qtdAberta ?? '—';
+        }
 
         // Limpa senha e erro anteriores
         const inp = document.getElementById('alertaSenhaInput');
