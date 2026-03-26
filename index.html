@@ -4480,7 +4480,8 @@ ALL_OCS_ITEMS = itemsObj;
             $titulo.innerHTML = '⚠️ Falha no Processo de Faturamento <span class="alerta-contador" id="alertaContadorTexto">' +
                 (total > 1 ? `(${total} pendentes)` : '') + '</span>';
             $descricao.innerHTML = 'O item abaixo <strong>saiu do PEDIDOS</strong> com quantidade ainda em aberto. ' +
-                'Verifique o motivo antes de confirmar.';
+                'Antes de confirmar, verifique se o item foi <strong>excluído ou alterado no sistema</strong>, ' +
+                'ou se foi faturado sem que a baixa correspondente tenha sido registrada no Relatório Online.';
             $qtdWrap.style.display = '';
             $divWrap.style.display = 'none';
             document.getElementById('alertaCampoQtd').textContent = a.qtdAberta ?? '—';
