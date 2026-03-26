@@ -1810,24 +1810,31 @@ function sincronizarDados() {
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus, id: id });
         }
 
-        // Detecta divergência de QTD: PEDIDOS reduziu sem baixa correspondente no relatório online
+        // Detecta divergência de QTD: PEDIDOS reduziu sem baixa correspondente no relatório online.
+        // Só alerta se o item tem histórico de baixa no HTML (idsBaixados), pois sem esse histórico
+        // a diferença de QTD provavelmente indica itens idênticos com IDs deslocados pelo IMPORTRANGE
+        // (ex: dois pedidos iguais com quantidades diferentes na mesma OC), não uma divergência real.
         const pedidosQtd = Number(fonteRow[QTD_COL] || 0);
         const dbQtd      = Number(dbItem.row[DB_QTD_COL] || 0);
         if (pedidosQtd < dbQtd && statusAtual !== "Faturado" && statusAtual !== "Finalizado") {
-          Logger.log(`   ⚠️ DIVERGÊNCIA QTD: ID="${id}" PEDIDOS=${pedidosQtd} < DB=${dbQtd} — faturamento parcial sem baixa no relatório`);
-          _registrarAlertaFaturamento_({
-            tipo: 'divergencia_qtd',
-            id: id,
-            cartela: String(dbItem.row[CARTELA_COL]   || ''),
-            cliente: String(dbItem.row[CLIENTE_COL]   || ''),
-            pedido:  String(dbItem.row[DB_PEDIDO_COL] || ''),
-            oc:      String(dbItem.row[DB_OC_COL]     || ''),
-            desc:    String(dbItem.row[DB_DESC_COL]   || ''),
-            tam:     String(dbItem.row[DB_TAM_COL]    || ''),
-            pedidosQtd: pedidosQtd,
-            dbQtd:      dbQtd,
-            dataEvento: new Date().toISOString()
-          });
+          if (idsBaixados.has(id)) {
+            Logger.log(`   ⚠️ DIVERGÊNCIA QTD: ID="${id}" PEDIDOS=${pedidosQtd} < DB=${dbQtd} — faturamento parcial sem baixa no relatório`);
+            _registrarAlertaFaturamento_({
+              tipo: 'divergencia_qtd',
+              id: id,
+              cartela: String(dbItem.row[CARTELA_COL]   || ''),
+              cliente: String(dbItem.row[CLIENTE_COL]   || ''),
+              pedido:  String(dbItem.row[DB_PEDIDO_COL] || ''),
+              oc:      String(dbItem.row[DB_OC_COL]     || ''),
+              desc:    String(dbItem.row[DB_DESC_COL]   || ''),
+              tam:     String(dbItem.row[DB_TAM_COL]    || ''),
+              pedidosQtd: pedidosQtd,
+              dbQtd:      dbQtd,
+              dataEvento: new Date().toISOString()
+            });
+          } else {
+            Logger.log(`   ℹ️ QTD difere mas sem histórico de baixa: ID="${id}" PEDIDOS=${pedidosQtd} DB=${dbQtd} — provável desalinhamento de IDs entre itens duplicados, ignorado`);
+          }
         }
 
         fonteMap.delete(id);
