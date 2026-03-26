@@ -1710,9 +1710,11 @@ function sincronizarDados() {
 
     // Map<impressao, {id, row}> para PEDIDOS
     const fonteImpressoes = new Map();
+    const fonteImpressoesCount = new Map(); // fingerprint → quantas vezes aparece em PEDIDOS
     for (let [id, row] of fonteMap.entries()) {
       const impressao = _criarImpressaoDigital_(row);
       fonteImpressoes.set(impressao, { id: id, row: row });
+      fonteImpressoesCount.set(impressao, (fonteImpressoesCount.get(impressao) || 0) + 1);
     }
     Logger.log(`   ✓ ${fonteImpressoes.size} impressões digitais criadas para PEDIDOS`);
 
@@ -1811,13 +1813,21 @@ function sincronizarDados() {
         }
 
         // Detecta divergência de QTD: PEDIDOS reduziu sem baixa correspondente no relatório online.
-        // Só alerta se o item tem histórico de baixa no HTML (idsBaixados), pois sem esse histórico
-        // a diferença de QTD provavelmente indica itens idênticos com IDs deslocados pelo IMPORTRANGE
-        // (ex: dois pedidos iguais com quantidades diferentes na mesma OC), não uma divergência real.
-        const pedidosQtd = Number(fonteRow[QTD_COL] || 0);
-        const dbQtd      = Number(dbItem.row[DB_QTD_COL] || 0);
+        // Condições para alertar (ambas precisam ser verdadeiras):
+        //   1) O item tem histórico de baixa no HTML (idsBaixados) — sem isso, a diferença de QTD
+        //      provavelmente é desalinhamento de IDs causado por itens duplicados no IMPORTRANGE.
+        //   2) A fingerprint deste item é ÚNICA em PEDIDOS — se existirem múltiplos itens com a
+        //      mesma fingerprint (mesmo produto, qtds diferentes), a comparação pode estar errada.
+        const pedidosQtd   = Number(fonteRow[QTD_COL] || 0);
+        const dbQtd        = Number(dbItem.row[DB_QTD_COL] || 0);
+        const fpFonte      = _criarImpressaoDigital_(fonteRow);
+        const fpDuplicados = (fonteImpressoesCount.get(fpFonte) || 1) > 1;
         if (pedidosQtd < dbQtd && statusAtual !== "Faturado" && statusAtual !== "Finalizado") {
-          if (idsBaixados.has(id)) {
+          if (fpDuplicados) {
+            Logger.log(`   ⚠️ QTD difere mas fingerprint tem ${fonteImpressoesCount.get(fpFonte)} itens em PEDIDOS: ID="${id}" PEDIDOS=${pedidosQtd} DB=${dbQtd} — desalinhamento esperado entre itens duplicados, ignorado`);
+          } else if (!idsBaixados.has(id)) {
+            Logger.log(`   ℹ️ QTD difere mas sem histórico de baixa: ID="${id}" PEDIDOS=${pedidosQtd} DB=${dbQtd} — possível desalinhamento de IDs, ignorado`);
+          } else {
             Logger.log(`   ⚠️ DIVERGÊNCIA QTD: ID="${id}" PEDIDOS=${pedidosQtd} < DB=${dbQtd} — faturamento parcial sem baixa no relatório`);
             _registrarAlertaFaturamento_({
               tipo: 'divergencia_qtd',
@@ -1832,8 +1842,6 @@ function sincronizarDados() {
               dbQtd:      dbQtd,
               dataEvento: new Date().toISOString()
             });
-          } else {
-            Logger.log(`   ℹ️ QTD difere mas sem histórico de baixa: ID="${id}" PEDIDOS=${pedidosQtd} DB=${dbQtd} — provável desalinhamento de IDs entre itens duplicados, ignorado`);
           }
         }
 
