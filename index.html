@@ -343,6 +343,9 @@
         <button id="btn-relatorio-faturamento" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #10b981; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
           💰 Relatório para Faturamento
         </button>
+        <button id="btn-cadastro-revisao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #7c3aed; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+          ✅ Cadastro Revisão
+        </button>
       </div>
 
       <!-- Botão Etiqueta NF -->
@@ -546,6 +549,17 @@
           </div>
         </div>
 
+        <!-- Lote do produto -->
+        <div style="margin-bottom: 0.75rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem; color: #374151;">
+            Lote do produto <span style="font-weight:400; color:#6b7280;">(aparece em todas as etiquetas)</span>:
+          </label>
+          <input type="text" id="etiqueta-lote"
+            placeholder="Informe o lote do produto..."
+            style="width: 100%; padding: 0.75rem; border: 2px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; font-family: inherit;"
+          />
+        </div>
+
         <!-- Observações -->
         <div style="margin-bottom: 1rem;">
           <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem; color: #374151;">
@@ -714,7 +728,15 @@
         <div id="lote-itens-container">
           <!-- Seções de itens serão inseridas aqui -->
         </div>
-        <div style="margin-top: 1.5rem; margin-bottom: 1rem;">
+        <div style="margin-top: 1.5rem; margin-bottom: 0.75rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem; color: #374151;">
+            Lote do produto <span style="font-weight:400; color:#6b7280;">(aparece em todas as etiquetas)</span>:
+          </label>
+          <input type="text" id="lote-lote-produto"
+            placeholder="Informe o lote do produto..."
+            style="width: 100%; padding: 0.75rem; border: 2px solid #d1d5db; border-radius: 6px; font-size: 0.875rem; font-family: inherit;" />
+        </div>
+        <div style="margin-bottom: 1rem;">
           <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem; color: #374151;">
             Observações (aparece em todas as etiquetas):
           </label>
@@ -726,6 +748,36 @@
       <div class="modal-footer">
         <button id="lote-cancel-btn" class="modal-btn modal-btn-cancel">Cancelar</button>
         <button id="lote-gerar-btn" class="modal-btn modal-btn-confirm">🖨️ Gerar PDF do Lote</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL CADASTRO REVISÃO ===== -->
+  <div id="revisaoModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h2>✅ Cadastro Revisão</h2>
+      </div>
+      <div class="modal-body">
+        <p style="color:#374151; font-size:0.875rem; margin:0 0 1rem 0;">
+          Os nomes cadastrados aqui serão impressos em uma etiqueta extra <strong>"Revisado"</strong>
+          em todas as impressões de etiquetas, com uma caixa ao lado de cada nome para o revisor dar visto.
+        </p>
+        <div style="display:flex; gap:0.5rem; margin-bottom:1rem;">
+          <input type="text" id="revisao-nome-input" placeholder="Nome do revisor..."
+            style="flex:1; padding:0.6rem 0.75rem; border:2px solid #d1d5db; border-radius:6px; font-size:0.875rem;"
+            onkeydown="if(event.key==='Enter') adicionarRevisor()" />
+          <button onclick="adicionarRevisor()"
+            style="padding:0.6rem 1rem; background:#7c3aed; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600; font-size:0.875rem;">
+            + Adicionar
+          </button>
+        </div>
+        <div id="revisao-lista" style="display:flex; flex-direction:column; gap:0.5rem; min-height:60px;">
+          <p style="color:#9ca3af; font-size:0.85rem; text-align:center; padding:1rem 0;">Nenhum revisor cadastrado.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button onclick="document.getElementById('revisaoModal').classList.add('hidden')" class="modal-btn modal-btn-cancel">Fechar</button>
       </div>
     </div>
   </div>
@@ -1517,12 +1569,11 @@ ALL_OCS_ITEMS = itemsObj;
     });
   });
 
-  console.log(`📊 grupos => faturados:${cards.filter(c=>c.groupRank===0).length} normais:${cards.filter(c=>c.groupRank===1).length}`);
+  console.log(`📊 cards: ${cards.length} total`);
 
-  // ORDENAR: grupo (0,1,2) depois prazo ascendente
+  // ORDENAR: prazo ascendente (faturados ficam na posição natural pela data de entrega)
   cards.sort((a, b) => {
-    if (a.groupRank !== b.groupRank) return a.groupRank - b.groupRank;
-    if (a.prazoKey !== b.prazoKey)   return a.prazoKey - b.prazoKey;
+    if (a.prazoKey !== b.prazoKey) return a.prazoKey - b.prazoKey;
     // desempate estável
     return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
   });
@@ -1763,8 +1814,7 @@ ALL_OCS_ITEMS = itemsObj;
   });
 
   cards.sort((a, b) => {
-    if (a.groupRank !== b.groupRank) return a.groupRank - b.groupRank;
-    if (a.prazoKey !== b.prazoKey)   return a.prazoKey - b.prazoKey;
+    if (a.prazoKey !== b.prazoKey) return a.prazoKey - b.prazoKey;
     return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
   });
 
@@ -2703,8 +2753,9 @@ ALL_OCS_ITEMS = itemsObj;
         $etiquetaQtdOriginal.textContent = fmtInt(qtdOriginal);
         $etiquetaTotalDisponivel.textContent = fmtInt(qtdOriginal);
 
-        // Limpa observações
+        // Limpa campos
         $etiquetaObs.value = '';
+        document.getElementById('etiqueta-lote').value = '';
 
         // Adiciona primeira etiqueta automaticamente
         adicionarEtiqueta();
@@ -2856,6 +2907,7 @@ ALL_OCS_ITEMS = itemsObj;
             }
         });
         document.getElementById('lote-obs').value = '';
+        document.getElementById('lote-lote-produto').value = '';
         renderizarItensLote();
         document.getElementById('loteModal').classList.remove('hidden');
         document.getElementById('lote-floating-bar').style.display = 'none';
@@ -2974,6 +3026,7 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         const observacoes = document.getElementById('lote-obs').value.trim();
+        const loteProduto = document.getElementById('lote-lote-produto').value.trim();
         const dataEmissao = new Date().toLocaleDateString('pt-BR');
 
         // Calcula totais para etiqueta LOTE
@@ -3109,6 +3162,7 @@ ALL_OCS_ITEMS = itemsObj;
         <div class="linha"><span class="label">OC:</span>${oc}</div>
         <div class="linha"><span class="label">Descrição:</span>${item.DESCRIÇÃO || 'N/A'}</div>
         <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
+        <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
         <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
         ${observacoes ? `<div class="obs"><span class="label">Obs:</span> ${observacoes}</div>` : ''}
     </div>
@@ -3131,6 +3185,7 @@ ALL_OCS_ITEMS = itemsObj;
         <div class="linha"><span class="label">OC:</span>${oc}</div>
         <div class="linha"><span class="label">Descrição:</span>${item.DESCRIÇÃO || 'N/A'}</div>
         <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
+        <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
         <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
         ${observacoes ? `<div class="obs"><span class="label">Obs:</span> ${observacoes}</div>` : ''}
     </div>
@@ -3181,6 +3236,7 @@ ALL_OCS_ITEMS = itemsObj;
         </div>
     </div>
 </div>
+${gerarEtiquetaRevisao()}
 </body>
 </html>`;
 
@@ -3211,8 +3267,9 @@ ALL_OCS_ITEMS = itemsObj;
 
         console.log('🖨️ Gerando PDF com', etiquetas.length, 'etiquetas');
 
-        const observacoes = $etiquetaObs.value.trim();
-        const dataEmissao = new Date().toLocaleDateString('pt-BR');
+        const observacoes  = $etiquetaObs.value.trim();
+        const loteProduto  = document.getElementById('etiqueta-lote').value.trim();
+        const dataEmissao  = new Date().toLocaleDateString('pt-BR');
 
         // Criar janela de impressão
         const printWindow = window.open('', '_blank');
@@ -3383,6 +3440,10 @@ ALL_OCS_ITEMS = itemsObj;
                     </div>
 
                     <div class="linha">
+                        <span class="label">Lote do produto:</span>${loteProduto || '—'}
+                    </div>
+
+                    <div class="linha">
                         <span class="label">Data:</span>${dataEmissao}
                     </div>
 
@@ -3399,6 +3460,9 @@ ALL_OCS_ITEMS = itemsObj;
             </div>
             `;
         });
+
+        // Etiqueta extra de revisão (se houver revisores cadastrados)
+        html += gerarEtiquetaRevisao();
 
         html += `
         </body>
@@ -3693,7 +3757,6 @@ ALL_OCS_ITEMS = itemsObj;
 
         // ORDENAR igual aos cards: grupo → prazo → OC
         ocsParaRelatorio.sort((a, b) => {
-            if (a.groupRank !== b.groupRank) return a.groupRank - b.groupRank;
             if (a.prazoKey !== b.prazoKey) return a.prazoKey - b.prazoKey;
             return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
         });
@@ -4544,6 +4607,77 @@ ALL_OCS_ITEMS = itemsObj;
         document.getElementById('alertaSenhaInput').addEventListener('keydown', function(e) {
             if (e.key === 'Enter') confirmarAlertaAtual();
         });
+    });
+
+    // ==== CADASTRO REVISÃO ====
+    const REVISAO_KEY = 'cadastroRevisao_nomes';
+
+    function _getRevisores() {
+        try { return JSON.parse(localStorage.getItem(REVISAO_KEY) || '[]'); }
+        catch(e) { return []; }
+    }
+    function _saveRevisores(lista) {
+        localStorage.setItem(REVISAO_KEY, JSON.stringify(lista));
+    }
+
+    function renderizarListaRevisores() {
+        const lista = _getRevisores();
+        const container = document.getElementById('revisao-lista');
+        if (!container) return;
+        if (lista.length === 0) {
+            container.innerHTML = '<p style="color:#9ca3af; font-size:0.85rem; text-align:center; padding:1rem 0;">Nenhum revisor cadastrado.</p>';
+            return;
+        }
+        container.innerHTML = lista.map((nome, i) => `
+            <div style="display:flex; align-items:center; gap:0.5rem; padding:0.5rem 0.75rem; background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px;">
+                <span style="flex:1; font-size:0.875rem; color:#374151;">${nome}</span>
+                <button onclick="removerRevisor(${i})"
+                    style="padding:0.25rem 0.5rem; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.75rem; font-weight:700;">✕</button>
+            </div>`).join('');
+    }
+
+    function adicionarRevisor() {
+        const inp = document.getElementById('revisao-nome-input');
+        const nome = (inp.value || '').trim();
+        if (!nome) return;
+        const lista = _getRevisores();
+        if (!lista.includes(nome)) {
+            lista.push(nome);
+            _saveRevisores(lista);
+        }
+        inp.value = '';
+        renderizarListaRevisores();
+    }
+
+    function removerRevisor(idx) {
+        const lista = _getRevisores();
+        lista.splice(idx, 1);
+        _saveRevisores(lista);
+        renderizarListaRevisores();
+    }
+
+    function gerarEtiquetaRevisao() {
+        const revisores = _getRevisores();
+        if (revisores.length === 0) return '';
+        const linhas = revisores.map(nome =>
+            `<div style="display:flex; align-items:center; gap:3mm; margin-bottom:1.5mm;">
+                <div style="width:4mm; height:4mm; border:1.5px solid #000; flex-shrink:0;"></div>
+                <span style="font-size:11px;">${nome}</span>
+            </div>`
+        ).join('');
+        return `
+        <div class="etiqueta" style="display:flex; flex-direction:column; justify-content:flex-start; padding:3mm;">
+            <div style="font-size:14px; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1.5mm; margin-bottom:2.5mm; letter-spacing:0.05em;">
+                ✅ REVISADO
+            </div>
+            ${linhas}
+        </div>`;
+    }
+
+    document.getElementById('btn-cadastro-revisao').addEventListener('click', () => {
+        renderizarListaRevisores();
+        document.getElementById('revisaoModal').classList.remove('hidden');
+        setTimeout(() => document.getElementById('revisao-nome-input').focus(), 100);
     });
 
     // ==== INICIALIZAÇÃO ====
