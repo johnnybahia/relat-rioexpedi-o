@@ -34,8 +34,17 @@ const PRAZO_COL = 14;    // O (na aba PEDIDOS)
 const TIMESTAMP_COL = 15; // P (na aba PEDIDOS) - Timestamp de criação do ID
 
 // Índices de colunas - ABA Relatorio_DB
-// Status é sempre a coluna O (índice 14 no array, coluna 15 na planilha)
-const DB_QTD_COL = 9;    // J (índice 9) - QTD. ABERTA no Relatorio_DB (≠ QTD_COL=10 que é da aba PEDIDOS)
+// O DB compacta as colunas: não tem col D do PEDIDOS, então índices diferem a partir de PEDIDO.
+// DB:  [0]=ID, [1]=CARTELA, [2]=CLIENTE, [3]=PEDIDO, [4]=CODCLI, [5]=MARFIM,
+//      [6]=DESC, [7]=TAM, [8]=OC, [9]=QTD, [10]=OS, [11]=DTREC, [12]=DTENT, [13]=PRAZO,
+//      [14]=Status, [15]=MARCAR_FATURAR, [16]=DATA_STATUS
+const DB_PEDIDO_COL  = 3;
+const DB_CODCLI_COL  = 4;
+const DB_MARFIM_COL  = 5;
+const DB_DESC_COL    = 6;
+const DB_TAM_COL     = 7;
+const DB_OC_COL      = 8;
+const DB_QTD_COL     = 9;  // QTD. ABERTA (≠ QTD_COL=10 que é da aba PEDIDOS)
 const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
 const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova coluna para marcar itens para faturamento
 const DATA_STATUS_COL = 16;    // Q (coluna 17) - Data em que o status foi alterado para Faturado/Finalizado/Excluido
@@ -1892,12 +1901,12 @@ function sincronizarDados() {
         Logger.log(`   ⚠️ QTD.ABERTA=${qtdAberta} → Faturado + ALERTA (ID="${id}")`);
         _registrarAlertaFaturamento_({
           id: id,
-          cartela: String(row[CARTELA_COL] || ''),
-          cliente: String(row[CLIENTE_COL] || ''),
-          pedido: String(row[PEDIDO_COL] || ''),
-          oc: String(row[OC_COL] || ''),
-          desc: String(row[DESC_COL] || ''),
-          tam: String(row[TAM_COL] || ''),
+          cartela: String(row[CARTELA_COL]    || ''),  // índice 1 — igual em ambos
+          cliente: String(row[CLIENTE_COL]    || ''),  // índice 2 — igual em ambos
+          pedido:  String(row[DB_PEDIDO_COL]  || ''),  // índice 3 no DB (≠ PEDIDO_COL=4)
+          oc:      String(row[DB_OC_COL]      || ''),  // índice 8 no DB (≠ OC_COL=9)
+          desc:    String(row[DB_DESC_COL]    || ''),  // índice 6 no DB (≠ DESC_COL=7)
+          tam:     String(row[DB_TAM_COL]     || ''),  // índice 7 no DB (≠ TAM_COL=8)
           qtdAberta: qtdAberta,
           dataEvento: new Date().toISOString()
         });
