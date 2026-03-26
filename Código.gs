@@ -48,6 +48,8 @@ const DB_QTD_COL     = 9;  // QTD. ABERTA (≠ QTD_COL=10 que é da aba PEDIDOS)
 const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
 const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova coluna para marcar itens para faturamento
 const DATA_STATUS_COL = 16;    // Q (coluna 17) - Data em que o status foi alterado para Faturado/Finalizado/Excluido
+const PEDIDOS_CODIGO_FIXO_COL = 18; // S (coluna 19) — UUID fixo por item, gerado uma vez e preservado para sempre
+const DB_CODIGO_FIXO_COL      = 18; // S (coluna 19) — mesmo UUID propagado do PEDIDOS para o Relatorio_DB
 const DIAS_RETENCAO = 15;      // Itens com status final são purgados após este número de dias
 
 // ====== BAIXAS PARCIAIS ======
@@ -892,7 +894,7 @@ function sincronizarPedidosComFonte() {
 
     if (pedidosLastRow >= FONTE_DATA_START_ROW) {
       // Lê dados atuais de PEDIDOS (com ID e timestamp)
-      const pedidosNumCols = Math.max(16, pedidosSheet.getLastColumn()); // Garante até coluna P
+      const pedidosNumCols = Math.max(19, pedidosSheet.getLastColumn()); // Garante até coluna S (CÓDIGO_FIXO)
       pedidosData = pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosNumCols).getValues();
 
       Logger.log(`📋 Leu ${pedidosData.length} linhas de ${FONTE_SHEET_NAME}`);
@@ -917,6 +919,7 @@ function sincronizarPedidosComFonte() {
           id: id,
           timestamp: timestamp,
           row: row,
+          codigoFixo: String(row[PEDIDOS_CODIGO_FIXO_COL] || '').trim(),
           linhaOriginal: idx + FONTE_DATA_START_ROW,
           usado: false
         });
@@ -939,11 +942,12 @@ function sincronizarPedidosComFonte() {
     // repopular só as colunas B-O (sem a coluna A que é gerenciada por script).
     const idsUsados = new Set();
     const dbFingerprintMap = new Map(); // fingerprint → id (recuperação de ID)
+    const dbCodigoFixoMap  = new Map(); // id → codigoFixo (reutilizar UUID já gravado no DB)
     const dbSheetRef = SS.getSheetByName(DB_SHEET_NAME);
     if (dbSheetRef && dbSheetRef.getLastRow() >= 2) {
       const numDbRows = dbSheetRef.getLastRow() - 1;
-      // Lê 12 colunas (A até L) — suficiente para ID (col A) e todos os campos da fingerprint
-      const dbRange = dbSheetRef.getRange(2, 1, numDbRows, 12).getValues();
+      // Lê 19 colunas (A até S) — inclui CÓDIGO_FIXO na coluna S (índice 18)
+      const dbRange = dbSheetRef.getRange(2, 1, numDbRows, 19).getValues();
       dbRange.forEach(dbRow => {
         const dbId = String(dbRow[0] || '').trim();
         if (dbId) {
@@ -952,6 +956,8 @@ function sincronizarPedidosComFonte() {
           if (fp && !dbFingerprintMap.has(fp)) {
             dbFingerprintMap.set(fp, dbId); // primeiro ID encontrado para este fingerprint
           }
+          const cf = String(dbRow[DB_CODIGO_FIXO_COL] || '').trim();
+          if (cf) dbCodigoFixoMap.set(dbId, cf); // UUID fixo já gravado no DB para este item
         }
       });
       Logger.log(`🔒 ${idsUsados.size} IDs do Relatorio_DB carregados (colisões + recuperação)`);
@@ -975,6 +981,7 @@ function sincronizarPedidosComFonte() {
       let idFinal = null;
       let timestampFinal = null;
       let isNovo = false;
+      let codigoFixo = ''; // UUID fixo por item — gerado uma vez, preservado para sempre
 
       if (matches && matches.length > 0) {
         // TEM MATCH(ES) em PEDIDOS - Reusar ID existente
@@ -1002,6 +1009,7 @@ function sincronizarPedidosComFonte() {
           isNovo = true;
         } else {
           matchEscolhido.usado = true;
+          codigoFixo = matchEscolhido.codigoFixo || ''; // reutiliza UUID já existente em PEDIDOS
 
           // Se a coluna A do PEDIDOS estava vazia (usuário apagou o PEDIDOS e o IMPORTRANGE
           // trouxe de volta só os dados B-O), tenta recuperar o ID do Relatorio_DB antes de
@@ -1081,7 +1089,12 @@ function sincronizarPedidosComFonte() {
 
       idsUsados.add(idFinal);
 
-      // Monta linha completa para PEDIDOS (A até P)
+      // Resolve CÓDIGO_FIXO: reutiliza o que já existe (PEDIDOS ou DB), senão gera novo UUID
+      if (!codigoFixo) {
+        codigoFixo = dbCodigoFixoMap.get(idFinal) || Utilities.getUuid();
+      }
+
+      // Monta linha completa para PEDIDOS (A até S)
       const novaLinha = [
         idFinal,           // A: ID_UNICO
         fonteRow[0],       // B: CARTELA
@@ -1098,7 +1111,10 @@ function sincronizarPedidosComFonte() {
         fonteRow[11],      // M: DATA RECEB.
         fonteRow[12],      // N: DT. ENTREGA
         fonteRow[13],      // O: PRAZO
-        timestampFinal     // P: TIMESTAMP_CRIACAO
+        timestampFinal,    // P: TIMESTAMP_CRIACAO
+        '',                // Q: (reservado)
+        '',                // R: (reservado)
+        codigoFixo         // S: CÓDIGO_FIXO — UUID imutável por item
       ];
 
       novasPedidosData.push(novaLinha);
@@ -1112,7 +1128,7 @@ function sincronizarPedidosComFonte() {
       }
 
       // Escreve novos dados
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 16).setValues(novasPedidosData);
+      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
       SpreadsheetApp.flush();
 
       const tempoTotal = Date.now() - inicioSync;
@@ -1690,10 +1706,10 @@ function sincronizarDados() {
     let dbData = [];
 
     if (dbRows > 0) {
-      // Lê 16 colunas: A-P (ID até MARCAR_FATURAR)
-      // Status está na coluna O (índice 14 do array)
-      // MARCAR_FATURAR está na coluna P (índice 15 do array)
-      dbData = dbSheet.getRange(2, 1, dbRows, 16).getValues();
+      // Lê 19 colunas: A-S (ID até CÓDIGO_FIXO)
+      // Status em O (índice 14), MARCAR_FATURAR em P (índice 15),
+      // DATA_STATUS em Q (índice 16), CÓDIGO_FIXO em S (índice 18)
+      dbData = dbSheet.getRange(2, 1, dbRows, 19).getValues();
     }
 
     const dbMap = new Map();
@@ -1782,12 +1798,14 @@ function sincronizarDados() {
           Logger.log(`   ♻️ ID="${id}" estava Excluido mas voltou ao PEDIDOS - reativando como Ativo`);
           const fonteRow = fonteMap.get(id);
           const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
+          const cfReativa = dbItem.row[DB_CODIGO_FIXO_COL] || fonteRow[PEDIDOS_CODIGO_FIXO_COL] || '';
           const novaLinha = [
             fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
             fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
             fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
-            fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               marcarFaturarAtual
+            fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               marcarFaturarAtual,
+            '',  '',  cfReativa   // Q: DATA_STATUS vazia ao reativar, R: reservado, S: CÓDIGO_FIXO
           ];
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: "Ativo", id: id });
           fonteMap.delete(id);
@@ -1803,12 +1821,14 @@ function sincronizarDados() {
         // Posição 14 é Status na coluna O
         // Posição 15 é MARCAR_FATURAR na coluna P
         const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
+        const cfMatch = dbItem.row[DB_CODIGO_FIXO_COL] || fonteRow[PEDIDOS_CODIGO_FIXO_COL] || '';
         const novaLinha = [
           fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
           fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
           fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
           dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
-          fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
+          fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
+          dbItem.row[DATA_STATUS_COL] || '', '', cfMatch  // Q: DATA_STATUS preservado, R: reservado, S: CÓDIGO_FIXO
         ]; // QTD. ABERTA preservada do DB via DB_QTD_COL=9 (índice correto no Relatorio_DB)
 
         let mudou = false;
@@ -1877,12 +1897,14 @@ function sincronizarDados() {
           const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
 
           // Atualiza com NOVO ID
+          const cfFp = dbItem.row[DB_CODIGO_FIXO_COL] || fonteRow[PEDIDOS_CODIGO_FIXO_COL] || '';
           const novaLinha = [
             novoId,                fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
             fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
             dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
-            fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual
+            fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
+            dbItem.row[DATA_STATUS_COL] || '', '', cfFp  // Q: DATA_STATUS preservado, R: reservado, S: CÓDIGO_FIXO
           ]; // QTD. ABERTA preservada do DB via DB_QTD_COL=9 (índice correto no Relatorio_DB)
 
           // FIX: preserva "Faturado" e "Finalizado" na atualização por fingerprint também
@@ -1989,13 +2011,14 @@ function sincronizarDados() {
       Logger.log(`   🆕 Novo item: ID="${id}" está em PEDIDOS mas não em Relatorio_DB - será adicionado como Ativo`);
       Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
 
-      // Array de 16 elementos, Status (índice 14) = "Ativo", MARCAR_FATURAR (índice 15) = ""
+      // Array de 19 elementos: A-P dados, Q=DATA_STATUS vazio, R=reservado, S=CÓDIGO_FIXO
       const novaLinha = [
         fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
         fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
         fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
         fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
-        fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               ""
+        fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               "",
+        '',  '',  fonteRow[PEDIDOS_CODIGO_FIXO_COL] || ''  // Q: DATA_STATUS vazio, R: reservado, S: CÓDIGO_FIXO
       ];
       novos.push(novaLinha);
     }
@@ -2090,7 +2113,7 @@ function sincronizarDados() {
           }
         }
       }
-      dbSheet.getRange(proxLinha, 1, novosValidados.length, 16).setValues(novosValidados);
+      dbSheet.getRange(proxLinha, 1, novosValidados.length, novosValidados[0].length).setValues(novosValidados);
       Logger.log(`   ✅ ${novosValidados.length} novos adicionados`);
     }
     if (updates.length > 0) {
