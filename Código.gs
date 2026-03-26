@@ -979,8 +979,23 @@ function sincronizarPedidosComFonte() {
       if (matches && matches.length > 0) {
         // TEM MATCH(ES) em PEDIDOS - Reusar ID existente
 
-        // Encontra primeiro match não usado
-        let matchEscolhido = matches.find(m => !m.usado);
+        // Encontra match não usado.
+        // Se há múltiplos candidatos com a mesma fingerprint (mesmo produto, QTDs diferentes),
+        // usa QTD como critério de desempate para garantir matching estável mesmo quando o
+        // IMPORTRANGE reordena as linhas — evita troca de IDs entre itens duplicados.
+        const unusedMatches = matches.filter(m => !m.usado);
+        let matchEscolhido = null;
+        if (unusedMatches.length > 1) {
+          const fonteQtd = Number(fonteRow[9] || 0); // QTD em DADOS_IMPORTADOS (índice 9)
+          matchEscolhido = unusedMatches.reduce((best, m) => {
+            const diffBest = Math.abs(Number(m.row[QTD_COL] || 0) - fonteQtd);
+            const diffCurr = Math.abs(Number(m.row[QTD_COL] || 0) - fonteQtd);
+            return diffCurr < diffBest ? m : best;
+          }, unusedMatches[0]);
+          Logger.log(`   🔀 Desempate por QTD: fonte=${fonteQtd} → PEDIDOS QTD=${Number(matchEscolhido.row[QTD_COL]||0)} (${unusedMatches.length} candidatos com mesma fingerprint)`);
+        } else {
+          matchEscolhido = unusedMatches[0] || null;
+        }
 
         if (!matchEscolhido) {
           // Todos os matches já foram usados (mais itens na fonte que em PEDIDOS)
