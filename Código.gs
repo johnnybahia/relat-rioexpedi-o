@@ -3119,3 +3119,13 @@ function obterItensMarcadosParaFaturar() {
     Logger.log("🏁 FIM obterItensMarcadosParaFaturar");
   }
 }
+
+// ====== UTILITÁRIO: LIMPAR ALERTAS DE FATURAMENTO ======
+/**
+ * Remove todos os alertas pendentes de faturamento (faturado_sem_baixa e divergencia_qtd).
+ * Execute manualmente pelo Apps Script quando quiser zerar os avisos.
+ */
+function limparTodosAlertas() {
+  PropertiesService.getScriptProperties().deleteProperty('ALERTAS_FATURAMENTO');
+  Logger.log('✅ Todos os alertas de faturamento foram limpos.');
+}
