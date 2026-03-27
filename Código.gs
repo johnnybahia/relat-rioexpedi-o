@@ -1023,6 +1023,7 @@ function sincronizarPedidosComFonte() {
       let timestampFinal = null;
       let isNovo = false;
       let codigoFixo = ''; // UUID fixo por item — gerado uma vez, preservado para sempre
+      let matchEscolhido = null; // declarado no escopo externo para uso na resolução de posicaoFonte
 
       if (matches && matches.length > 0) {
         // TEM MATCH(ES) em PEDIDOS - Reusar ID existente
@@ -1032,7 +1033,6 @@ function sincronizarPedidosComFonte() {
         // usa QTD como critério de desempate para garantir matching estável mesmo quando o
         // IMPORTRANGE reordena as linhas — evita troca de IDs entre itens duplicados.
         const unusedMatches = matches.filter(m => !m.usado);
-        let matchEscolhido = null;
         if (unusedMatches.length > 1) {
           const fonteQtd = Number(fonteRow[9] || 0); // QTD em DADOS_IMPORTADOS (índice 9)
           matchEscolhido = unusedMatches.reduce((best, m) => {
