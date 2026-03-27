@@ -1555,26 +1555,23 @@ ALL_OCS_ITEMS = itemsObj;
     if (items.length === 0) return;
 
     const hasFaturados  = items.some(i => i.Status?.toLowerCase() === 'faturado');
-    const prazoMin      = calcularPrazoMinimo(items);
-    const prazoKey      = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
-    const groupRank     = hasFaturados ? 0 : 1;
+    const posicaoMin    = (typeof ocInfo.posicaoMin === 'number') ? ocInfo.posicaoMin : 999999;
 
     cards.push({
       ocInfo,
       items,
       hasFaturados,
-      prazoKey,
-      groupRank,
+      posicaoMin,
       ocKey: String(ocInfo.ordCompra || '')
     });
   });
 
   console.log(`📊 cards: ${cards.length} total`);
 
-  // ORDENAR: prazo ascendente (faturados ficam na posição natural pela data de entrega)
+  // ORDENAR: mesma ordem de DADOS_IMPORTADOS (posicaoMin = índice do primeiro item do grupo na fonte)
   cards.sort((a, b) => {
-    if (a.prazoKey !== b.prazoKey) return a.prazoKey - b.prazoKey;
-    // desempate estável
+    if (a.posicaoMin !== b.posicaoMin) return a.posicaoMin - b.posicaoMin;
+    // desempate estável por OC
     return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
   });
 
@@ -1603,12 +1600,14 @@ ALL_OCS_ITEMS = itemsObj;
         const cardId = "card-" + ocIdLimpo;
         
         let existingCard = document.getElementById(cardId);
-        if (existingCard) { 
-            existingCard.innerHTML = ''; 
-            card = existingCard; 
-        } else { 
-            card.id = cardId; 
+        if (existingCard) {
+            existingCard.innerHTML = '';
+            card = existingCard;
+        } else {
+            card.id = cardId;
         }
+        // Armazena posição original de DADOS_IMPORTADOS para ordenação estável
+        card.dataset.posicao = (typeof ocInfo.posicaoMin === 'number') ? ocInfo.posicaoMin : 999999;
 
         let items = [];
         let hasFaturadosItems = false;
@@ -1801,20 +1800,14 @@ ALL_OCS_ITEMS = itemsObj;
   const cards = Array.from($cardsContainer.querySelectorAll('.card')).map(card => {
     const hasFaturados = card.querySelectorAll('.item-faturado').length > 0;
 
-    let prazoMin = Infinity;
-    card.querySelectorAll('td.status-prazo').forEach(td => {
-      const n = parseInt((td.textContent || '').trim(), 10);
-      if (!isNaN(n)) prazoMin = Math.min(prazoMin, n);
-    });
-    const prazoKey  = (prazoMin === Infinity) ? Infinity : prazoMin;
-    const groupRank = hasFaturados ? 0 : 1;
-    const ocKey     = (card.id || '').replace(/^card-/, '');
+    const posicaoMin = parseInt(card.dataset.posicao ?? '999999', 10);
+    const ocKey      = (card.id || '').replace(/^card-/, '');
 
-    return { card, groupRank, prazoKey, ocKey };
+    return { card, posicaoMin, ocKey };
   });
 
   cards.sort((a, b) => {
-    if (a.prazoKey !== b.prazoKey) return a.prazoKey - b.prazoKey;
+    if (a.posicaoMin !== b.posicaoMin) return a.posicaoMin - b.posicaoMin;
     return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
   });
 
@@ -3739,9 +3732,7 @@ ${gerarEtiquetaRevisao()}
             // Calcular metadados (mesma lógica dos cards)
             const hasInativos = items.some(i => i.Status?.toLowerCase() === 'inativo');
             const hasFaturados = items.some(i => i.Status?.toLowerCase() === 'faturado');
-            const prazoMin = calcularPrazoMinimo(items);
-            const prazoKey = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
-            const groupRank = hasInativos ? 0 : (hasFaturados ? 1 : 2);
+            const posicaoMin = (ocInfo && typeof ocInfo.posicaoMin === 'number') ? ocInfo.posicaoMin : 999999;
 
             ocsParaRelatorio.push({
                 ocNum,
@@ -3749,15 +3740,14 @@ ${gerarEtiquetaRevisao()}
                 ocInfo,
                 nomeCliente: ocInfo ? ocInfo.cliente : '',
                 items,
-                groupRank,
-                prazoKey,
+                posicaoMin,
                 ocKey: String(ocNum)
             });
         });
 
-        // ORDENAR igual aos cards: grupo → prazo → OC
+        // ORDENAR igual aos cards: mesma ordem de DADOS_IMPORTADOS
         ocsParaRelatorio.sort((a, b) => {
-            if (a.prazoKey !== b.prazoKey) return a.prazoKey - b.prazoKey;
+            if (a.posicaoMin !== b.posicaoMin) return a.posicaoMin - b.posicaoMin;
             return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
         });
 

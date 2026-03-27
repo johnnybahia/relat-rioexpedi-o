@@ -50,6 +50,8 @@ const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova c
 const DATA_STATUS_COL = 16;    // Q (coluna 17) - Data em que o status foi alterado para Faturado/Finalizado/Excluido
 const PEDIDOS_CODIGO_FIXO_COL = 18; // S (coluna 19) — UUID fixo por item, gerado uma vez e preservado para sempre
 const DB_CODIGO_FIXO_COL      = 18; // S (coluna 19) — mesmo UUID propagado do PEDIDOS para o Relatorio_DB
+const PEDIDOS_POSICAO_FONTE_COL = 16; // Q (coluna 17) — índice do item em DADOS_IMPORTADOS (para manter ordem original)
+const DB_POSICAO_FONTE_COL      = 17; // R (coluna 18) — posição propagada do PEDIDOS para o Relatorio_DB
 const DIAS_RETENCAO = 15;      // Itens com status final são purgados após este número de dias
 
 // ====== BAIXAS PARCIAIS ======
@@ -1112,7 +1114,7 @@ function sincronizarPedidosComFonte() {
         fonteRow[12],      // N: DT. ENTREGA
         fonteRow[13],      // O: PRAZO
         timestampFinal,    // P: TIMESTAMP_CRIACAO
-        '',                // Q: (reservado)
+        idx,               // Q: POSICAO_FONTE — índice em DADOS_IMPORTADOS (preserva ordem original)
         '',                // R: (reservado)
         codigoFixo         // S: CÓDIGO_FIXO — UUID imutável por item
       ];
@@ -1805,7 +1807,7 @@ function sincronizarDados() {
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
             fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               marcarFaturarAtual,
-            '',  '',  cfReativa   // Q: DATA_STATUS vazia ao reativar, R: reservado, S: CÓDIGO_FIXO
+            '',  fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '',  cfReativa   // Q: DATA_STATUS vazia ao reativar, R: POSICAO_FONTE, S: CÓDIGO_FIXO
           ];
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: "Ativo", id: id });
           fonteMap.delete(id);
@@ -1828,7 +1830,7 @@ function sincronizarDados() {
           fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
           dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
           fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
-          dbItem.row[DATA_STATUS_COL] || '', '', cfMatch  // Q: DATA_STATUS preservado, R: reservado, S: CÓDIGO_FIXO
+          dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfMatch  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: CÓDIGO_FIXO
         ]; // QTD. ABERTA preservada do DB via DB_QTD_COL=9 (índice correto no Relatorio_DB)
 
         let mudou = false;
@@ -1904,7 +1906,7 @@ function sincronizarDados() {
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
             dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
-            dbItem.row[DATA_STATUS_COL] || '', '', cfFp  // Q: DATA_STATUS preservado, R: reservado, S: CÓDIGO_FIXO
+            dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfFp  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: CÓDIGO_FIXO
           ]; // QTD. ABERTA preservada do DB via DB_QTD_COL=9 (índice correto no Relatorio_DB)
 
           // FIX: preserva "Faturado" e "Finalizado" na atualização por fingerprint também
@@ -2018,7 +2020,7 @@ function sincronizarDados() {
         fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
         fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
         fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               "",
-        '',  '',  fonteRow[PEDIDOS_CODIGO_FIXO_COL] || ''  // Q: DATA_STATUS vazio, R: reservado, S: CÓDIGO_FIXO
+        '',  fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '',  fonteRow[PEDIDOS_CODIGO_FIXO_COL] || ''  // Q: DATA_STATUS vazio, R: POSICAO_FONTE, S: CÓDIGO_FIXO
       ];
       novos.push(novaLinha);
     }
@@ -2547,7 +2549,9 @@ const RELATORIO_DB_HEADERS = [
   'ID_UNICO', 'CARTELA', 'CLIENTE', 'PEDIDO', 'CÓD. CLIENTE',
   'CÓD. MARFIM', 'DESCRIÇÃO', 'TAMANHO', 'ORD. COMPRA', 'QTD. ABERTA',
   'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR',
-  'DATA_STATUS' // Q - data em que o status foi alterado para Faturado/Finalizado/Excluido
+  'DATA_STATUS',   // Q - data em que o status foi alterado para Faturado/Finalizado/Excluido
+  'POSICAO_FONTE', // R - índice do item em DADOS_IMPORTADOS (preserva ordem original)
+  'CODIGO_FIXO'    // S - UUID imutável por item
 ];
 
 /**
@@ -2669,7 +2673,11 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     })(),
 
     Status: getDisp('Status', 'Desconhecido'),
-    MARCAR_FATURAR: getDisp('MARCAR_FATURAR', '') // Nova coluna para marcação de faturamento
+    MARCAR_FATURAR: getDisp('MARCAR_FATURAR', ''), // Nova coluna para marcação de faturamento
+    // Posição original em DADOS_IMPORTADOS — lida por índice fixo (col R = índice 17 no DB)
+    posicaoFonte: (typeof row[DB_POSICAO_FONTE_COL] === 'number' && !isNaN(row[DB_POSICAO_FONTE_COL]))
+      ? row[DB_POSICAO_FONTE_COL]
+      : 999999
   };
 
   if (!item.uniqueId) return null;
@@ -2685,8 +2693,13 @@ function _organizeByOC_(items) {
         ordCompraId: oc,
         ordCompra: oc,      // alias para compatibilidade com o front
         cliente: item.CLIENTE,
+        posicaoMin: item.posicaoFonte, // menor posição em DADOS_IMPORTADOS para ordenar os cards
         items: []
       };
+    }
+    // mantém a menor posição entre todos os itens do grupo
+    if (item.posicaoFonte < byOC[oc].posicaoMin) {
+      byOC[oc].posicaoMin = item.posicaoFonte;
     }
     byOC[oc].items.push(item);
   });
