@@ -52,6 +52,14 @@ const PEDIDOS_CODIGO_FIXO_COL = 18; // S (coluna 19) — UUID fixo por item, ger
 const DB_CODIGO_FIXO_COL      = 18; // S (coluna 19) — mesmo UUID propagado do PEDIDOS para o Relatorio_DB
 const PEDIDOS_POSICAO_FONTE_COL = 16; // Q (coluna 17) — índice do item em DADOS_IMPORTADOS (para manter ordem original)
 const DB_POSICAO_FONTE_COL      = 17; // R (coluna 18) — posição propagada do PEDIDOS para o Relatorio_DB
+
+// ====== ABA ORIGINAL (fonte primária para ordenação dos itens dentro de cada OC) ======
+const ORIGINAL_SHEET_NAME = 'original'; // nome exato da aba
+const ORIG_OC_COL   = 7;  // H — Ordem de Compra
+const ORIG_DESC_COL = 5;  // F — Descrição
+const ORIG_TAM_COL  = 6;  // G — Tamanho
+const ORIG_QTD_COL  = 8;  // I — Quantidade
+const ORIG_DATA_COL = 11; // L — Data
 const DIAS_RETENCAO = 15;      // Itens com status final são purgados após este número de dias
 
 // ====== BAIXAS PARCIAIS ======
@@ -966,6 +974,37 @@ function sincronizarPedidosComFonte() {
       Logger.log(`🔑 ${dbFingerprintMap.size} fingerprints do DB indexadas para recuperação de ID`);
     }
 
+    // PASSO 2.5: Ler aba "original" para determinar a sequência correta de itens dentro de cada OC.
+    // Chave: "OC|DESC|TAM|QTD|DATA" → índice global da linha (usado para ordenar itens no HTML).
+    // Regra: uma vez encontrada, a posição NUNCA muda — mesmo que QTD seja alterada depois.
+    const originalPosMap = new Map();
+    try {
+      const origSheet = SS.getSheetByName(ORIGINAL_SHEET_NAME);
+      if (origSheet && origSheet.getLastRow() > 1) {
+        const origLastRow = origSheet.getLastRow() - 1; // exclui cabeçalho
+        const origData = origSheet.getRange(2, 1, origLastRow, 12).getValues();
+        origData.forEach((row, origIdx) => {
+          const oc = String(row[ORIG_OC_COL] || '').trim();
+          if (!oc) return;
+          const desc = String(row[ORIG_DESC_COL] || '').trim();
+          const tam  = String(row[ORIG_TAM_COL]  || '').trim();
+          const qtd  = String(row[ORIG_QTD_COL]  || '').trim();
+          const data = row[ORIG_DATA_COL] instanceof Date
+            ? Utilities.formatDate(row[ORIG_DATA_COL], TZ, 'yyyy-MM-dd')
+            : String(row[ORIG_DATA_COL] || '').trim();
+          const chave = `${oc}|${desc}|${tam}|${qtd}|${data}`;
+          if (!originalPosMap.has(chave)) { // guarda apenas a primeira ocorrência
+            originalPosMap.set(chave, origIdx);
+          }
+        });
+        Logger.log(`📐 ${originalPosMap.size} posições mapeadas da aba "${ORIGINAL_SHEET_NAME}"`);
+      } else {
+        Logger.log(`⚠️ Aba "${ORIGINAL_SHEET_NAME}" não encontrada ou vazia — usando índice de DADOS_IMPORTADOS como fallback`);
+      }
+    } catch (e) {
+      Logger.log(`⚠️ Erro ao ler aba "${ORIGINAL_SHEET_NAME}": ${e.message} — usando fallback`);
+    }
+
     fonteData.forEach((fonteRow, idx) => {
       const cartela = fonteRow[0]; // Em DADOS_IMPORTADOS, CARTELA é coluna A (índice 0)
 
@@ -1096,6 +1135,31 @@ function sincronizarPedidosComFonte() {
         codigoFixo = dbCodigoFixoMap.get(idFinal) || Utilities.getUuid();
       }
 
+      // Resolve POSICAO_FONTE: procura na aba "original" pela chave OC|DESC|TAM|QTD|DATA.
+      // Uma vez encontrada, a posição é preservada para sempre (matchEscolhido já tem o valor).
+      // Nunca sobrescreve uma posição válida já gravada em PEDIDOS (< 500000).
+      let posicaoFonte = null;
+      if (matchEscolhido && !isNovo) {
+        const posExistente = matchEscolhido.row[PEDIDOS_POSICAO_FONTE_COL];
+        if (typeof posExistente === 'number' && posExistente < 500000) {
+          posicaoFonte = posExistente; // já encontrado antes — preserva
+        }
+      }
+      if (posicaoFonte === null) {
+        // Primeira vez: procura na aba "original"
+        const oc   = String(fonteRow[8]  || '').trim(); // J: ORD. COMPRA
+        const desc = String(fonteRow[6]  || '').trim(); // H: DESCRIÇÃO
+        const tam  = String(fonteRow[7]  || '').trim(); // I: TAMANHO
+        const qtd  = String(fonteRow[9]  || '').trim(); // K: QTD. ABERTA
+        const data = fonteRow[11] instanceof Date
+          ? Utilities.formatDate(fonteRow[11], TZ, 'yyyy-MM-dd')
+          : String(fonteRow[11] || '').trim();          // M: DATA RECEB.
+        const chave = `${oc}|${desc}|${tam}|${qtd}|${data}`;
+        const posOriginal = originalPosMap.get(chave);
+        posicaoFonte = (posOriginal !== undefined) ? posOriginal : (900000 + idx);
+        // 900000+idx como fallback: mantém ordem relativa de DADOS_IMPORTADOS para itens não encontrados
+      }
+
       // Monta linha completa para PEDIDOS (A até S)
       const novaLinha = [
         idFinal,           // A: ID_UNICO
@@ -1114,7 +1178,7 @@ function sincronizarPedidosComFonte() {
         fonteRow[12],      // N: DT. ENTREGA
         fonteRow[13],      // O: PRAZO
         timestampFinal,    // P: TIMESTAMP_CRIACAO
-        idx,               // Q: POSICAO_FONTE — índice em DADOS_IMPORTADOS (preserva ordem original)
+        posicaoFonte,      // Q: POSICAO_FONTE — índice na aba "original" (fixo, nunca muda)
         '',                // R: (reservado)
         codigoFixo         // S: CÓDIGO_FIXO — UUID imutável por item
       ];
