@@ -880,6 +880,23 @@ function sincronizarPedidosComFonte() {
       return { houveMudancas: false, erro: 'Aba DADOS_IMPORTADOS não existe' };
     }
 
+    // GUARDA DE IMPORTRANGE: verifica timestamp em G2 antes de qualquer processamento.
+    // G2 contém o horário da última atualização do IMPORTRANGE (ex: "27/03/2026 18:25:53").
+    // Se G2 não mudou desde o último sync, o IMPORTRANGE não foi atualizado — aborta.
+    // Se G2 está vazio ou com erro (#), o IMPORTRANGE ainda está carregando — aborta.
+    const tsAtual = fonteSheet.getRange('G2').getDisplayValue().trim();
+    if (!tsAtual || tsAtual.startsWith('#')) {
+      Logger.log(`⚠️ IMPORTRANGE não concluído — G2="${tsAtual}". Sync ignorado.`);
+      return { houveMudancas: false, motivo: 'importrange_nao_pronto' };
+    }
+    const props = PropertiesService.getScriptProperties();
+    const tsAnterior = props.getProperty('ULTIMO_IMPORTRANGE_TS') || '';
+    if (tsAtual === tsAnterior) {
+      Logger.log(`ℹ️ IMPORTRANGE não atualizado (G2="${tsAtual}"). Sync ignorado.`);
+      return { houveMudancas: false, motivo: 'sem_nova_importacao' };
+    }
+    Logger.log(`🆕 Novo IMPORTRANGE detectado: "${tsAnterior || 'nenhum'}" → "${tsAtual}"`);
+
     const fonteLastRow = fonteSheet.getLastRow();
     if (fonteLastRow < FONTE_DATA_START_ROW) {
       Logger.log(`⚠️ Sem dados em ${IMPORTRANGE_SHEET_NAME}`);
@@ -1208,6 +1225,9 @@ function sincronizarPedidosComFonte() {
       // BUG FIX: houveMudancas agora só é true se há itens NOVOS ou com dados
       // realmente alterados. Antes era true para qualquer item correspondido,
       // causando limpeza desnecessária de cache a cada execução do trigger.
+      // Grava timestamp do IMPORTRANGE processado — próxima execução só roda se G2 mudar
+      props.setProperty('ULTIMO_IMPORTRANGE_TS', tsAtual);
+
       const houveMudancas = novosItens > 0 || itensComMudancaReal > 0;
       return {
         houveMudancas: houveMudancas,
