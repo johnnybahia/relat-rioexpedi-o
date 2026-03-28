@@ -1191,7 +1191,7 @@ function sincronizarPedidosComFonte() {
         fonteRow[3],       // E: PEDIDO
         fonteRow[4],       // F: CÓD. CLIENTE
         fonteRow[5],       // G: CÓD. MARFIM
-        fonteRow[6],       // H: DESCRIÇÃO
+        String(fonteRow[6] || '') + (codigoFixo ? ' [' + codigoFixo + ']' : ''),  // H: DESCRIÇÃO [UUID] — âncora de identidade visível na planilha
         fonteRow[7],       // I: TAMANHO
         fonteRow[8],       // J: ORD. COMPRA
         fonteRow[9],       // K: QTD. ABERTA
@@ -1850,14 +1850,19 @@ function sincronizarDados() {
     }
     Logger.log(`   ✓ ${dbImpressoes.size} impressões digitais criadas para Relatorio_DB`);
 
-    // Map<codigoFixo, {id, row}> para PEDIDOS — busca por UUID imutável (ideia do usuário)
-    // Permite localizar o item mesmo que fingerprint e ID mudem após atualização da fonte.
+    // Map<codigoFixo, {id, row}> para PEDIDOS — busca por UUID imutável
+    // Fonte primária: col S (CÓDIGO_FIXO). Fallback: UUID embutido na DESC (col H).
+    // Dois lugares para o mesmo UUID garante localização mesmo se uma das fontes for perdida.
     const fonteCodigoFixoMap = new Map();
+    const _uuidRegexCf_ = /\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]$/i;
     for (let [id, row] of fonteMap.entries()) {
       const cf = String(row[PEDIDOS_CODIGO_FIXO_COL] || '').trim();
       if (cf && !fonteCodigoFixoMap.has(cf)) fonteCodigoFixoMap.set(cf, { id: id, row: row });
+      // Fallback: UUID visível na DESC — redundância para resistir a limpeza acidental da col S
+      const m = String(row[DESC_COL] || '').match(_uuidRegexCf_);
+      if (m && !fonteCodigoFixoMap.has(m[1])) fonteCodigoFixoMap.set(m[1], { id: id, row: row });
     }
-    Logger.log(`   ✓ ${fonteCodigoFixoMap.size} UUIDs fixos indexados de PEDIDOS`);
+    Logger.log(`   ✓ ${fonteCodigoFixoMap.size} UUIDs fixos indexados de PEDIDOS (col S + DESC)`);
 
     // 3) PROCESSAR
     Logger.log("\n🔄 3. PROCESSANDO");
@@ -2109,27 +2114,32 @@ function sincronizarDados() {
     }
 
     itensFaturarPendentes.forEach(({ id, linha, row, statusAtual, qtdAberta }) => {
-      const linhaFaturar = [...row];
-      linhaFaturar[STATUS_COL] = "Faturado";
-      linhaFaturar[DATA_STATUS_COL] = new Date();
-      updates.push({ linha: linha, dados: linhaFaturar, de: statusAtual, para: "Faturado", id: id });
-      autoExcluidos++;
+      const linhaAtualizar = [...row];
 
-      if (qtdAberta > 0) {
-        Logger.log(`   ⚠️ QTD.ABERTA=${qtdAberta} → Faturado + ALERTA (ID="${id}")`);
+      if (qtdAberta === 0) {
+        // QTD=0: baixa foi completamente registrada no HTML — seguro faturar automaticamente
+        linhaAtualizar[STATUS_COL] = "Faturado";
+        linhaAtualizar[DATA_STATUS_COL] = new Date();
+        updates.push({ linha: linha, dados: linhaAtualizar, de: statusAtual, para: "Faturado", id: id });
+        autoExcluidos++;
+        Logger.log(`   ✅ QTD.ABERTA=0 → Faturado silencioso (ID="${id}")`);
+      } else {
+        // QTD>0: não auto-fatura — sinaliza MARCAR_FATURAR=SIM e aguarda confirmação manual no HTML.
+        // Na próxima sync o item já terá MARCAR_FATURAR=SIM e será mantido Ativo pelo bloco aguardandoNF.
+        linhaAtualizar[MARCAR_FATURAR_COL] = "SIM";
+        updates.push({ linha: linha, dados: linhaAtualizar, de: statusAtual, para: statusAtual, id: id });
+        Logger.log(`   ⚠️ QTD.ABERTA=${qtdAberta} → MARCAR_FATURAR=SIM + ALERTA, mantido ${statusAtual} (ID="${id}")`);
         _registrarAlertaFaturamento_({
           id: id,
-          cartela: String(row[CARTELA_COL]    || ''),  // índice 1 — igual em ambos
-          cliente: String(row[CLIENTE_COL]    || ''),  // índice 2 — igual em ambos
-          pedido:  String(row[DB_PEDIDO_COL]  || ''),  // índice 3 no DB (≠ PEDIDO_COL=4)
-          oc:      String(row[DB_OC_COL]      || ''),  // índice 8 no DB (≠ OC_COL=9)
-          desc:    String(row[DB_DESC_COL]    || ''),  // índice 6 no DB (≠ DESC_COL=7)
-          tam:     String(row[DB_TAM_COL]     || ''),  // índice 7 no DB (≠ TAM_COL=8)
+          cartela: String(row[CARTELA_COL]    || ''),
+          cliente: String(row[CLIENTE_COL]    || ''),
+          pedido:  String(row[DB_PEDIDO_COL]  || ''),
+          oc:      String(row[DB_OC_COL]      || ''),
+          desc:    String(row[DB_DESC_COL]    || ''),
+          tam:     String(row[DB_TAM_COL]     || ''),
           qtdAberta: qtdAberta,
           dataEvento: new Date().toISOString()
         });
-      } else {
-        Logger.log(`   ✅ QTD.ABERTA=0 → Faturado silencioso (ID="${id}")`);
       }
     });
 
@@ -2790,7 +2800,7 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     // TEXTUAIS/IDENTIFICADORES via display
     CARTELA: getDisp('CARTELA', 'N/A'),
     'CÓD. CLIENTE': getDisp('CÓD. CLIENTE', 'N/A'),
-    'DESCRIÇÃO': getDisp('DESCRIÇÃO', 'N/A'),
+    'DESCRIÇÃO': (() => { const d = getDisp('DESCRIÇÃO', 'N/A'); return d.replace(/\s*\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]$/i, '').trim() || d; })(),
     'TAMANHO': getDisp('TAMANHO', 'N/A'),
     'CÓD. MARFIM': getDisp('CÓD. MARFIM', 'N/A'),
     'CÓD. OS': getDisp('CÓD. OS', 'N/A'),
