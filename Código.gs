@@ -880,10 +880,15 @@ function sincronizarPedidosComFonte() {
       return { houveMudancas: false, erro: 'Aba DADOS_IMPORTADOS não existe' };
     }
 
-    // GUARDA DE IMPORTRANGE: verifica timestamp em G2 antes de qualquer processamento.
-    // G2 contém o horário da última atualização do IMPORTRANGE (ex: "27/03/2026 18:25:53").
-    // Se G2 não mudou desde o último sync, o IMPORTRANGE não foi atualizado — aborta.
-    // Se G2 está vazio ou com erro (#), o IMPORTRANGE ainda está carregando — aborta.
+    // GUARDA DE IMPORTRANGE: verifica A1 (fórmula) e G2 (timestamp) antes de qualquer processamento.
+    // A1 contém a fórmula IMPORTRANGE — se tiver erro (#) o IMPORTRANGE falhou.
+    // G2 contém o horário da última atualização (ex: "27/03/2026 18:25:53").
+    // Se A1 tem erro, ou G2 está vazio/com erro, ou G2 não mudou → aborta.
+    const a1Val = fonteSheet.getRange('A1').getDisplayValue().trim();
+    if (a1Val.startsWith('#')) {
+      Logger.log(`⚠️ IMPORTRANGE com erro em A1="${a1Val}". Sync ignorado.`);
+      return { houveMudancas: false, motivo: 'importrange_erro_a1' };
+    }
     const tsAtual = fonteSheet.getRange('G2').getDisplayValue().trim();
     if (!tsAtual || tsAtual.startsWith('#')) {
       Logger.log(`⚠️ IMPORTRANGE não concluído — G2="${tsAtual}". Sync ignorado.`);
