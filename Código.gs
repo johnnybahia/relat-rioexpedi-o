@@ -880,6 +880,28 @@ function sincronizarPedidosComFonte() {
       return { houveMudancas: false, erro: 'Aba DADOS_IMPORTADOS não existe' };
     }
 
+    // GUARDA DE IMPORTRANGE: verifica A1 (fórmula) e G2 (timestamp) antes de qualquer processamento.
+    // A1 contém a fórmula IMPORTRANGE — se tiver erro (#) o IMPORTRANGE falhou.
+    // G2 contém o horário da última atualização (ex: "27/03/2026 18:25:53").
+    // Se A1 tem erro, ou G2 está vazio/com erro, ou G2 não mudou → aborta.
+    const a1Val = fonteSheet.getRange('A1').getDisplayValue().trim();
+    if (a1Val.startsWith('#')) {
+      Logger.log(`⚠️ IMPORTRANGE com erro em A1="${a1Val}". Sync ignorado.`);
+      return { houveMudancas: false, motivo: 'importrange_erro_a1' };
+    }
+    const tsAtual = fonteSheet.getRange('G2').getDisplayValue().trim();
+    if (!tsAtual || tsAtual.startsWith('#')) {
+      Logger.log(`⚠️ IMPORTRANGE não concluído — G2="${tsAtual}". Sync ignorado.`);
+      return { houveMudancas: false, motivo: 'importrange_nao_pronto' };
+    }
+    const props = PropertiesService.getScriptProperties();
+    const tsAnterior = props.getProperty('ULTIMO_IMPORTRANGE_TS') || '';
+    if (tsAtual === tsAnterior) {
+      Logger.log(`ℹ️ IMPORTRANGE não atualizado (G2="${tsAtual}"). Sync ignorado.`);
+      return { houveMudancas: false, motivo: 'sem_nova_importacao' };
+    }
+    Logger.log(`🆕 Novo IMPORTRANGE detectado: "${tsAnterior || 'nenhum'}" → "${tsAtual}"`);
+
     const fonteLastRow = fonteSheet.getLastRow();
     if (fonteLastRow < FONTE_DATA_START_ROW) {
       Logger.log(`⚠️ Sem dados em ${IMPORTRANGE_SHEET_NAME}`);
@@ -1208,6 +1230,9 @@ function sincronizarPedidosComFonte() {
       // BUG FIX: houveMudancas agora só é true se há itens NOVOS ou com dados
       // realmente alterados. Antes era true para qualquer item correspondido,
       // causando limpeza desnecessária de cache a cada execução do trigger.
+      // Grava timestamp do IMPORTRANGE processado — próxima execução só roda se G2 mudar
+      props.setProperty('ULTIMO_IMPORTRANGE_TS', tsAtual);
+
       const houveMudancas = novosItens > 0 || itensComMudancaReal > 0;
       return {
         houveMudancas: houveMudancas,
