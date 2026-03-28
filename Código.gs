@@ -1169,7 +1169,7 @@ function sincronizarPedidosComFonte() {
         fonteRow[3],       // E: PEDIDO
         fonteRow[4],       // F: CÓD. CLIENTE
         fonteRow[5],       // G: CÓD. MARFIM
-        String(fonteRow[6] || '') + (codigoFixo ? ' [' + codigoFixo + ']' : ''),  // H: DESCRIÇÃO [UUID]
+        fonteRow[6],       // H: DESCRIÇÃO
         fonteRow[7],       // I: TAMANHO
         fonteRow[8],       // J: ORD. COMPRA
         fonteRow[9],       // K: QTD. ABERTA
@@ -1958,6 +1958,11 @@ function sincronizarDados() {
         }
 
         fonteMap.delete(id);
+        // Marca slot no fonteImpressoes como usado — sem isso, itens excluídos da fonte
+        // conseguem fazer fingerprint match com este slot e não são marcados como Faturado.
+        const fpFonteId = _criarImpressaoDigital_(fonteRow);
+        const fpListId = fonteImpressoes.get(fpFonteId);
+        if (fpListId) { const fi = fpListId.find(i => i.id === id); if (fi) fi.usado = true; }
         consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
 
       } else {
@@ -2760,7 +2765,7 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     // TEXTUAIS/IDENTIFICADORES via display
     CARTELA: getDisp('CARTELA', 'N/A'),
     'CÓD. CLIENTE': getDisp('CÓD. CLIENTE', 'N/A'),
-    'DESCRIÇÃO': (() => { const d = getDisp('DESCRIÇÃO', 'N/A'); return d.replace(/\s*\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]$/i, '').trim() || d; })(),
+    'DESCRIÇÃO': getDisp('DESCRIÇÃO', 'N/A'),
     'TAMANHO': getDisp('TAMANHO', 'N/A'),
     'CÓD. MARFIM': getDisp('CÓD. MARFIM', 'N/A'),
     'CÓD. OS': getDisp('CÓD. OS', 'N/A'),
