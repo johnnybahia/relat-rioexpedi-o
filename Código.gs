@@ -1169,7 +1169,7 @@ function sincronizarPedidosComFonte() {
         fonteRow[3],       // E: PEDIDO
         fonteRow[4],       // F: CÓD. CLIENTE
         fonteRow[5],       // G: CÓD. MARFIM
-        String(fonteRow[6] || '') + (codigoFixo ? ' [' + codigoFixo + ']' : ''),  // H: DESCRIÇÃO [UUID]
+        fonteRow[6],       // H: DESCRIÇÃO
         fonteRow[7],       // I: TAMANHO
         fonteRow[8],       // J: ORD. COMPRA
         fonteRow[9],       // K: QTD. ABERTA
@@ -2760,7 +2760,7 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     // TEXTUAIS/IDENTIFICADORES via display
     CARTELA: getDisp('CARTELA', 'N/A'),
     'CÓD. CLIENTE': getDisp('CÓD. CLIENTE', 'N/A'),
-    'DESCRIÇÃO': (() => { const d = getDisp('DESCRIÇÃO', 'N/A'); return d.replace(/\s*\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]$/i, '').trim() || d; })(),
+    'DESCRIÇÃO': getDisp('DESCRIÇÃO', 'N/A'),
     'TAMANHO': getDisp('TAMANHO', 'N/A'),
     'CÓD. MARFIM': getDisp('CÓD. MARFIM', 'N/A'),
     'CÓD. OS': getDisp('CÓD. OS', 'N/A'),
