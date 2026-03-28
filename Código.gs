@@ -1958,6 +1958,11 @@ function sincronizarDados() {
         }
 
         fonteMap.delete(id);
+        // Marca slot no fonteImpressoes como usado — sem isso, itens excluídos da fonte
+        // conseguem fazer fingerprint match com este slot e não são marcados como Faturado.
+        const fpFonteId = _criarImpressaoDigital_(fonteRow);
+        const fpListId = fonteImpressoes.get(fpFonteId);
+        if (fpListId) { const fi = fpListId.find(i => i.id === id); if (fi) fi.usado = true; }
         consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
 
       } else {
