@@ -1742,7 +1742,7 @@ function sincronizarDadosOtimizado() {
 }
 
 function sincronizarDados() {
-  Logger.clear();
+  // Logger.clear() removido — apagava logs de sincronizarPedidosComFonte (ETAPA 0) que rodam antes
   Logger.log("=".repeat(70));
   Logger.log(`SINCRONIZAÇÃO v${APP_VERSION} - ${new Date().toLocaleString('pt-BR')}`);
   Logger.log("=".repeat(70));
@@ -2082,7 +2082,21 @@ function sincronizarDados() {
             const aguardandoNF = marcarFaturar === 'SIM';
 
             if (aguardandoNF) {
-              Logger.log(`   ✋ Item aguardando NF - mantido Ativo mesmo fora do DADOS_IMPORTADOS (MARCAR_FATURAR=SIM)`);
+              const qtdAtual = Number(dbItem.row[DB_QTD_COL] || 0);
+              // Diagnóstico: verificar se o item ainda existe em PEDIDOS sob fingerprint diferente
+              const fpDB = _criarImpressaoDigital_(dbItem.row, true);
+              const aindaEmPedidos = fonteImpressoes.has(fpDB) && fonteImpressoes.get(fpDB).some(i => !i.usado);
+              if (aindaEmPedidos) {
+                // Item ainda existe em PEDIDOS com ID diferente — provável duplicata (ID mudou em sincronizarPedidosComFonte)
+                Logger.log(`   ⚠️ DUPLICATA: Item aguardando NF existe em PEDIDOS com ID diferente — OC="${dbItem.row[DB_OC_COL]}" QTD=${qtdAtual} ID="${id}"`);
+                // Mantém Ativo — o item correto (novo ID) já está sendo processado neste ciclo
+              } else if (qtdAtual === 0) {
+                // QTD=0: baixa foi completamente registrada no HTML — seguro faturar automaticamente
+                Logger.log(`   ✋→✅ Aguardando NF + QTD=0 → baixa concluída, marcando Faturado (ID="${id}")`);
+                itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
+              } else {
+                Logger.log(`   ✋ Item aguardando NF - mantido Ativo (QTD=${qtdAtual}, ID="${id}")`);
+              }
             } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
               // Coleta para processar depois, ordenado por QTD.ABERTA crescente.
               // Isso garante que, entre itens idênticos (mesma OC), os totalmente
