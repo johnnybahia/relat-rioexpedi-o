@@ -1397,6 +1397,12 @@ ALL_OCS_ITEMS = itemsObj;
                     // Aplicar filtros e renderizar
                     aplicarFiltros();
 
+                    // Verifica alertas de faturamento a cada carregamento (inicial e auto-refresh).
+                    // Só dispara se não houver modal de alerta já aberto (não interrompe digitação de senha).
+                    if (!_alertaAtual) {
+                        verificarAlertasFaturamento();
+                    }
+
                 } else {
                     console.error("❌ Resposta inválida:", response);
                     if (!silentRefresh) {
