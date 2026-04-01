@@ -94,8 +94,6 @@
     .item-table tr:last-child td { border-bottom: none; }
     
     .item-table td.status-prazo { font-weight: 600; text-align: center; }
-    .item-table tr.date-group-separator td { background: #f1f5f9; padding: 0.3rem 0.75rem; font-size: 0.75rem; font-weight: 700; color: #475569; border-top: 2px solid #cbd5e1; letter-spacing: 0.03em; }
-    .item-table tr.date-group-separator:first-child td { border-top: none; }
     .item-table th.qtd-aberta { color: #b91c1c; background-color: #fef2f2; }
     .item-table td.qtd-aberta { color: #b91c1c; font-weight: 700; background-color: #fff5f5; }
     .item-table tr.item-faturado { background-color: #dcfce7; font-weight: 500; }
@@ -1556,16 +1554,21 @@ ALL_OCS_ITEMS = itemsObj;
 
     if (items.length === 0) return;
 
-    const hasFaturados  = items.some(i => i.Status?.toLowerCase() === 'faturado');
-    const prazoMin      = calcularPrazoMinimo(items);
-    const prazoKey      = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
+    // Separa itens por DT. ENTREGA — cada data vira um card independente
+    const _byDate = new Map();
+    items.forEach(item => {
+      const chave = formatarData(item['DT. ENTREGA']) || 'N/A';
+      if (!_byDate.has(chave)) _byDate.set(chave, []);
+      _byDate.get(chave).push(item);
+    });
 
-    cards.push({
-      ocInfo,
-      items,
-      hasFaturados,
-      prazoKey,
-      ocKey: String(ocInfo.ordCompra || '')
+    _byDate.forEach((groupItems, dateKey) => {
+      const hasFaturados = groupItems.some(i => i.Status?.toLowerCase() === 'faturado');
+      const prazoMin     = calcularPrazoMinimo(groupItems);
+      const prazoKey     = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
+      // Anotação de data no ocInfo apenas quando há múltiplas datas
+      const ocInfoCard   = _byDate.size > 1 ? { ...ocInfo, dateGroup: dateKey } : ocInfo;
+      cards.push({ ocInfo: ocInfoCard, items: groupItems, hasFaturados, prazoKey, ocKey: String(ocInfo.ordCompra || '') });
     });
   });
 
@@ -1598,8 +1601,9 @@ ALL_OCS_ITEMS = itemsObj;
 
         let card = document.createElement("div");
         card.className = "card";
-        const ocIdLimpo = String(ocInfo.ordCompra).replace(/[^a-zA-Z0-9-]/g, '');
-        const cardId = "card-" + ocIdLimpo;
+        const ocIdLimpo   = String(ocInfo.ordCompra).replace(/[^a-zA-Z0-9-]/g, '');
+        const dateIdSuffix = ocInfo.dateGroup ? '-' + String(ocInfo.dateGroup).replace(/[^a-zA-Z0-9]/g, '') : '';
+        const cardId = "card-" + ocIdLimpo + dateIdSuffix;
         
         let existingCard = document.getElementById(cardId);
         if (existingCard) {
@@ -1640,10 +1644,11 @@ ALL_OCS_ITEMS = itemsObj;
         
         console.log(`📊 OC ${ocInfo.ordCompra}: Prazo mínimo = ${prazoMin}, Status = ${statusPrazo}, Metros = ${totaisCard.metros}, Pares = ${totaisCard.pares}`);
 
+        const dateGroupLabel = ocInfo.dateGroup ? ` <span style="font-size:0.8em;font-weight:400;color:#64748b;">· 📅 Entrega: ${ocInfo.dateGroup}</span>` : '';
         let headerHtml = `
             <div class="card-header">
                 ${statusPrazo ? `<span class="prazo-badge ${statusPrazo}">${textoPrazo}</span>` : ''}
-                <h3>OC: ${ocInfo.ordCompra} | ${ocInfo.cliente || 'Sem cliente'}</h3>`;
+                <h3>OC: ${ocInfo.ordCompra} | ${ocInfo.cliente || 'Sem cliente'}${dateGroupLabel}</h3>`;
         
         // NOVO: Adiciona totalizador do card
         if (totaisCard.metros > 0 || totaisCard.pares > 0) {
@@ -1674,31 +1679,7 @@ ALL_OCS_ITEMS = itemsObj;
                             <th>Dt. Recebimento</th><th>Dt. Entrega</th><th class="status-prazo">Prazo</th>
                             <th title="Selecionar para lote de etiquetas">📦 Lote</th><th>Ações</th></tr></thead><tbody>`;
 
-            // Agrupa itens por DT. ENTREGA e ordena grupos do mais atrasado para o mais recente
-            const _grupos = new Map();
             items.forEach(item => {
-                const chave = formatarData(item['DT. ENTREGA']) || 'N/A';
-                if (!_grupos.has(chave)) _grupos.set(chave, { items: [], minPrazo: Infinity, chave });
-                const g = _grupos.get(chave);
-                g.items.push(item);
-                const p = Number(item.PRAZO);
-                if (!isNaN(p) && p < g.minPrazo) g.minPrazo = p;
-            });
-            const _gruposOrdenados = Array.from(_grupos.values()).sort((a, b) => {
-                if (a.minPrazo === Infinity && b.minPrazo === Infinity) return 0;
-                if (a.minPrazo === Infinity) return 1;
-                if (b.minPrazo === Infinity) return -1;
-                return a.minPrazo - b.minPrazo;
-            });
-            const _multiDatas = _gruposOrdenados.length > 1;
-
-            _gruposOrdenados.forEach((grupo, gi) => {
-            if (_multiDatas) {
-                const statusGrupo = getStatusPrazo(grupo.minPrazo === Infinity ? null : grupo.minPrazo);
-                const badgeGrupo = statusGrupo ? `<span class="prazo-badge ${statusGrupo}" style="margin-left:0.5rem;">${getTextoPrazo(statusGrupo)}</span>` : '';
-                bodyHtml += `<tr class="date-group-separator"><td colspan="12">📅 Entrega: ${grupo.chave}${badgeGrupo}</td></tr>`;
-            }
-            grupo.items.forEach(item => {
                 if (!item) return;
                 const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
                 const itemId = `item-linha-${item.planilhaLinha}`;
@@ -1742,8 +1723,7 @@ ALL_OCS_ITEMS = itemsObj;
                 }
 
                 bodyHtml += `</td></tr>`;
-            }); // fim item
-            }); // fim grupo
+            });
             bodyHtml += `</tbody></table></div>`;
         } else if (itemResponse && itemResponse.ok === false) {
             const errorMsg = itemResponse.error ? (itemResponse.error.message || JSON.stringify(itemResponse.error)) : 'Erro desconhecido';
