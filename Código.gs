@@ -2096,6 +2096,19 @@ function sincronizarDados() {
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
               } else {
                 Logger.log(`   ✋ Item aguardando NF - mantido Ativo (QTD=${qtdAtual}, ID="${id}")`);
+                // Re-registra o alerta — pode ter sido apagado erroneamente pelo bug do filtro invertido
+                // A deduplicação em _registrarAlertaFaturamento_ impede entradas duplicadas
+                _registrarAlertaFaturamento_({
+                  id: id,
+                  cartela:    String(dbItem.row[CARTELA_COL]    || ''),
+                  cliente:    String(dbItem.row[CLIENTE_COL]    || ''),
+                  pedido:     String(dbItem.row[DB_PEDIDO_COL]  || ''),
+                  oc:         String(dbItem.row[DB_OC_COL]      || ''),
+                  desc:       String(dbItem.row[DB_DESC_COL]    || ''),
+                  tam:        String(dbItem.row[DB_TAM_COL]     || ''),
+                  qtdAberta:  qtdAtual,
+                  dataEvento: new Date().toISOString()
+                });
               }
             } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
               // Coleta para processar depois, ordenado por QTD.ABERTA crescente.
@@ -2441,8 +2454,11 @@ function obterAlertasPendentes() {
       const itemId = String(a.itemId || '').trim();
       const tipo   = a.tipo || 'faturado_sem_baixa';
       if (tipo === 'faturado_sem_baixa') {
-        // Mantém apenas se ainda está Faturado no DB
-        return faturadosNoDb.has(itemId);
+        // Mantém enquanto o item AINDA NÃO foi confirmado (status != Faturado)
+        // Remove quando: já virou Faturado (confirmação feita) ou saiu do DB completamente
+        if (!dbQtdAtual.has(itemId)) return false;   // não existe mais no DB → remove
+        if (faturadosNoDb.has(itemId)) return false;  // já confirmado como Faturado → remove
+        return true; // ainda pendente de confirmação → mantém o alerta
       }
       if (tipo === 'divergencia_qtd') {
         // Limpa se: saiu do DB, virou Faturado, ou DB QTD já foi reduzido (baixa feita)
