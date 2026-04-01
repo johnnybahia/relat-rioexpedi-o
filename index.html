@@ -1554,16 +1554,21 @@ ALL_OCS_ITEMS = itemsObj;
 
     if (items.length === 0) return;
 
-    const hasFaturados  = items.some(i => i.Status?.toLowerCase() === 'faturado');
-    const prazoMin      = calcularPrazoMinimo(items);
-    const prazoKey      = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
+    // Separa itens por DT. ENTREGA — cada data vira um card independente
+    const _byDate = new Map();
+    items.forEach(item => {
+      const chave = formatarData(item['DT. ENTREGA']) || 'N/A';
+      if (!_byDate.has(chave)) _byDate.set(chave, []);
+      _byDate.get(chave).push(item);
+    });
 
-    cards.push({
-      ocInfo,
-      items,
-      hasFaturados,
-      prazoKey,
-      ocKey: String(ocInfo.ordCompra || '')
+    _byDate.forEach((groupItems, dateKey) => {
+      const hasFaturados = groupItems.some(i => i.Status?.toLowerCase() === 'faturado');
+      const prazoMin     = calcularPrazoMinimo(groupItems);
+      const prazoKey     = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
+      // Anotação de data no ocInfo apenas quando há múltiplas datas
+      const ocInfoCard   = _byDate.size > 1 ? { ...ocInfo, dateGroup: dateKey } : ocInfo;
+      cards.push({ ocInfo: ocInfoCard, items: groupItems, hasFaturados, prazoKey, ocKey: String(ocInfo.ordCompra || '') });
     });
   });
 
@@ -1596,8 +1601,9 @@ ALL_OCS_ITEMS = itemsObj;
 
         let card = document.createElement("div");
         card.className = "card";
-        const ocIdLimpo = String(ocInfo.ordCompra).replace(/[^a-zA-Z0-9-]/g, '');
-        const cardId = "card-" + ocIdLimpo;
+        const ocIdLimpo   = String(ocInfo.ordCompra).replace(/[^a-zA-Z0-9-]/g, '');
+        const dateIdSuffix = ocInfo.dateGroup ? '-' + String(ocInfo.dateGroup).replace(/[^a-zA-Z0-9]/g, '') : '';
+        const cardId = "card-" + ocIdLimpo + dateIdSuffix;
         
         let existingCard = document.getElementById(cardId);
         if (existingCard) {
@@ -1638,10 +1644,11 @@ ALL_OCS_ITEMS = itemsObj;
         
         console.log(`📊 OC ${ocInfo.ordCompra}: Prazo mínimo = ${prazoMin}, Status = ${statusPrazo}, Metros = ${totaisCard.metros}, Pares = ${totaisCard.pares}`);
 
+        const dateGroupLabel = ocInfo.dateGroup ? ` <span style="font-size:0.8em;font-weight:400;color:#64748b;">· 📅 Entrega: ${ocInfo.dateGroup}</span>` : '';
         let headerHtml = `
             <div class="card-header">
                 ${statusPrazo ? `<span class="prazo-badge ${statusPrazo}">${textoPrazo}</span>` : ''}
-                <h3>OC: ${ocInfo.ordCompra} | ${ocInfo.cliente || 'Sem cliente'}</h3>`;
+                <h3>OC: ${ocInfo.ordCompra} | ${ocInfo.cliente || 'Sem cliente'}${dateGroupLabel}</h3>`;
         
         // NOVO: Adiciona totalizador do card
         if (totaisCard.metros > 0 || totaisCard.pares > 0) {
@@ -1671,7 +1678,7 @@ ALL_OCS_ITEMS = itemsObj;
                             <th>Tamanho</th><th>Qtd. Original</th><th class="qtd-aberta">Qtd. Aberta</th><th>OS</th>
                             <th>Dt. Recebimento</th><th>Dt. Entrega</th><th class="status-prazo">Prazo</th>
                             <th title="Selecionar para lote de etiquetas">📦 Lote</th><th>Ações</th></tr></thead><tbody>`;
-            
+
             items.forEach(item => {
                 if (!item) return;
                 const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
