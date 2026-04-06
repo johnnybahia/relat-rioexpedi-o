@@ -3326,3 +3326,40 @@ function limparTodosAlertas() {
   PropertiesService.getScriptProperties().deleteProperty('ALERTAS_FATURAMENTO');
   Logger.log('✅ Todos os alertas de faturamento foram limpos.');
 }
+
+// ====== UTILITÁRIO: CONFIRMAR TODOS OS ALERTAS (USO EM TESTES) ======
+/**
+ * Marca como "Faturado" todos os itens do Relatorio_DB que possuem MARCAR_FATURAR="SIM"
+ * e em seguida limpa todos os alertas pendentes.
+ * Use apenas para testes ou correções em lote — não exige senha.
+ */
+function confirmarTodosAlertas() {
+  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('⚠️ confirmarTodosAlertas: DB vazio ou não encontrado.');
+    return;
+  }
+
+  const lastRow  = sheet.getLastRow();
+  const lastCol  = Math.max(sheet.getLastColumn(), DATA_STATUS_COL + 1);
+  const dados    = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const agora    = new Date();
+  let   marcados = 0;
+
+  dados.forEach((row, i) => {
+    const marcar = String(row[MARCAR_FATURAR_COL] || '').trim().toUpperCase();
+    if (marcar !== 'SIM') return;
+
+    const linhaSheet = i + 2; // +1 offset base, +1 cabeçalho
+    sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Faturado');
+    sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+    sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue(agora);
+    marcados++;
+    Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${row[ID_COL]}")`);
+  });
+
+  PropertiesService.getScriptProperties().deleteProperty('ALERTAS_FATURAMENTO');
+  limparCache();
+
+  Logger.log(`✅ confirmarTodosAlertas: ${marcados} item(ns) marcado(s) como Faturado. Alertas limpos.`);
+}
