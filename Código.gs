@@ -885,6 +885,23 @@ function importarDadosExternos() {
       return { success: false, erro: 'Sem dados na fonte' };
     }
 
+    // Colunas que devem ser tratadas como número mesmo que a célula de origem
+    // esteja formatada como data (Apps Script leria como Date object).
+    // Índice 0-based dentro do range A1:W (coluna A=0, B=1, ..., O=14, ...).
+    const COLUNAS_FORCA_NUMERO = new Set([14]); // O: PRAZO (-1, 2, etc.)
+
+    // Fator de conversão: serial do Sheets 0 = 30/12/1899 = -2209161600000 ms Unix UTC
+    const SHEETS_EPOCH_MS = -2209161600000;
+
+    dadosFiltrados.forEach(row => {
+      COLUNAS_FORCA_NUMERO.forEach(col => {
+        if (row[col] instanceof Date) {
+          // Converte o Date de volta para o serial numérico original do Sheets
+          row[col] = Math.round((row[col].getTime() - SHEETS_EPOCH_MS) / 86400000);
+        }
+      });
+    });
+
     const destSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
     if (!destSheet) throw new Error(`Aba "${IMPORTRANGE_SHEET_NAME}" não encontrada.`);
 
