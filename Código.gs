@@ -882,24 +882,24 @@ function sincronizarPedidosComFonte() {
       return { houveMudancas: false, erro: 'Aba DADOS_IMPORTADOS não existe' };
     }
 
-    // GUARDA DE IMPORTRANGE: verifica A1 (fórmula) e G2 (timestamp) antes de qualquer processamento.
-    // A1 contém a fórmula IMPORTRANGE — se tiver erro (#) o IMPORTRANGE falhou.
-    // G2 contém o horário da última atualização (ex: "27/03/2026 18:25:53").
-    // Se A1 tem erro, ou G2 está vazio/com erro, ou G2 não mudou → aborta.
-    const a1Val = fonteSheet.getRange('A1').getDisplayValue().trim();
+    // GUARDA DE IMPORTRANGE: verifica B1 (fórmula) e H2 (timestamp) antes de qualquer processamento.
+    // B1 contém a fórmula IMPORTRANGE — se tiver erro (#) o IMPORTRANGE falhou.
+    // H2 contém o horário da última atualização (ex: "27/03/2026 18:25:53").
+    // Se B1 tem erro, ou H2 está vazio/com erro, ou H2 não mudou → aborta.
+    const a1Val = fonteSheet.getRange('B1').getDisplayValue().trim();
     if (a1Val.startsWith('#')) {
-      Logger.log(`⚠️ IMPORTRANGE com erro em A1="${a1Val}". Sync ignorado.`);
-      return { houveMudancas: false, motivo: 'importrange_erro_a1' };
+      Logger.log(`⚠️ IMPORTRANGE com erro em B1="${a1Val}". Sync ignorado.`);
+      return { houveMudancas: false, motivo: 'importrange_erro_b1' };
     }
-    const tsAtual = fonteSheet.getRange('G2').getDisplayValue().trim();
+    const tsAtual = fonteSheet.getRange('H2').getDisplayValue().trim();
     if (!tsAtual || tsAtual.startsWith('#')) {
-      Logger.log(`⚠️ IMPORTRANGE não concluído — G2="${tsAtual}". Sync ignorado.`);
+      Logger.log(`⚠️ IMPORTRANGE não concluído — H2="${tsAtual}". Sync ignorado.`);
       return { houveMudancas: false, motivo: 'importrange_nao_pronto' };
     }
     const props = PropertiesService.getScriptProperties();
     const tsAnterior = props.getProperty('ULTIMO_IMPORTRANGE_TS') || '';
     if (tsAtual === tsAnterior) {
-      Logger.log(`ℹ️ IMPORTRANGE não atualizado (G2="${tsAtual}"). Sync ignorado.`);
+      Logger.log(`ℹ️ IMPORTRANGE não atualizado (H2="${tsAtual}"). Sync ignorado.`);
       return { houveMudancas: false, motivo: 'sem_nova_importacao' };
     }
     Logger.log(`🆕 Novo IMPORTRANGE detectado: "${tsAnterior || 'nenhum'}" → "${tsAtual}"`);
@@ -910,9 +910,9 @@ function sincronizarPedidosComFonte() {
       return { houveMudancas: false, erro: 'Sem dados na fonte' };
     }
 
-    // Lê dados da fonte (sem coluna de ID, começa direto em CARTELA)
-    const fonteNumCols = fonteSheet.getLastColumn();
-    const fonteData = fonteSheet.getRange(FONTE_DATA_START_ROW, 1, fonteLastRow - FONTE_DATA_START_ROW + 1, fonteNumCols).getValues();
+    // Lê dados da fonte a partir da coluna B (dados começam em B, coluna A ignorada)
+    const fonteNumCols = fonteSheet.getLastColumn() - 1; // desconta coluna A
+    const fonteData = fonteSheet.getRange(FONTE_DATA_START_ROW, 2, fonteLastRow - FONTE_DATA_START_ROW + 1, fonteNumCols).getValues();
     Logger.log(`📥 Leu ${fonteData.length} linhas de ${IMPORTRANGE_SHEET_NAME}`);
 
     // PASSO 2: Ler aba PEDIDOS (atual com IDs)
@@ -1030,7 +1030,7 @@ function sincronizarPedidosComFonte() {
     }
 
     fonteData.forEach((fonteRow, idx) => {
-      const cartela = fonteRow[0]; // Em DADOS_IMPORTADOS, CARTELA é coluna A (índice 0)
+      const cartela = fonteRow[0]; // Em DADOS_IMPORTADOS, CARTELA é coluna B (índice 0, lido a partir de B)
 
       // Ignora linhas vazias
       if (!cartela || String(cartela).trim() === '') {
@@ -1265,7 +1265,7 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
   // ela mudava, perdendo todo o histórico e marcações do item no Relatorio_DB.
   //
   // Campos estáveis usados como identidade (inclui TAMANHO para distinguir tamanhos):
-  // DADOS_IMPORTADOS (offset=0): CLIENTE=1, PEDIDO=3, MARFIM=5, TAM=7, OC=8, OS=10, DATA=11
+  // DADOS_IMPORTADOS (offset=0): lido a partir col B → CLIENTE=1, PEDIDO=3, MARFIM=5, TAM=7, OC=8, OS=10, DATA=11
   // PEDIDOS          (offset=1): CLIENTE=2, PEDIDO=4, MARFIM=6, TAM=8, OC=9, OS=11, DATA=12
 
   const cliente = String(row[1 + offset] || '').trim();
