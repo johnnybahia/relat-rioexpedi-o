@@ -891,9 +891,9 @@ function importarDadosExternos() {
     const numCols    = dadosFiltrados[0].length;
     const clearRows  = Math.max(destSheet.getLastRow(), dadosFiltrados.length + 1);
 
-    // Limpa área anterior (coluna B em diante) e grava novos dados
-    destSheet.getRange(1, 2, clearRows, numCols).clearContent();
-    destSheet.getRange(1, 2, dadosFiltrados.length, numCols).setValues(dadosFiltrados);
+    // Limpa área anterior (coluna A em diante) e grava novos dados
+    destSheet.getRange(1, 1, clearRows, numCols).clearContent();
+    destSheet.getRange(1, 1, dadosFiltrados.length, numCols).setValues(dadosFiltrados);
 
     // Atualiza timestamp em H2 — detectado pelo guard em sincronizarPedidosComFonte()
     const ts = Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm:ss');
