@@ -580,6 +580,8 @@ function onOpen() {
     .addItem('3. Desativar Geração Automática', 'desinstalarTriggerAutomatico')
     .addItem('4. Status do Trigger', 'mostrarStatusTrigger')
     .addSeparator()
+    .addItem('🧹 Confirmar todos os alertas de faturamento (testes)', 'confirmarTodosAlertasMenu')
+    .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
     .addToUi();
 }
@@ -3333,6 +3335,27 @@ function limparTodosAlertas() {
  * e em seguida limpa todos os alertas pendentes.
  * Use apenas para testes ou correções em lote — não exige senha.
  */
+/**
+ * Wrapper chamado pelo menu — exibe confirmação antes de executar.
+ */
+function confirmarTodosAlertasMenu() {
+  const ui = SpreadsheetApp.getUi();
+  const resp = ui.alert(
+    '🧹 Confirmar todos os alertas de faturamento',
+    'Isso irá:\n\n' +
+    '• Marcar como "Faturado" todos os itens com MARCAR_FATURAR = SIM\n' +
+    '• Limpar todos os alertas pendentes no Relatorio_DB\n\n' +
+    'Use apenas para testes ou correções em lote. Deseja continuar?',
+    ui.ButtonSet.YES_NO
+  );
+  if (resp !== ui.Button.YES) {
+    Logger.log('ℹ️ confirmarTodosAlertasMenu: cancelado pelo usuário.');
+    return;
+  }
+  confirmarTodosAlertas();
+  ui.alert('✅ Concluído', 'Todos os alertas foram confirmados e os itens marcados como Faturado.', ui.ButtonSet.OK);
+}
+
 function confirmarTodosAlertas() {
   const sheet = SS.getSheetByName(DB_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) {
