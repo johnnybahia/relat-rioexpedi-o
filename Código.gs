@@ -866,28 +866,23 @@ function importarDadosExternos() {
   const SOURCE_SHEET = 'RELATÓRIO GERAL DA PRODUÇÃO1';
   const SOURCE_RANGE = 'A1:W5000';
 
-  // Apenas colunas de data precisam de tratamento especial.
-  // Todas as demais chegam como string (display value) — sem risco de perda de valores
-  // como "82249D" ou "14660U" que seriam apagados se tentássemos converter para número.
-  // L=11: DATA RECEB.   M=12: DT. ENTREGA
-  const DATE_COLS = new Set([11, 12]);
-
-  // Strings geradas pelo Sheets para datas com serial 0 ou negativo (ex: 0 → "30/12/1899").
-  const DATA_INVALIDA = new Set(['30/12/1899', '29/12/1899', '31/12/1899', '00/01/1900', '01/01/1900']);
+  // Coluna J (índice 9): valores como "82249D" e "14660U" têm formatação customizada
+  // no Sheets — getValues() retorna só o número cru (sem sufixo). Por isso usamos
+  // getDisplayValues() apenas nessa coluna para preservar o valor visível.
+  const COL_J = 9;
 
   try {
     Logger.log(`📡 importarDadosExternos: abrindo planilha externa...`);
     const sourceSheet = SpreadsheetApp.openById(SOURCE_ID).getSheetByName(SOURCE_SHEET);
     if (!sourceSheet) throw new Error(`Aba "${SOURCE_SHEET}" não encontrada na planilha externa.`);
 
-    // getDisplayValues(): tudo chega como string, igual ao que aparece na tela.
-    // Preserva valores com formatação customizada ("82249D", "14660U") e evita
-    // que colunas formatadas como data convertam números em objetos Date.
-    const dados = sourceSheet.getRange(SOURCE_RANGE).getDisplayValues();
+    const rangeRef = sourceSheet.getRange(SOURCE_RANGE);
+    const dados       = rangeRef.getValues();        // comportamento padrão para tudo
+    const displayColJ = rangeRef.getDisplayValues(); // usado só para col J
 
     // Remove linhas em branco do final
     let ultimaLinha = dados.length;
-    while (ultimaLinha > 0 && dados[ultimaLinha - 1].every(c => c === '')) {
+    while (ultimaLinha > 0 && dados[ultimaLinha - 1].every(c => c === '' || c === null || c === undefined)) {
       ultimaLinha--;
     }
     const dadosFiltrados = dados.slice(0, ultimaLinha);
@@ -897,24 +892,9 @@ function importarDadosExternos() {
       return { success: false, erro: 'Sem dados na fonte' };
     }
 
-    // Converte apenas as colunas de data de string → Date
+    // Substitui coluna J pelo valor de display (preserva sufixos "D"/"U")
     dadosFiltrados.forEach((row, i) => {
-      if (i === 0) return; // pula cabeçalho
-
-      DATE_COLS.forEach(j => {
-        const val = row[j];
-        if (!val || DATA_INVALIDA.has(val.trim())) {
-          row[j] = '';
-          return;
-        }
-        const parts = val.trim().split('/');
-        if (parts.length === 3) {
-          const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
-          row[j] = isNaN(d.getTime()) ? '' : d;
-        } else {
-          row[j] = val; // mantém como string se formato desconhecido
-        }
-      });
+      row[COL_J] = displayColJ[i][COL_J];
     });
 
     const destSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
