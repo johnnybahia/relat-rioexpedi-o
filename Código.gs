@@ -866,28 +866,24 @@ function importarDadosExternos() {
   const SOURCE_SHEET = 'RELATÓRIO GERAL DA PRODUÇÃO1';
   const SOURCE_RANGE = 'A1:W5000';
 
-  // Colunas (0-based no range A:W) que devem chegar como Date no destino.
-  // Todas as demais chegam como string (display value), evitando conversões indesejadas.
+  // Apenas colunas de data precisam de tratamento especial.
+  // Todas as demais chegam como string (display value) — sem risco de perda de valores
+  // como "82249D" ou "14660U" que seriam apagados se tentássemos converter para número.
   // L=11: DATA RECEB.   M=12: DT. ENTREGA
   const DATE_COLS = new Set([11, 12]);
 
-  // Colunas que devem chegar como número.
-  // K=9: QTD. ABERTA
-  const NUM_COLS = new Set([9]);
-
   // Strings geradas pelo Sheets para datas com serial 0 ou negativo (ex: 0 → "30/12/1899").
-  // Quando encontradas nas DATE_COLS, substituímos por '' (célula vazia).
   const DATA_INVALIDA = new Set(['30/12/1899', '29/12/1899', '31/12/1899', '00/01/1900', '01/01/1900']);
 
   try {
     Logger.log(`📡 importarDadosExternos: abrindo planilha externa...`);
-    const sourceRange = SpreadsheetApp.openById(SOURCE_ID)
-                          .getSheetByName(SOURCE_SHEET);
-    if (!sourceRange) throw new Error(`Aba "${SOURCE_SHEET}" não encontrada na planilha externa.`);
+    const sourceSheet = SpreadsheetApp.openById(SOURCE_ID).getSheetByName(SOURCE_SHEET);
+    if (!sourceSheet) throw new Error(`Aba "${SOURCE_SHEET}" não encontrada na planilha externa.`);
 
-    // Usa getDisplayValues(): tudo chega como string, exatamente como aparece na tela.
-    // Isso elimina a conversão automática de números para Date em colunas formatadas como data.
-    const dados = sourceRange.getRange(SOURCE_RANGE).getDisplayValues();
+    // getDisplayValues(): tudo chega como string, igual ao que aparece na tela.
+    // Preserva valores com formatação customizada ("82249D", "14660U") e evita
+    // que colunas formatadas como data convertam números em objetos Date.
+    const dados = sourceSheet.getRange(SOURCE_RANGE).getDisplayValues();
 
     // Remove linhas em branco do final
     let ultimaLinha = dados.length;
@@ -901,31 +897,23 @@ function importarDadosExternos() {
       return { success: false, erro: 'Sem dados na fonte' };
     }
 
-    // Converte colunas específicas de string de volta para o tipo correto
+    // Converte apenas as colunas de data de string → Date
     dadosFiltrados.forEach((row, i) => {
       if (i === 0) return; // pula cabeçalho
 
-      row.forEach((val, j) => {
-        if (DATE_COLS.has(j)) {
-          // Datas inválidas (serial 0 ou negativo) → célula vazia
-          if (!val || DATA_INVALIDA.has(val.trim())) {
-            row[j] = '';
-            return;
-          }
-          // Converte string "dd/MM/yyyy" → objeto Date
-          const parts = val.trim().split('/');
-          if (parts.length === 3) {
-            const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
-            row[j] = isNaN(d.getTime()) ? '' : d;
-          } else {
-            row[j] = val; // mantém como string se formato desconhecido
-          }
-        } else if (NUM_COLS.has(j)) {
-          // Converte string numérica para número (aceita vírgula como decimal)
-          const n = Number(String(val).replace(',', '.'));
-          row[j] = isNaN(n) ? '' : n;
+      DATE_COLS.forEach(j => {
+        const val = row[j];
+        if (!val || DATA_INVALIDA.has(val.trim())) {
+          row[j] = '';
+          return;
         }
-        // Todas as demais colunas ficam como string — sem risco de conversão para data
+        const parts = val.trim().split('/');
+        if (parts.length === 3) {
+          const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+          row[j] = isNaN(d.getTime()) ? '' : d;
+        } else {
+          row[j] = val; // mantém como string se formato desconhecido
+        }
       });
     });
 
