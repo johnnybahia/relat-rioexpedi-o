@@ -855,6 +855,60 @@ function verificarEGerarIDs() {
   }
 }
 
+// ====== IMPORTAÇÃO DIRETA DA PLANILHA EXTERNA ======
+/**
+ * Substitui o IMPORTRANGE: lê diretamente da planilha externa via Apps Script
+ * e grava os dados em DADOS_IMPORTADOS a partir da coluna B, atualizando H2.
+ * Muito mais rápido e confiável que o IMPORTRANGE nativo.
+ */
+function importarDadosExternos() {
+  const SOURCE_ID    = '1GtYG4Ahy5XJyJjE37S27u8RyELdRkct8nDAVGIBRI-w';
+  const SOURCE_SHEET = 'RELATÓRIO GERAL DA PRODUÇÃO1';
+  const SOURCE_RANGE = 'A1:W5000';
+
+  try {
+    Logger.log(`📡 importarDadosExternos: abrindo planilha externa...`);
+    const sourceSheet = SpreadsheetApp.openById(SOURCE_ID).getSheetByName(SOURCE_SHEET);
+    if (!sourceSheet) throw new Error(`Aba "${SOURCE_SHEET}" não encontrada na planilha externa.`);
+
+    const dados = sourceSheet.getRange(SOURCE_RANGE).getValues();
+
+    // Remove linhas em branco do final para não sobrescrever dados antigos desnecessariamente
+    let ultimaLinha = dados.length;
+    while (ultimaLinha > 0 && dados[ultimaLinha - 1].every(c => c === '' || c === null || c === undefined)) {
+      ultimaLinha--;
+    }
+    const dadosFiltrados = dados.slice(0, ultimaLinha);
+
+    if (dadosFiltrados.length === 0) {
+      Logger.log('⚠️ importarDadosExternos: nenhum dado encontrado na fonte.');
+      return { success: false, erro: 'Sem dados na fonte' };
+    }
+
+    const destSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
+    if (!destSheet) throw new Error(`Aba "${IMPORTRANGE_SHEET_NAME}" não encontrada.`);
+
+    const numCols    = dadosFiltrados[0].length;
+    const clearRows  = Math.max(destSheet.getLastRow(), dadosFiltrados.length + 1);
+
+    // Limpa área anterior (coluna B em diante) e grava novos dados
+    destSheet.getRange(1, 2, clearRows, numCols).clearContent();
+    destSheet.getRange(1, 2, dadosFiltrados.length, numCols).setValues(dadosFiltrados);
+
+    // Atualiza timestamp em H2 — detectado pelo guard em sincronizarPedidosComFonte()
+    const ts = Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm:ss');
+    destSheet.getRange('H2').setValue(ts);
+
+    SpreadsheetApp.flush();
+    Logger.log(`✅ importarDadosExternos: ${dadosFiltrados.length} linhas gravadas em ${IMPORTRANGE_SHEET_NAME}. Timestamp: ${ts}`);
+    return { success: true, linhas: dadosFiltrados.length, timestamp: ts };
+
+  } catch (e) {
+    Logger.log(`❌ importarDadosExternos: ${e.message}`);
+    return { success: false, erro: e.message };
+  }
+}
+
 /**
  * SINCRONIZAÇÃO INTELIGENTE: DADOS_IMPORTADOS → PEDIDOS
  *
@@ -882,13 +936,13 @@ function sincronizarPedidosComFonte() {
       return { houveMudancas: false, erro: 'Aba DADOS_IMPORTADOS não existe' };
     }
 
-    // GUARDA DE IMPORTRANGE: verifica B1 (fórmula) e H2 (timestamp) antes de qualquer processamento.
-    // B1 contém a fórmula IMPORTRANGE — se tiver erro (#) o IMPORTRANGE falhou.
-    // H2 contém o horário da última atualização (ex: "27/03/2026 18:25:53").
+    // GUARDA DE DADOS: verifica B1 (primeiro dado) e H2 (timestamp da última importação).
+    // B1 contém o primeiro valor importado — se iniciar com '#' indica erro na importação.
+    // H2 contém o horário da última importação gravado por importarDadosExternos().
     // Se B1 tem erro, ou H2 está vazio/com erro, ou H2 não mudou → aborta.
     const a1Val = fonteSheet.getRange('B1').getDisplayValue().trim();
     if (a1Val.startsWith('#')) {
-      Logger.log(`⚠️ IMPORTRANGE com erro em B1="${a1Val}". Sync ignorado.`);
+      Logger.log(`⚠️ Dado inválido em B1="${a1Val}". Sync ignorado.`);
       return { houveMudancas: false, motivo: 'importrange_erro_b1' };
     }
     const tsAtual = fonteSheet.getRange('H2').getDisplayValue().trim();
@@ -1306,8 +1360,18 @@ function processoAutomaticoCompleto() {
   let houveMudancas = false;
 
   try {
-    // ETAPA 0: Sincronizar DADOS_IMPORTADOS → PEDIDOS (Nova arquitetura!)
-    Logger.log("\n📥 ETAPA 0: Sincronização IMPORTRANGE → PEDIDOS");
+    // ETAPA 0a: Importar dados da planilha externa → DADOS_IMPORTADOS
+    Logger.log("\n📡 ETAPA 0a: Importação direta da planilha externa");
+    const resultadoImport = importarDadosExternos();
+    if (resultadoImport.success) {
+      Logger.log(`   ✅ ${resultadoImport.linhas} linhas importadas`);
+    } else {
+      Logger.log(`   ⚠️ Falha na importação: ${resultadoImport.erro}`);
+      // Não aborta — sincronizarPedidosComFonte usará o guard de timestamp para decidir
+    }
+
+    // ETAPA 0: Sincronizar DADOS_IMPORTADOS → PEDIDOS
+    Logger.log("\n📥 ETAPA 0: Sincronização DADOS_IMPORTADOS → PEDIDOS");
     const resultadoSyncFonte = sincronizarPedidosComFonte();
 
     if (resultadoSyncFonte.houveMudancas) {
