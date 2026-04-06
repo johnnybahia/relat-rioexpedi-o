@@ -1319,10 +1319,11 @@ function sincronizarPedidosComFonte() {
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
 
       // Colunas com texto puro — evita interpretação como data pelo Sheets
-      // F+G: CÓD. CLIENTE e CÓD. MARFIM | L: CÓD. OS
+      // F+G: CÓD. CLIENTE e CÓD. MARFIM | L: CÓD. OS | T: coluna extra
       const txtFmt = '@';
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 6,  novasPedidosData.length, 2).setNumberFormat(txtFmt); // F, G
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 12, novasPedidosData.length, 1).setNumberFormat(txtFmt); // L
+      pedidosSheet.getRange(FONTE_DATA_START_ROW, 20, novasPedidosData.length, 1).setNumberFormat(txtFmt); // T
 
       SpreadsheetApp.flush();
 
