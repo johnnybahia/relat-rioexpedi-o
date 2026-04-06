@@ -1315,12 +1315,18 @@ function sincronizarPedidosComFonte() {
         pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosSheet.getLastColumn()).clearContent();
       }
 
+      // Formata colunas inteiras como texto puro antes de escrever —
+      // clearContent() não remove formatação, então células antigas poderiam
+      // ainda estar como "data" e converter os novos valores silenciosamente.
+      // Aplicar na coluna inteira (linha 1 até o máximo) garante que não haja resíduo.
+      const txtFmt = '@';
+      const maxRows = pedidosSheet.getMaxRows();
+      pedidosSheet.getRange(1, 6,  maxRows, 2).setNumberFormat(txtFmt); // F, G
+      pedidosSheet.getRange(1, 12, maxRows, 1).setNumberFormat(txtFmt); // L
+      pedidosSheet.getRange(1, 20, maxRows, 1).setNumberFormat(txtFmt); // T
+
       // Escreve novos dados
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
-
-      // Coluna F (CÓD. CLIENTE) forçada como texto puro — evita que valores como
-      // "7490-1" sejam interpretados como data pelo Sheets (ex: 01/01/7490)
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 6, novasPedidosData.length, 1).setNumberFormat('@');
 
       SpreadsheetApp.flush();
 
