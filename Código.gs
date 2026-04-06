@@ -903,8 +903,15 @@ function importarDadosExternos() {
     const numCols   = dadosFiltrados[0].length;
     const clearRows = Math.max(destSheet.getLastRow(), dadosFiltrados.length + 1);
 
-    // Limpa área anterior e grava dados processados
+    // Limpa área anterior
     destSheet.getRange(1, 1, clearRows, numCols).clearContent();
+
+    // Formata como texto as colunas que têm valores alfanuméricos (ex: "7490-1", "82249D")
+    // ANTES de gravar — evita que o Sheets interprete esses valores como datas ao receber.
+    const maxRows = destSheet.getMaxRows();
+    destSheet.getRange(1, 6, maxRows, 1).setNumberFormat('@'); // F: CÓD. CLIENTE
+
+    // Grava dados processados
     destSheet.getRange(1, 1, dadosFiltrados.length, numCols).setValues(dadosFiltrados);
 
     // Atualiza timestamp em H2 — detectado pelo guard em sincronizarPedidosComFonte()
