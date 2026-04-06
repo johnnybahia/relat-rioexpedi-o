@@ -1318,9 +1318,11 @@ function sincronizarPedidosComFonte() {
       // Escreve novos dados
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
 
-      // Colunas F e G (CÓD. CLIENTE e CÓD. MARFIM) forçadas como texto puro —
-      // evita que valores como "7490-1" sejam interpretados como data pelo Sheets
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 6, novasPedidosData.length, 2).setNumberFormat('@');
+      // Colunas com texto puro — evita interpretação como data pelo Sheets
+      // F+G: CÓD. CLIENTE e CÓD. MARFIM | L: CÓD. OS
+      const txtFmt = '@';
+      pedidosSheet.getRange(FONTE_DATA_START_ROW, 6,  novasPedidosData.length, 2).setNumberFormat(txtFmt); // F, G
+      pedidosSheet.getRange(FONTE_DATA_START_ROW, 12, novasPedidosData.length, 1).setNumberFormat(txtFmt); // L
 
       SpreadsheetApp.flush();
 
