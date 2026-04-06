@@ -1245,16 +1245,16 @@ function sincronizarPedidosComFonte() {
         fonteRow[1],       // C: CLIENTE
         fonteRow[2],       // D: CÓD. FILIAL
         fonteRow[3],       // E: PEDIDO
-        fonteRow[4],       // F: CÓD. CLIENTE
+        String(fonteRow[4] !== null && fonteRow[4] !== undefined ? fonteRow[4] : ''), // F: CÓD. CLIENTE — string evita "7490-1" virar data
         fonteRow[5],       // G: CÓD. MARFIM
         String(fonteRow[6] || '') + (codigoFixo ? ' [' + codigoFixo + ']' : ''),  // H: DESCRIÇÃO [UUID] — âncora de identidade visível na planilha
         fonteRow[7],       // I: TAMANHO
         fonteRow[8],       // J: ORD. COMPRA
         fonteRow[9],       // K: QTD. ABERTA
         fonteRow[10],      // L: CÓD. OS
-        fonteRow[11],      // M: DATA RECEB.
+        (fonteRow[11] instanceof Date ? fonteRow[11] : (!fonteRow[11] || fonteRow[11] === 0 ? '' : fonteRow[11])), // M: DATA RECEB. — 0 vira '' (evita 30/12/1899)
         fonteRow[12],      // N: DT. ENTREGA
-        fonteRow[13],      // O: PRAZO
+        String(fonteRow[13] !== null && fonteRow[13] !== undefined && fonteRow[13] !== '' ? fonteRow[13] : ''), // O: PRAZO — string evita -1/2 virar data
         timestampFinal,    // P: TIMESTAMP_CRIACAO
         posicaoFonte,      // Q: POSICAO_FONTE — índice na aba "original" (fixo, nunca muda)
         '',                // R: (reservado)
