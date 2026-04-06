@@ -580,6 +580,8 @@ function onOpen() {
     .addItem('3. Desativar Geração Automática', 'desinstalarTriggerAutomatico')
     .addItem('4. Status do Trigger', 'mostrarStatusTrigger')
     .addSeparator()
+    .addItem('🧹 Confirmar todos os alertas de faturamento (testes)', 'confirmarTodosAlertasMenu')
+    .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
     .addToUi();
 }
@@ -3325,4 +3327,62 @@ function obterItensMarcadosParaFaturar() {
 function limparTodosAlertas() {
   PropertiesService.getScriptProperties().deleteProperty('ALERTAS_FATURAMENTO');
   Logger.log('✅ Todos os alertas de faturamento foram limpos.');
+}
+
+// ====== UTILITÁRIO: CONFIRMAR TODOS OS ALERTAS (USO EM TESTES) ======
+/**
+ * Marca como "Faturado" todos os itens do Relatorio_DB que possuem MARCAR_FATURAR="SIM"
+ * e em seguida limpa todos os alertas pendentes.
+ * Use apenas para testes ou correções em lote — não exige senha.
+ */
+/**
+ * Wrapper chamado pelo menu — exibe confirmação antes de executar.
+ */
+function confirmarTodosAlertasMenu() {
+  const ui = SpreadsheetApp.getUi();
+  const resp = ui.alert(
+    '🧹 Confirmar todos os alertas de faturamento',
+    'Isso irá:\n\n' +
+    '• Marcar como "Faturado" todos os itens com MARCAR_FATURAR = SIM\n' +
+    '• Limpar todos os alertas pendentes no Relatorio_DB\n\n' +
+    'Use apenas para testes ou correções em lote. Deseja continuar?',
+    ui.ButtonSet.YES_NO
+  );
+  if (resp !== ui.Button.YES) {
+    Logger.log('ℹ️ confirmarTodosAlertasMenu: cancelado pelo usuário.');
+    return;
+  }
+  confirmarTodosAlertas();
+  ui.alert('✅ Concluído', 'Todos os alertas foram confirmados e os itens marcados como Faturado.', ui.ButtonSet.OK);
+}
+
+function confirmarTodosAlertas() {
+  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('⚠️ confirmarTodosAlertas: DB vazio ou não encontrado.');
+    return;
+  }
+
+  const lastRow  = sheet.getLastRow();
+  const lastCol  = Math.max(sheet.getLastColumn(), DATA_STATUS_COL + 1);
+  const dados    = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  const agora    = new Date();
+  let   marcados = 0;
+
+  dados.forEach((row, i) => {
+    const marcar = String(row[MARCAR_FATURAR_COL] || '').trim().toUpperCase();
+    if (marcar !== 'SIM') return;
+
+    const linhaSheet = i + 2; // +1 offset base, +1 cabeçalho
+    sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Faturado');
+    sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+    sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue(agora);
+    marcados++;
+    Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${row[ID_COL]}")`);
+  });
+
+  PropertiesService.getScriptProperties().deleteProperty('ALERTAS_FATURAMENTO');
+  limparCache();
+
+  Logger.log(`✅ confirmarTodosAlertas: ${marcados} item(ns) marcado(s) como Faturado. Alertas limpos.`);
 }
