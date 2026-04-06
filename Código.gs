@@ -1315,12 +1315,15 @@ function sincronizarPedidosComFonte() {
         pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosSheet.getLastColumn()).clearContent();
       }
 
-      // Define formato texto ANTES de escrever os valores — o Sheets converte
-      // para data no momento do setValues(), então o formato precisa estar definido antes.
+      // Formata colunas inteiras como texto puro antes de escrever —
+      // clearContent() não remove formatação, então células antigas poderiam
+      // ainda estar como "data" e converter os novos valores silenciosamente.
+      // Aplicar na coluna inteira (linha 1 até o máximo) garante que não haja resíduo.
       const txtFmt = '@';
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 6,  novasPedidosData.length, 2).setNumberFormat(txtFmt); // F, G
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 12, novasPedidosData.length, 1).setNumberFormat(txtFmt); // L
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 20, novasPedidosData.length, 1).setNumberFormat(txtFmt); // T
+      const maxRows = pedidosSheet.getMaxRows();
+      pedidosSheet.getRange(1, 6,  maxRows, 2).setNumberFormat(txtFmt); // F, G
+      pedidosSheet.getRange(1, 12, maxRows, 1).setNumberFormat(txtFmt); // L
+      pedidosSheet.getRange(1, 20, maxRows, 1).setNumberFormat(txtFmt); // T
 
       // Escreve novos dados
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
