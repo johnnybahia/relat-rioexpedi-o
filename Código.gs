@@ -1315,15 +1315,15 @@ function sincronizarPedidosComFonte() {
         pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosSheet.getLastColumn()).clearContent();
       }
 
-      // Escreve novos dados
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
-
-      // Colunas com texto puro — evita interpretação como data pelo Sheets
-      // F+G: CÓD. CLIENTE e CÓD. MARFIM | L: CÓD. OS | T: coluna extra
+      // Define formato texto ANTES de escrever os valores — o Sheets converte
+      // para data no momento do setValues(), então o formato precisa estar definido antes.
       const txtFmt = '@';
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 6,  novasPedidosData.length, 2).setNumberFormat(txtFmt); // F, G
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 12, novasPedidosData.length, 1).setNumberFormat(txtFmt); // L
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 20, novasPedidosData.length, 1).setNumberFormat(txtFmt); // T
+
+      // Escreve novos dados
+      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
 
       SpreadsheetApp.flush();
 
