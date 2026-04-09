@@ -1382,13 +1382,37 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
 }
 
 /**
- * PROCESSO AUTOMÁTICO COMPLETO OTIMIZADO
- * Executa a cada 5 minutos via trigger
+ * IMPORTAÇÃO AUTOMÁTICA — Trigger separado (a cada 5 min)
+ * Responsável apenas por: planilha externa → DADOS_IMPORTADOS
+ * Separado de processoAutomaticoCompleto para não estourar o limite de 6 minutos.
+ */
+function processoImportacao() {
+  const inicio = Date.now();
+  Logger.log("=" .repeat(70));
+  Logger.log(`📡 IMPORTAÇÃO AUTOMÁTICA INICIADA - ${new Date().toLocaleString('pt-BR')}`);
+  Logger.log("=".repeat(70));
+  try {
+    const resultado = importarDadosExternos();
+    if (resultado.success) {
+      Logger.log(`✅ ${resultado.linhas} linhas importadas em ${Date.now() - inicio}ms`);
+    } else {
+      Logger.log(`⚠️ Falha na importação: ${resultado.erro}`);
+    }
+  } catch (e) {
+    Logger.log(`❌ Erro em processoImportacao: ${e.message}`);
+  }
+  Logger.log("=".repeat(70));
+}
+
+/**
+ * PROCESSO AUTOMÁTICO DE SINCRONIZAÇÃO — Trigger separado (a cada 5 min)
+ * Responsável por: DADOS_IMPORTADOS → PEDIDOS → Relatorio_DB → purga → cache
+ * Separado de processoImportacao para respeitar o limite de 6 minutos.
  *
  * OTIMIZAÇÕES:
- * 1. Só regenera IDs se necessário (performance!)
- * 2. Só limpa cache se houve mudanças (UX!)
- * 3. Log detalhado de performance
+ * 1. Só roda a sync se H2 mudou (guard de timestamp)
+ * 2. Só regenera IDs se necessário
+ * 3. Só limpa cache se houve mudanças
  */
 function processoAutomaticoCompleto() {
   // Previne execuções simultâneas que causam duplicação de dados no DB
@@ -1408,21 +1432,11 @@ function processoAutomaticoCompleto() {
   let houveMudancas = false;
 
   try {
-    // ETAPA 0a: Importar dados da planilha externa → DADOS_IMPORTADOS
-    Logger.log("\n📡 ETAPA 0a: Importação direta da planilha externa");
-    const resultadoImport = importarDadosExternos();
-    if (resultadoImport.success) {
-      Logger.log(`   ✅ ${resultadoImport.linhas} linhas importadas`);
-    } else {
-      Logger.log(`   ⚠️ Falha na importação: ${resultadoImport.erro}`);
-      // Não aborta — sincronizarPedidosComFonte usará o guard de timestamp para decidir
-    }
-
     // ETAPA 0: Sincronizar DADOS_IMPORTADOS → PEDIDOS
-    // forcarExecucao=true: ignora guard de timestamp — importarDadosExternos já
-    // garantiu que os dados são frescos; não deixar uma falha pontual bloquear a sync.
+    // forcarExecucao=false: usa o guard de H2 — processoImportacao() atualiza H2
+    // quando importa dados novos; se H2 não mudou, a sync é ignorada (eficiente).
     Logger.log("\n📥 ETAPA 0: Sincronização DADOS_IMPORTADOS → PEDIDOS");
-    const resultadoSyncFonte = sincronizarPedidosComFonte(true);
+    const resultadoSyncFonte = sincronizarPedidosComFonte(false);
 
     if (resultadoSyncFonte.houveMudancas) {
       Logger.log(`   ✅ Sincronização concluída:`);
@@ -1519,7 +1533,7 @@ function processoAutomaticoCompleto() {
  */
 function instalarTriggerAutomaticoSilencioso() {
   try {
-    Logger.log("🔄 Instalando trigger automático...");
+    Logger.log("🔄 Instalando triggers automáticos...");
 
     // Remove triggers antigos
     const triggers = ScriptApp.getProjectTriggers();
@@ -1527,7 +1541,7 @@ function instalarTriggerAutomaticoSilencioso() {
 
     triggers.forEach(trigger => {
       const funcao = trigger.getHandlerFunction();
-      if (funcao === 'verificarEGerarIDs' || funcao === 'processoAutomaticoCompleto') {
+      if (funcao === 'verificarEGerarIDs' || funcao === 'processoAutomaticoCompleto' || funcao === 'processoImportacao') {
         ScriptApp.deleteTrigger(trigger);
         removidos++;
         Logger.log(`   ✓ Removido trigger: ${funcao}`);
@@ -1538,37 +1552,28 @@ function instalarTriggerAutomaticoSilencioso() {
       Logger.log(`✅ ${removidos} trigger(s) antigo(s) removido(s)`);
     }
 
-    // Cria novo trigger
+    // Trigger 1: importação da planilha externa → DADOS_IMPORTADOS
+    ScriptApp.newTrigger('processoImportacao')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+
+    // Trigger 2: sincronização DADOS_IMPORTADOS → PEDIDOS → DB
     ScriptApp.newTrigger('processoAutomaticoCompleto')
       .timeBased()
       .everyMinutes(5)
       .create();
 
-    Logger.log("✅ TRIGGER INSTALADO COM SUCESSO!");
-    Logger.log("📋 Detalhes:");
-    Logger.log("   • Função: processoAutomaticoCompleto");
-    Logger.log("   • Frequência: A cada 5 minutos");
-    Logger.log("   • Status: ATIVO");
-    Logger.log("");
-    Logger.log("🎯 O sistema automático está rodando!");
-    Logger.log("   • Gera IDs faltantes automaticamente");
-    Logger.log("   • Sincroniza PEDIDOS → Relatorio_DB");
-    Logger.log("   • Mantém dados sempre atualizados");
+    Logger.log("✅ TRIGGERS INSTALADOS COM SUCESSO!");
+    Logger.log("   • processoImportacao       → a cada 5 min (importa dados externos)");
+    Logger.log("   • processoAutomaticoCompleto → a cada 5 min (sincroniza PEDIDOS → DB)");
 
-    return {
-      success: true,
-      message: 'Trigger instalado com sucesso',
-      funcao: 'processoAutomaticoCompleto',
-      frequencia: '5 minutos'
-    };
+    return { success: true };
 
   } catch (e) {
     Logger.log(`❌ ERRO ao instalar trigger: ${e.message}`);
     Logger.log(`   Stack: ${e.stack}`);
-    return {
-      success: false,
-      error: e.message
-    };
+    return { success: false, error: e.message };
   }
 }
 
@@ -1581,23 +1586,28 @@ function instalarTriggerAutomatico() {
     // Remove triggers antigos para evitar duplicatas
     desinstalarTriggerAutomatico();
 
-    // Cria novo trigger que executa o processo completo
+    // Trigger 1: importação da planilha externa → DADOS_IMPORTADOS (a cada 5 min)
+    ScriptApp.newTrigger('processoImportacao')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+
+    // Trigger 2: sincronização DADOS_IMPORTADOS → PEDIDOS → DB (a cada 5 min)
     ScriptApp.newTrigger('processoAutomaticoCompleto')
       .timeBased()
       .everyMinutes(5)
       .create();
 
     SpreadsheetApp.getUi().alert(
-      '✅ Trigger Automático Ativado!',
-      'O sistema automático está ativo e executará a cada 5 minutos:\n\n' +
-      '• Gera IDs faltantes automaticamente\n' +
-      '• Sincroniza PEDIDOS → Relatorio_DB\n' +
-      '• Mantém dados sempre atualizados\n\n' +
+      '✅ Triggers Automáticos Ativados!',
+      'Dois triggers foram instalados (cada um a cada 5 minutos):\n\n' +
+      '• processoImportacao: importa dados da planilha externa\n' +
+      '• processoAutomaticoCompleto: sincroniza PEDIDOS → DB\n\n' +
       'Para desativar, use o menu: IDs Personalizados > Desativar Geração Automática',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
 
-    Logger.log("✅ Trigger automático completo instalado com sucesso");
+    Logger.log("✅ Dois triggers automáticos instalados com sucesso");
   } catch (e) {
     SpreadsheetApp.getUi().alert('❌ Erro ao instalar trigger: ' + e.message);
     Logger.log(`❌ Erro ao instalar trigger: ${e.message}`);
@@ -1615,7 +1625,7 @@ function desinstalarTriggerAutomatico() {
 
     triggers.forEach(trigger => {
       const funcao = trigger.getHandlerFunction();
-      if (funcao === 'verificarEGerarIDs' || funcao === 'processoAutomaticoCompleto') {
+      if (funcao === 'verificarEGerarIDs' || funcao === 'processoAutomaticoCompleto' || funcao === 'processoImportacao') {
         ScriptApp.deleteTrigger(trigger);
         removidos++;
         Logger.log(`   Removido trigger: ${funcao}`);
