@@ -940,7 +940,7 @@ function importarDadosExternos() {
  *
  * @returns {Object} {houveMudancas: boolean, novos: number, atualizados: number, erro: string}
  */
-function sincronizarPedidosComFonte() {
+function sincronizarPedidosComFonte(forcarExecucao) {
   const inicioSync = Date.now();
   Logger.log("=" .repeat(70));
   Logger.log(`🔄 SINCRONIZAÇÃO DADOS_IMPORTADOS → PEDIDOS`);
@@ -971,11 +971,15 @@ function sincronizarPedidosComFonte() {
     }
     const props = PropertiesService.getScriptProperties();
     const tsAnterior = props.getProperty('ULTIMO_IMPORTRANGE_TS') || '';
-    if (tsAtual === tsAnterior) {
-      Logger.log(`ℹ️ IMPORTRANGE não atualizado (H2="${tsAtual}"). Sync ignorado.`);
+    if (tsAtual === tsAnterior && !forcarExecucao) {
+      Logger.log(`ℹ️ Dados não alterados (H2="${tsAtual}"). Sync ignorado.`);
       return { houveMudancas: false, motivo: 'sem_nova_importacao' };
     }
-    Logger.log(`🆕 Novo IMPORTRANGE detectado: "${tsAnterior || 'nenhum'}" → "${tsAtual}"`);
+    if (forcarExecucao && tsAtual === tsAnterior) {
+      Logger.log(`⚡ Execução forçada — ignorando guard de timestamp (H2="${tsAtual}")`);
+    } else {
+      Logger.log(`🆕 Novo timestamp detectado: "${tsAnterior || 'nenhum'}" → "${tsAtual}"`);
+    }
 
     const fonteLastRow = fonteSheet.getLastRow();
     if (fonteLastRow < FONTE_DATA_START_ROW) {
@@ -1401,8 +1405,10 @@ function processoAutomaticoCompleto() {
     }
 
     // ETAPA 0: Sincronizar DADOS_IMPORTADOS → PEDIDOS
+    // forcarExecucao=true: ignora guard de timestamp — importarDadosExternos já
+    // garantiu que os dados são frescos; não deixar uma falha pontual bloquear a sync.
     Logger.log("\n📥 ETAPA 0: Sincronização DADOS_IMPORTADOS → PEDIDOS");
-    const resultadoSyncFonte = sincronizarPedidosComFonte();
+    const resultadoSyncFonte = sincronizarPedidosComFonte(true);
 
     if (resultadoSyncFonte.houveMudancas) {
       Logger.log(`   ✅ Sincronização concluída:`);
