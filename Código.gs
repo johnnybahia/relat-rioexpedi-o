@@ -864,11 +864,10 @@ function verificarEGerarIDs() {
 function importarDadosExternos() {
   const SOURCE_ID    = '1GtYG4Ahy5XJyJjE37S27u8RyELdRkct8nDAVGIBRI-w';
   const SOURCE_SHEET = 'RELATÓRIO GERAL DA PRODUÇÃO1';
-  const SOURCE_RANGE = 'A1:W5000';
 
   // Coluna J (índice 9): valores como "82249D" e "14660U" têm formatação customizada
   // no Sheets — getValues() retorna só o número cru (sem sufixo). Por isso usamos
-  // getDisplayValues() apenas nessa coluna para preservar o valor visível.
+  // getDisplayValues() APENAS nessa coluna (range estreito) para preservar o valor visível.
   const COL_J = 9;
 
   try {
@@ -876,9 +875,20 @@ function importarDadosExternos() {
     const sourceSheet = SpreadsheetApp.openById(SOURCE_ID).getSheetByName(SOURCE_SHEET);
     if (!sourceSheet) throw new Error(`Aba "${SOURCE_SHEET}" não encontrada na planilha externa.`);
 
-    const rangeRef = sourceSheet.getRange(SOURCE_RANGE);
-    const dados       = rangeRef.getValues();        // comportamento padrão para tudo
-    const displayColJ = rangeRef.getDisplayValues(); // usado só para col J
+    // Usa lastRow/lastColumn dinâmico — evita ler 5000 linhas vazias
+    const srcLastRow = sourceSheet.getLastRow();
+    const srcLastCol = sourceSheet.getLastColumn();
+    if (srcLastRow < 1) {
+      Logger.log('⚠️ importarDadosExternos: nenhum dado encontrado na fonte.');
+      return { success: false, erro: 'Sem dados na fonte' };
+    }
+
+    // Leitura única com getValues() — muito mais rápido que getDisplayValues() na range grande
+    const rangeRef = sourceSheet.getRange(1, 1, srcLastRow, srcLastCol);
+    const dados = rangeRef.getValues();
+
+    // Lê display values SOMENTE da coluna J (range de 1 coluna × N linhas = muito menor)
+    const colJDisplay = sourceSheet.getRange(1, COL_J + 1, srcLastRow, 1).getDisplayValues();
 
     // Remove linhas em branco do final
     let ultimaLinha = dados.length;
@@ -894,22 +904,23 @@ function importarDadosExternos() {
 
     // Substitui coluna J pelo valor de display (preserva sufixos "D"/"U")
     dadosFiltrados.forEach((row, i) => {
-      row[COL_J] = displayColJ[i][COL_J];
+      row[COL_J] = colJDisplay[i][0]; // colJDisplay é array de 1 coluna → índice 0
     });
 
     const destSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
     if (!destSheet) throw new Error(`Aba "${IMPORTRANGE_SHEET_NAME}" não encontrada.`);
 
     const numCols   = dadosFiltrados[0].length;
-    const clearRows = Math.max(destSheet.getLastRow(), dadosFiltrados.length + 1);
+    const destLastRow = destSheet.getLastRow();
+    const clearRows = Math.max(destLastRow, dadosFiltrados.length);
 
     // Limpa área anterior
-    destSheet.getRange(1, 1, clearRows, numCols).clearContent();
+    if (clearRows > 0) {
+      destSheet.getRange(1, 1, clearRows, numCols).clearContent();
+    }
 
-    // Formata como texto as colunas que têm valores alfanuméricos (ex: "7490-1", "82249D")
-    // ANTES de gravar — evita que o Sheets interprete esses valores como datas ao receber.
-    const maxRows = destSheet.getMaxRows();
-    destSheet.getRange(1, 6, maxRows, 1).setNumberFormat('@'); // F: CÓD. CLIENTE
+    // Formata coluna F como texto — apenas as linhas que serão escritas (não a planilha inteira)
+    destSheet.getRange(1, 6, dadosFiltrados.length, 1).setNumberFormat('@'); // F: CÓD. CLIENTE
 
     // Grava dados processados
     destSheet.getRange(1, 1, dadosFiltrados.length, numCols).setValues(dadosFiltrados);
@@ -1294,15 +1305,18 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosSheet.getLastColumn()).clearContent();
       }
 
-      // Formata colunas inteiras como texto puro antes de escrever —
+      // Formata colunas como texto puro antes de escrever —
       // clearContent() não remove formatação, então células antigas poderiam
       // ainda estar como "data" e converter os novos valores silenciosamente.
-      // Aplicar na coluna inteira (linha 1 até o máximo) garante que não haja resíduo.
+      // Limita ao máximo entre as linhas antigas e as novas (não a planilha inteira).
       const txtFmt = '@';
-      const maxRows = pedidosSheet.getMaxRows();
-      pedidosSheet.getRange(1, 6,  maxRows, 2).setNumberFormat(txtFmt); // F, G
-      pedidosSheet.getRange(1, 12, maxRows, 1).setNumberFormat(txtFmt); // L
-      pedidosSheet.getRange(1, 20, maxRows, 1).setNumberFormat(txtFmt); // T
+      const rowsToFormat = Math.max(
+        pedidosLastRow >= FONTE_DATA_START_ROW ? pedidosLastRow : FONTE_DATA_START_ROW,
+        FONTE_DATA_START_ROW + novasPedidosData.length - 1
+      );
+      pedidosSheet.getRange(1, 6,  rowsToFormat, 2).setNumberFormat(txtFmt); // F, G
+      pedidosSheet.getRange(1, 12, rowsToFormat, 1).setNumberFormat(txtFmt); // L
+      pedidosSheet.getRange(1, 20, rowsToFormat, 1).setNumberFormat(txtFmt); // T
 
       // Escreve novos dados
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
