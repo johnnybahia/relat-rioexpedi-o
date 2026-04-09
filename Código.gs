@@ -1533,7 +1533,7 @@ function processoAutomaticoCompleto() {
  */
 function instalarTriggerAutomaticoSilencioso() {
   try {
-    Logger.log("🔄 Instalando trigger automático...");
+    Logger.log("🔄 Instalando triggers automáticos...");
 
     // Remove triggers antigos
     const triggers = ScriptApp.getProjectTriggers();
@@ -1541,7 +1541,7 @@ function instalarTriggerAutomaticoSilencioso() {
 
     triggers.forEach(trigger => {
       const funcao = trigger.getHandlerFunction();
-      if (funcao === 'verificarEGerarIDs' || funcao === 'processoAutomaticoCompleto') {
+      if (funcao === 'verificarEGerarIDs' || funcao === 'processoAutomaticoCompleto' || funcao === 'processoImportacao') {
         ScriptApp.deleteTrigger(trigger);
         removidos++;
         Logger.log(`   ✓ Removido trigger: ${funcao}`);
@@ -1552,37 +1552,28 @@ function instalarTriggerAutomaticoSilencioso() {
       Logger.log(`✅ ${removidos} trigger(s) antigo(s) removido(s)`);
     }
 
-    // Cria novo trigger
+    // Trigger 1: importação da planilha externa → DADOS_IMPORTADOS
+    ScriptApp.newTrigger('processoImportacao')
+      .timeBased()
+      .everyMinutes(5)
+      .create();
+
+    // Trigger 2: sincronização DADOS_IMPORTADOS → PEDIDOS → DB
     ScriptApp.newTrigger('processoAutomaticoCompleto')
       .timeBased()
       .everyMinutes(5)
       .create();
 
-    Logger.log("✅ TRIGGER INSTALADO COM SUCESSO!");
-    Logger.log("📋 Detalhes:");
-    Logger.log("   • Função: processoAutomaticoCompleto");
-    Logger.log("   • Frequência: A cada 5 minutos");
-    Logger.log("   • Status: ATIVO");
-    Logger.log("");
-    Logger.log("🎯 O sistema automático está rodando!");
-    Logger.log("   • Gera IDs faltantes automaticamente");
-    Logger.log("   • Sincroniza PEDIDOS → Relatorio_DB");
-    Logger.log("   • Mantém dados sempre atualizados");
+    Logger.log("✅ TRIGGERS INSTALADOS COM SUCESSO!");
+    Logger.log("   • processoImportacao       → a cada 5 min (importa dados externos)");
+    Logger.log("   • processoAutomaticoCompleto → a cada 5 min (sincroniza PEDIDOS → DB)");
 
-    return {
-      success: true,
-      message: 'Trigger instalado com sucesso',
-      funcao: 'processoAutomaticoCompleto',
-      frequencia: '5 minutos'
-    };
+    return { success: true };
 
   } catch (e) {
     Logger.log(`❌ ERRO ao instalar trigger: ${e.message}`);
     Logger.log(`   Stack: ${e.stack}`);
-    return {
-      success: false,
-      error: e.message
-    };
+    return { success: false, error: e.message };
   }
 }
 
