@@ -1990,6 +1990,32 @@ function sincronizarDados() {
     }
     Logger.log(`   ✓ ${fonteCodigoFixoMap.size} UUIDs fixos indexados de PEDIDOS (col S + DESC)`);
 
+    // 2.6) PROTEÇÃO ANTI-FATURAMENTO INDEVIDO
+    // Lê os OCs presentes em DADOS_IMPORTADOS (apenas col J) para distinguir dois cenários:
+    //   A) OC sumiu de DADOS_IMPORTADOS → item saiu do sistema de origem → faturamento OK
+    //   B) OC ainda existe em DADOS_IMPORTADOS → item ainda está no sistema, só o ID/fingerprint
+    //      mudou (ex: rebuild zerou IDs, dado alterado na fonte) → NÃO marcar Faturado
+    Logger.log("\n🛡️ 2.6. OCs EM DADOS_IMPORTADOS (proteção anti-faturamento)");
+    const dadosImportadosOcs = new Set();
+    try {
+      const importSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
+      if (importSheet && importSheet.getLastRow() >= FONTE_DATA_START_ROW) {
+        const impLastRow = importSheet.getLastRow();
+        // Lê só col J (OC, coluna 10) de DADOS_IMPORTADOS — 1 coluna × N linhas (eficiente)
+        // Usa getDisplayValues() para preservar sufixos como "13807U", "14660U"
+        const ocVals = importSheet.getRange(FONTE_DATA_START_ROW, 10, impLastRow - FONTE_DATA_START_ROW + 1, 1).getDisplayValues();
+        ocVals.forEach(([oc]) => {
+          const s = String(oc || '').trim();
+          if (s) dadosImportadosOcs.add(s);
+        });
+        Logger.log(`   ✓ ${dadosImportadosOcs.size} OCs únicas em DADOS_IMPORTADOS`);
+      } else {
+        Logger.log(`   ⚠️ DADOS_IMPORTADOS vazio — proteção desabilitada nesta execução`);
+      }
+    } catch (eImp) {
+      Logger.log(`   ⚠️ Erro ao carregar OCs de DADOS_IMPORTADOS: ${eImp.message} — proteção desabilitada`);
+    }
+
     // 3) PROCESSAR
     Logger.log("\n🔄 3. PROCESSANDO");
 
@@ -2198,8 +2224,21 @@ function sincronizarDados() {
             consumedFingerprints.add(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
 
           } else {
-            // NÃO ENCONTROU por ID, UUID nem fingerprint — item saiu do DADOS_IMPORTADOS
-            Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS — OC="${dbItem.row[OC_COL]}", Status="${statusAtual}"`);
+            // NÃO ENCONTROU por ID, UUID nem fingerprint — item não está em PEDIDOS
+            const ocDB = String(dbItem.row[DB_OC_COL] || '').trim();
+            Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS — OC="${ocDB}", Status="${statusAtual}"`);
+
+            // PROTEÇÃO ANTI-FATURAMENTO INDEVIDO:
+            // Se o OC ainda existe em DADOS_IMPORTADOS, o item ainda está no sistema de origem.
+            // O mismatch de ID/fingerprint pode ser causado por rebuild (que zera UUIDs) ou por
+            // uma alteração de dados na fonte que mudou a fingerprint. Nesses casos NÃO deve
+            // ser marcado como Faturado — a próxima sincronização de DADOS_IMPORTADOS → PEDIDOS
+            // vai reconsolidar o ID corretamente.
+            if (dadosImportadosOcs.size > 0 && ocDB && dadosImportadosOcs.has(ocDB)) {
+              Logger.log(`   🛡️ Proteção: OC="${ocDB}" ainda em DADOS_IMPORTADOS → mismatch de ID, ignorando faturamento`);
+              continue; // Pula este item — não marca Faturado nem MARCAR_FATURAR=SIM
+            }
+            // OC ausente de DADOS_IMPORTADOS → item genuinamente saiu do sistema de origem → prossegue
 
             // FIX: Se o usuário do HTML já marcou o item para faturar (MARCAR_FATURAR=SIM),
             // o item pode ter sido fechado/removido pelo sistema de origem mas ainda não foi
