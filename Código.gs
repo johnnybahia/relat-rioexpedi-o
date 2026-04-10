@@ -580,6 +580,9 @@ function onOpen() {
     .addItem('3. Desativar Geração Automática', 'desinstalarTriggerAutomatico')
     .addItem('4. Status do Trigger', 'mostrarStatusTrigger')
     .addSeparator()
+    .addItem('⏸ Pausar sistema (para editar dados)', 'pausarSistema')
+    .addItem('▶ Retomar sistema', 'retomarSistema')
+    .addSeparator()
     .addItem('🧹 Confirmar todos os alertas de faturamento (testes)', 'confirmarTodosAlertasMenu')
     .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
@@ -1381,12 +1384,74 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
   return `${cliente}|${pedido}|${marfim}|${tam}|${oc}|${os}|${dataStr}`;
 }
 
+// ─── CONTROLE DE PAUSA ───────────────────────────────────────────────────────
+
+/** Retorna true se o sistema estiver pausado pelo usuário */
+function _sistemaPausado_() {
+  return PropertiesService.getScriptProperties().getProperty('SISTEMA_PAUSADO') === 'true';
+}
+
+/** Pausa todas as atualizações automáticas (import + sync) */
+function pausarSistema() {
+  PropertiesService.getScriptProperties().setProperty('SISTEMA_PAUSADO', 'true');
+  SpreadsheetApp.getUi().alert(
+    '⏸ Sistema Pausado',
+    'As atualizações automáticas foram pausadas.\n' +
+    'Você pode editar os dados livremente.\n\n' +
+    'Use "▶ Retomar sistema" no menu para reativar.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  Logger.log('⏸ Sistema pausado pelo usuário.');
+}
+
+/** Retoma as atualizações automáticas */
+function retomarSistema() {
+  PropertiesService.getScriptProperties().deleteProperty('SISTEMA_PAUSADO');
+  SpreadsheetApp.getUi().alert(
+    '▶ Sistema Retomado',
+    'As atualizações automáticas foram reativadas.\n' +
+    'O sistema voltará a importar e sincronizar normalmente.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  Logger.log('▶ Sistema retomado pelo usuário.');
+}
+
 /**
- * IMPORTAÇÃO AUTOMÁTICA — Trigger separado (a cada 5 min)
+ * Agenda processoAutomaticoCompleto para rodar após N segundos (one-time trigger).
+ * Garante que o sync sempre rode DEPOIS do import, em sequência.
+ * Salva o ID do trigger no PropertiesService para cancelar se necessário.
+ */
+function _agendarSincronizacao_(segundos) {
+  const props = PropertiesService.getScriptProperties();
+  // Cancela agendamento anterior pendente
+  const anteriorId = props.getProperty('SYNC_ONETIME_TRIGGER_ID');
+  if (anteriorId) {
+    ScriptApp.getProjectTriggers()
+      .filter(t => t.getUniqueId() === anteriorId)
+      .forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (_) {} });
+    props.deleteProperty('SYNC_ONETIME_TRIGGER_ID');
+  }
+  // Cria trigger one-time
+  const trigger = ScriptApp.newTrigger('processoAutomaticoCompleto')
+    .timeBased()
+    .after(segundos * 1000)
+    .create();
+  props.setProperty('SYNC_ONETIME_TRIGGER_ID', trigger.getUniqueId());
+  Logger.log(`   ⏱️ Sincronização agendada em ${segundos}s`);
+}
+
+// ─── TRIGGERS AUTOMÁTICOS ─────────────────────────────────────────────────────
+
+/**
+ * IMPORTAÇÃO AUTOMÁTICA — Trigger recorrente (a cada 5 min)
  * Responsável apenas por: planilha externa → DADOS_IMPORTADOS
- * Separado de processoAutomaticoCompleto para não estourar o limite de 6 minutos.
+ * Ao concluir, agenda processoAutomaticoCompleto para 90s depois (sequência garantida).
  */
 function processoImportacao() {
+  if (_sistemaPausado_()) {
+    Logger.log('⏸ Sistema pausado — importação ignorada.');
+    return;
+  }
   const inicio = Date.now();
   Logger.log("=" .repeat(70));
   Logger.log(`📡 IMPORTAÇÃO AUTOMÁTICA INICIADA - ${new Date().toLocaleString('pt-BR')}`);
@@ -1395,6 +1460,9 @@ function processoImportacao() {
     const resultado = importarDadosExternos();
     if (resultado.success) {
       Logger.log(`✅ ${resultado.linhas} linhas importadas em ${Date.now() - inicio}ms`);
+      // Agenda sincronização 90s após o import — garante que DADOS_IMPORTADOS
+      // já esteja gravado antes de o sync ler os dados.
+      _agendarSincronizacao_(90);
     } else {
       Logger.log(`⚠️ Falha na importação: ${resultado.erro}`);
     }
@@ -1415,6 +1483,11 @@ function processoImportacao() {
  * 3. Só limpa cache se houve mudanças
  */
 function processoAutomaticoCompleto() {
+  if (_sistemaPausado_()) {
+    Logger.log('⏸ Sistema pausado — sincronização ignorada.');
+    return;
+  }
+
   // Previne execuções simultâneas que causam duplicação de dados no DB
   const lock = LockService.getScriptLock();
   try {
@@ -1620,6 +1693,16 @@ function instalarTriggerAutomatico() {
  */
 function desinstalarTriggerAutomatico() {
   try {
+    // Limpa também o trigger one-time de sincronização, se existir
+    const props = PropertiesService.getScriptProperties();
+    const oneTimeId = props.getProperty('SYNC_ONETIME_TRIGGER_ID');
+    if (oneTimeId) {
+      ScriptApp.getProjectTriggers()
+        .filter(t => t.getUniqueId() === oneTimeId)
+        .forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (_) {} });
+      props.deleteProperty('SYNC_ONETIME_TRIGGER_ID');
+    }
+
     const triggers = ScriptApp.getProjectTriggers();
     let removidos = 0;
 
@@ -1990,6 +2073,32 @@ function sincronizarDados() {
     }
     Logger.log(`   ✓ ${fonteCodigoFixoMap.size} UUIDs fixos indexados de PEDIDOS (col S + DESC)`);
 
+    // 2.6) PROTEÇÃO ANTI-FATURAMENTO INDEVIDO
+    // Lê os OCs presentes em DADOS_IMPORTADOS (apenas col J) para distinguir dois cenários:
+    //   A) OC sumiu de DADOS_IMPORTADOS → item saiu do sistema de origem → faturamento OK
+    //   B) OC ainda existe em DADOS_IMPORTADOS → item ainda está no sistema, só o ID/fingerprint
+    //      mudou (ex: rebuild zerou IDs, dado alterado na fonte) → NÃO marcar Faturado
+    Logger.log("\n🛡️ 2.6. OCs EM DADOS_IMPORTADOS (proteção anti-faturamento)");
+    const dadosImportadosOcs = new Set();
+    try {
+      const importSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
+      if (importSheet && importSheet.getLastRow() >= FONTE_DATA_START_ROW) {
+        const impLastRow = importSheet.getLastRow();
+        // Lê só col J (OC, coluna 10) de DADOS_IMPORTADOS — 1 coluna × N linhas (eficiente)
+        // Usa getDisplayValues() para preservar sufixos como "13807U", "14660U"
+        const ocVals = importSheet.getRange(FONTE_DATA_START_ROW, 10, impLastRow - FONTE_DATA_START_ROW + 1, 1).getDisplayValues();
+        ocVals.forEach(([oc]) => {
+          const s = String(oc || '').trim();
+          if (s) dadosImportadosOcs.add(s);
+        });
+        Logger.log(`   ✓ ${dadosImportadosOcs.size} OCs únicas em DADOS_IMPORTADOS`);
+      } else {
+        Logger.log(`   ⚠️ DADOS_IMPORTADOS vazio — proteção desabilitada nesta execução`);
+      }
+    } catch (eImp) {
+      Logger.log(`   ⚠️ Erro ao carregar OCs de DADOS_IMPORTADOS: ${eImp.message} — proteção desabilitada`);
+    }
+
     // 3) PROCESSAR
     Logger.log("\n🔄 3. PROCESSANDO");
 
@@ -2198,8 +2307,21 @@ function sincronizarDados() {
             consumedFingerprints.add(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
 
           } else {
-            // NÃO ENCONTROU por ID, UUID nem fingerprint — item saiu do DADOS_IMPORTADOS
-            Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS — OC="${dbItem.row[OC_COL]}", Status="${statusAtual}"`);
+            // NÃO ENCONTROU por ID, UUID nem fingerprint — item não está em PEDIDOS
+            const ocDB = String(dbItem.row[DB_OC_COL] || '').trim();
+            Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS — OC="${ocDB}", Status="${statusAtual}"`);
+
+            // PROTEÇÃO ANTI-FATURAMENTO INDEVIDO:
+            // Se o OC ainda existe em DADOS_IMPORTADOS, o item ainda está no sistema de origem.
+            // O mismatch de ID/fingerprint pode ser causado por rebuild (que zera UUIDs) ou por
+            // uma alteração de dados na fonte que mudou a fingerprint. Nesses casos NÃO deve
+            // ser marcado como Faturado — a próxima sincronização de DADOS_IMPORTADOS → PEDIDOS
+            // vai reconsolidar o ID corretamente.
+            if (dadosImportadosOcs.size > 0 && ocDB && dadosImportadosOcs.has(ocDB)) {
+              Logger.log(`   🛡️ Proteção: OC="${ocDB}" ainda em DADOS_IMPORTADOS → mismatch de ID, ignorando faturamento`);
+              continue; // Pula este item — não marca Faturado nem MARCAR_FATURAR=SIM
+            }
+            // OC ausente de DADOS_IMPORTADOS → item genuinamente saiu do sistema de origem → prossegue
 
             // FIX: Se o usuário do HTML já marcou o item para faturar (MARCAR_FATURAR=SIM),
             // o item pode ter sido fechado/removido pelo sistema de origem mas ainda não foi
