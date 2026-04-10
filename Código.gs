@@ -580,6 +580,9 @@ function onOpen() {
     .addItem('3. Desativar Geração Automática', 'desinstalarTriggerAutomatico')
     .addItem('4. Status do Trigger', 'mostrarStatusTrigger')
     .addSeparator()
+    .addItem('⏸ Pausar sistema (para editar dados)', 'pausarSistema')
+    .addItem('▶ Retomar sistema', 'retomarSistema')
+    .addSeparator()
     .addItem('🧹 Confirmar todos os alertas de faturamento (testes)', 'confirmarTodosAlertasMenu')
     .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
@@ -1381,12 +1384,74 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
   return `${cliente}|${pedido}|${marfim}|${tam}|${oc}|${os}|${dataStr}`;
 }
 
+// ─── CONTROLE DE PAUSA ───────────────────────────────────────────────────────
+
+/** Retorna true se o sistema estiver pausado pelo usuário */
+function _sistemaPausado_() {
+  return PropertiesService.getScriptProperties().getProperty('SISTEMA_PAUSADO') === 'true';
+}
+
+/** Pausa todas as atualizações automáticas (import + sync) */
+function pausarSistema() {
+  PropertiesService.getScriptProperties().setProperty('SISTEMA_PAUSADO', 'true');
+  SpreadsheetApp.getUi().alert(
+    '⏸ Sistema Pausado',
+    'As atualizações automáticas foram pausadas.\n' +
+    'Você pode editar os dados livremente.\n\n' +
+    'Use "▶ Retomar sistema" no menu para reativar.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  Logger.log('⏸ Sistema pausado pelo usuário.');
+}
+
+/** Retoma as atualizações automáticas */
+function retomarSistema() {
+  PropertiesService.getScriptProperties().deleteProperty('SISTEMA_PAUSADO');
+  SpreadsheetApp.getUi().alert(
+    '▶ Sistema Retomado',
+    'As atualizações automáticas foram reativadas.\n' +
+    'O sistema voltará a importar e sincronizar normalmente.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  Logger.log('▶ Sistema retomado pelo usuário.');
+}
+
 /**
- * IMPORTAÇÃO AUTOMÁTICA — Trigger separado (a cada 5 min)
+ * Agenda processoAutomaticoCompleto para rodar após N segundos (one-time trigger).
+ * Garante que o sync sempre rode DEPOIS do import, em sequência.
+ * Salva o ID do trigger no PropertiesService para cancelar se necessário.
+ */
+function _agendarSincronizacao_(segundos) {
+  const props = PropertiesService.getScriptProperties();
+  // Cancela agendamento anterior pendente
+  const anteriorId = props.getProperty('SYNC_ONETIME_TRIGGER_ID');
+  if (anteriorId) {
+    ScriptApp.getProjectTriggers()
+      .filter(t => t.getUniqueId() === anteriorId)
+      .forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (_) {} });
+    props.deleteProperty('SYNC_ONETIME_TRIGGER_ID');
+  }
+  // Cria trigger one-time
+  const trigger = ScriptApp.newTrigger('processoAutomaticoCompleto')
+    .timeBased()
+    .after(segundos * 1000)
+    .create();
+  props.setProperty('SYNC_ONETIME_TRIGGER_ID', trigger.getUniqueId());
+  Logger.log(`   ⏱️ Sincronização agendada em ${segundos}s`);
+}
+
+// ─── TRIGGERS AUTOMÁTICOS ─────────────────────────────────────────────────────
+
+/**
+ * IMPORTAÇÃO AUTOMÁTICA — Trigger recorrente (a cada 5 min)
  * Responsável apenas por: planilha externa → DADOS_IMPORTADOS
- * Separado de processoAutomaticoCompleto para não estourar o limite de 6 minutos.
+ * Ao concluir, agenda processoAutomaticoCompleto para 90s depois (sequência garantida).
  */
 function processoImportacao() {
+  if (_sistemaPausado_()) {
+    Logger.log('⏸ Sistema pausado — importação ignorada.');
+    return;
+  }
   const inicio = Date.now();
   Logger.log("=" .repeat(70));
   Logger.log(`📡 IMPORTAÇÃO AUTOMÁTICA INICIADA - ${new Date().toLocaleString('pt-BR')}`);
@@ -1395,6 +1460,9 @@ function processoImportacao() {
     const resultado = importarDadosExternos();
     if (resultado.success) {
       Logger.log(`✅ ${resultado.linhas} linhas importadas em ${Date.now() - inicio}ms`);
+      // Agenda sincronização 90s após o import — garante que DADOS_IMPORTADOS
+      // já esteja gravado antes de o sync ler os dados.
+      _agendarSincronizacao_(90);
     } else {
       Logger.log(`⚠️ Falha na importação: ${resultado.erro}`);
     }
@@ -1415,6 +1483,11 @@ function processoImportacao() {
  * 3. Só limpa cache se houve mudanças
  */
 function processoAutomaticoCompleto() {
+  if (_sistemaPausado_()) {
+    Logger.log('⏸ Sistema pausado — sincronização ignorada.');
+    return;
+  }
+
   // Previne execuções simultâneas que causam duplicação de dados no DB
   const lock = LockService.getScriptLock();
   try {
@@ -1620,6 +1693,16 @@ function instalarTriggerAutomatico() {
  */
 function desinstalarTriggerAutomatico() {
   try {
+    // Limpa também o trigger one-time de sincronização, se existir
+    const props = PropertiesService.getScriptProperties();
+    const oneTimeId = props.getProperty('SYNC_ONETIME_TRIGGER_ID');
+    if (oneTimeId) {
+      ScriptApp.getProjectTriggers()
+        .filter(t => t.getUniqueId() === oneTimeId)
+        .forEach(t => { try { ScriptApp.deleteTrigger(t); } catch (_) {} });
+      props.deleteProperty('SYNC_ONETIME_TRIGGER_ID');
+    }
+
     const triggers = ScriptApp.getProjectTriggers();
     let removidos = 0;
 
