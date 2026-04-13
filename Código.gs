@@ -2081,7 +2081,11 @@ function sincronizarDados() {
     // IMPORTANTE: usa OC+OS (não só OC) — uma OC pode ter muitos itens; só porque
     // alguns sumiram não significa que todos sumiram. OS identifica a linha individual.
     Logger.log("\n🛡️ 2.6. OC+OS EM DADOS_IMPORTADOS (proteção anti-faturamento)");
-    const dadosImportadosOcs = new Set(); // chave: "OC|OS"
+    // Map<"OC|OS", count> — contagem proporcional: cada match bem-sucedido decrementa 1.
+    // Proteção ativa apenas enquanto ainda há slots não consumidos (count > 0).
+    // Isso resolve o caso de itens 100% idênticos: se DB tem 3 e PEDIDOS tem 2,
+    // após 2 matches o count cai a 0 e o 3º item NÃO é mais protegido → faturamento correto.
+    const dadosImportadosOcs = new Map(); // chave: "OC|OS" → contagem de ocorrências
     try {
       const importSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
       if (importSheet && importSheet.getLastRow() >= FONTE_DATA_START_ROW) {
@@ -2092,15 +2096,26 @@ function sincronizarDados() {
         vals.forEach(([oc, , os]) => {
           const ocStr = String(oc || '').trim();
           const osStr = String(os || '').trim();
-          if (ocStr || osStr) dadosImportadosOcs.add(`${ocStr}|${osStr}`);
+          if (ocStr || osStr) {
+            const k = `${ocStr}|${osStr}`;
+            dadosImportadosOcs.set(k, (dadosImportadosOcs.get(k) || 0) + 1);
+          }
         });
-        Logger.log(`   ✓ ${dadosImportadosOcs.size} pares OC+OS em DADOS_IMPORTADOS`);
+        Logger.log(`   ✓ ${dadosImportadosOcs.size} pares OC+OS únicos em DADOS_IMPORTADOS`);
       } else {
         Logger.log(`   ⚠️ DADOS_IMPORTADOS vazio — proteção desabilitada nesta execução`);
       }
     } catch (eImp) {
       Logger.log(`   ⚠️ Erro ao carregar OC+OS de DADOS_IMPORTADOS: ${eImp.message} — proteção desabilitada`);
     }
+    // Helper: consome 1 slot OC+OS após cada match — proporcional à quantidade na fonte
+    const _consumirOcOs_ = (ocStr, osStr) => {
+      const k = `${ocStr}|${osStr}`;
+      const c = dadosImportadosOcs.get(k);
+      if (c === undefined) return;
+      if (c <= 1) dadosImportadosOcs.delete(k);
+      else dadosImportadosOcs.set(k, c - 1);
+    };
 
     // 3) PROCESSAR
     Logger.log("\n🔄 3. PROCESSANDO");
@@ -2232,6 +2247,7 @@ function sincronizarDados() {
         const fpListId = fonteImpressoes.get(fpFonteId);
         if (fpListId) { const fi = fpListId.find(i => i.id === id); if (fi) fi.usado = true; }
         consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
+        _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
       } else {
         // SEGUNDA TENTATIVA: Buscar por CÓDIGO_FIXO (UUID imutável por item — ideia do usuário)
@@ -2270,6 +2286,7 @@ function sincronizarDados() {
           const fpList = fonteImpressoes.get(fpFonte);
           if (fpList) { const fi = fpList.find(i => i.id === novoId); if (fi) fi.usado = true; }
           consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true));
+          _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
         } else {
           // TERCEIRA TENTATIVA: Buscar por IMPRESSÃO DIGITAL (fallback para itens sem UUID ou UUID ausente)
@@ -2308,6 +2325,7 @@ function sincronizarDados() {
             // permitindo que outros DB-items com a mesma fingerprint ainda encontrem seus slots.
             fonteMap.delete(novoId);
             consumedFingerprints.add(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
+            _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
           } else {
             // NÃO ENCONTROU por ID, UUID nem fingerprint — item não está em PEDIDOS
