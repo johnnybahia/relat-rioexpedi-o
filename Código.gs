@@ -2074,30 +2074,48 @@ function sincronizarDados() {
     Logger.log(`   ✓ ${fonteCodigoFixoMap.size} UUIDs fixos indexados de PEDIDOS (col S + DESC)`);
 
     // 2.6) PROTEÇÃO ANTI-FATURAMENTO INDEVIDO
-    // Lê os OCs presentes em DADOS_IMPORTADOS (apenas col J) para distinguir dois cenários:
-    //   A) OC sumiu de DADOS_IMPORTADOS → item saiu do sistema de origem → faturamento OK
-    //   B) OC ainda existe em DADOS_IMPORTADOS → item ainda está no sistema, só o ID/fingerprint
-    //      mudou (ex: rebuild zerou IDs, dado alterado na fonte) → NÃO marcar Faturado
-    Logger.log("\n🛡️ 2.6. OCs EM DADOS_IMPORTADOS (proteção anti-faturamento)");
-    const dadosImportadosOcs = new Set();
+    // Lê OC+OS de DADOS_IMPORTADOS para distinguir dois cenários:
+    //   A) OC|OS sumiu de DADOS_IMPORTADOS → item saiu do sistema de origem → faturamento OK
+    //   B) OC|OS ainda existe → item ainda está no sistema, só o ID/fingerprint mudou
+    //      (ex: rebuild zerou IDs, dado alterado na fonte) → NÃO marcar Faturado
+    // IMPORTANTE: usa OC+OS (não só OC) — uma OC pode ter muitos itens; só porque
+    // alguns sumiram não significa que todos sumiram. OS identifica a linha individual.
+    Logger.log("\n🛡️ 2.6. OC+OS EM DADOS_IMPORTADOS (proteção anti-faturamento)");
+    // Map<"OC|OS", count> — contagem proporcional: cada match bem-sucedido decrementa 1.
+    // Proteção ativa apenas enquanto ainda há slots não consumidos (count > 0).
+    // Isso resolve o caso de itens 100% idênticos: se DB tem 3 e PEDIDOS tem 2,
+    // após 2 matches o count cai a 0 e o 3º item NÃO é mais protegido → faturamento correto.
+    const dadosImportadosOcs = new Map(); // chave: "OC|OS" → contagem de ocorrências
     try {
       const importSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
       if (importSheet && importSheet.getLastRow() >= FONTE_DATA_START_ROW) {
         const impLastRow = importSheet.getLastRow();
-        // Lê só col J (OC, coluna 10) de DADOS_IMPORTADOS — 1 coluna × N linhas (eficiente)
+        // Col J (10) = OC, Col L (12) = OS — lê 3 colunas (J, K, L) e usa índices 0 e 2
         // Usa getDisplayValues() para preservar sufixos como "13807U", "14660U"
-        const ocVals = importSheet.getRange(FONTE_DATA_START_ROW, 10, impLastRow - FONTE_DATA_START_ROW + 1, 1).getDisplayValues();
-        ocVals.forEach(([oc]) => {
-          const s = String(oc || '').trim();
-          if (s) dadosImportadosOcs.add(s);
+        const vals = importSheet.getRange(FONTE_DATA_START_ROW, 10, impLastRow - FONTE_DATA_START_ROW + 1, 3).getDisplayValues();
+        vals.forEach(([oc, , os]) => {
+          const ocStr = String(oc || '').trim();
+          const osStr = String(os || '').trim();
+          if (ocStr || osStr) {
+            const k = `${ocStr}|${osStr}`;
+            dadosImportadosOcs.set(k, (dadosImportadosOcs.get(k) || 0) + 1);
+          }
         });
-        Logger.log(`   ✓ ${dadosImportadosOcs.size} OCs únicas em DADOS_IMPORTADOS`);
+        Logger.log(`   ✓ ${dadosImportadosOcs.size} pares OC+OS únicos em DADOS_IMPORTADOS`);
       } else {
         Logger.log(`   ⚠️ DADOS_IMPORTADOS vazio — proteção desabilitada nesta execução`);
       }
     } catch (eImp) {
-      Logger.log(`   ⚠️ Erro ao carregar OCs de DADOS_IMPORTADOS: ${eImp.message} — proteção desabilitada`);
+      Logger.log(`   ⚠️ Erro ao carregar OC+OS de DADOS_IMPORTADOS: ${eImp.message} — proteção desabilitada`);
     }
+    // Helper: consome 1 slot OC+OS após cada match — proporcional à quantidade na fonte
+    const _consumirOcOs_ = (ocStr, osStr) => {
+      const k = `${ocStr}|${osStr}`;
+      const c = dadosImportadosOcs.get(k);
+      if (c === undefined) return;
+      if (c <= 1) dadosImportadosOcs.delete(k);
+      else dadosImportadosOcs.set(k, c - 1);
+    };
 
     // 3) PROCESSAR
     Logger.log("\n🔄 3. PROCESSANDO");
@@ -2229,6 +2247,7 @@ function sincronizarDados() {
         const fpListId = fonteImpressoes.get(fpFonteId);
         if (fpListId) { const fi = fpListId.find(i => i.id === id); if (fi) fi.usado = true; }
         consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
+        _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
       } else {
         // SEGUNDA TENTATIVA: Buscar por CÓDIGO_FIXO (UUID imutável por item — ideia do usuário)
@@ -2267,6 +2286,7 @@ function sincronizarDados() {
           const fpList = fonteImpressoes.get(fpFonte);
           if (fpList) { const fi = fpList.find(i => i.id === novoId); if (fi) fi.usado = true; }
           consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true));
+          _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
         } else {
           // TERCEIRA TENTATIVA: Buscar por IMPRESSÃO DIGITAL (fallback para itens sem UUID ou UUID ausente)
@@ -2305,23 +2325,28 @@ function sincronizarDados() {
             // permitindo que outros DB-items com a mesma fingerprint ainda encontrem seus slots.
             fonteMap.delete(novoId);
             consumedFingerprints.add(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
+            _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
           } else {
             // NÃO ENCONTROU por ID, UUID nem fingerprint — item não está em PEDIDOS
             const ocDB = String(dbItem.row[DB_OC_COL] || '').trim();
-            Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS — OC="${ocDB}", Status="${statusAtual}"`);
+            const osDB = String(dbItem.row[10]          || '').trim(); // índice 10 = CÓD. OS no DB
+            Logger.log(`   ❌ ID="${id}" não encontrado em PEDIDOS — OC="${ocDB}" OS="${osDB}", Status="${statusAtual}"`);
 
             // PROTEÇÃO ANTI-FATURAMENTO INDEVIDO:
-            // Se o OC ainda existe em DADOS_IMPORTADOS, o item ainda está no sistema de origem.
-            // O mismatch de ID/fingerprint pode ser causado por rebuild (que zera UUIDs) ou por
-            // uma alteração de dados na fonte que mudou a fingerprint. Nesses casos NÃO deve
-            // ser marcado como Faturado — a próxima sincronização de DADOS_IMPORTADOS → PEDIDOS
-            // vai reconsolidar o ID corretamente.
-            if (dadosImportadosOcs.size > 0 && ocDB && dadosImportadosOcs.has(ocDB)) {
-              Logger.log(`   🛡️ Proteção: OC="${ocDB}" ainda em DADOS_IMPORTADOS → mismatch de ID, ignorando faturamento`);
-              continue; // Pula este item — não marca Faturado nem MARCAR_FATURAR=SIM
+            // Verifica se o par OC+OS ainda existe em DADOS_IMPORTADOS.
+            // Usar só OC era amplo demais: se uma OC tem 18 itens e 8 sumiram, os 8 ficavam
+            // bloqueados porque os outros 10 mantinham o OC presente.
+            // Com OC+OS, cada linha é identificada individualmente (OS é único por linha).
+            //   • OC+OS presente → item ainda no sistema, só ID/fingerprint mudou (rebuild/dado alterado)
+            //                      → NÃO marcar Faturado (sync vai reconsolidar na próxima rodada)
+            //   • OC+OS ausente  → item genuinamente saiu do sistema de origem → prossegue normal
+            const chaveOcOs = `${ocDB}|${osDB}`;
+            if (dadosImportadosOcs.size > 0 && dadosImportadosOcs.has(chaveOcOs)) {
+              Logger.log(`   🛡️ Proteção: OC+OS "${chaveOcOs}" ainda em DADOS_IMPORTADOS → mismatch de ID, ignorando faturamento`);
+              continue; // Pula — item existe no sistema, só o ID/fingerprint mudou
             }
-            // OC ausente de DADOS_IMPORTADOS → item genuinamente saiu do sistema de origem → prossegue
+            // OC+OS ausente de DADOS_IMPORTADOS → item saiu do sistema de origem → prossegue
 
             // FIX: Se o usuário do HTML já marcou o item para faturar (MARCAR_FATURAR=SIM),
             // o item pode ter sido fechado/removido pelo sistema de origem mas ainda não foi
