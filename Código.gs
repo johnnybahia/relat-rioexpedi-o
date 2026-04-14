@@ -2108,14 +2108,21 @@ function sincronizarDados() {
     } catch (eImp) {
       Logger.log(`   ⚠️ Erro ao carregar OC+OS de DADOS_IMPORTADOS: ${eImp.message} — proteção desabilitada`);
     }
-    // Helper: consome 1 slot OC+OS após cada match — proporcional à quantidade na fonte
-    const _consumirOcOs_ = (ocStr, osStr) => {
-      const k = `${ocStr}|${osStr}`;
-      const c = dadosImportadosOcs.get(k);
-      if (c === undefined) return;
-      if (c <= 1) dadosImportadosOcs.delete(k);
-      else dadosImportadosOcs.set(k, c - 1);
-    };
+    // Pré-computa contagem de itens ATIVOS no DB por OC+OS (independente de ordem de processamento).
+    // Comparado com dadosImportadosOcs para detectar itens em excesso no DB:
+    //   fonte >= DB ativo → todos DB-itens com este OC+OS têm correspondência possível na fonte → PROTEGE
+    //   fonte <  DB ativo → DB tem itens a mais que a fonte → o excedente é genuinamente órfão → NÃO PROTEGE
+    // Isso resolve o problema de ordem: o cálculo é feito antes do loop principal.
+    const dbActiveOcOsCount = new Map();
+    for (const [, dbi] of dbMap.entries()) {
+      const s = String(dbi.row[STATUS_COL] || '').trim();
+      if (s === 'Faturado' || s === 'Finalizado' || s === 'Excluido') continue;
+      const oc = String(dbi.row[DB_OC_COL] || '').trim();
+      const os = String(dbi.row[10] || '').trim();
+      const k = `${oc}|${os}`;
+      dbActiveOcOsCount.set(k, (dbActiveOcOsCount.get(k) || 0) + 1);
+    }
+    Logger.log(`   ✓ ${dbActiveOcOsCount.size} pares OC+OS únicos em DB (itens ativos)`);
 
     // 3) PROCESSAR
     Logger.log("\n🔄 3. PROCESSANDO");
@@ -2247,7 +2254,6 @@ function sincronizarDados() {
         const fpListId = fonteImpressoes.get(fpFonteId);
         if (fpListId) { const fi = fpListId.find(i => i.id === id); if (fi) fi.usado = true; }
         consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
-        _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
       } else {
         // SEGUNDA TENTATIVA: Buscar por CÓDIGO_FIXO (UUID imutável por item — ideia do usuário)
@@ -2286,7 +2292,6 @@ function sincronizarDados() {
           const fpList = fonteImpressoes.get(fpFonte);
           if (fpList) { const fi = fpList.find(i => i.id === novoId); if (fi) fi.usado = true; }
           consumedFingerprints.add(_criarImpressaoDigital_(dbItem.row, true));
-          _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
         } else {
           // TERCEIRA TENTATIVA: Buscar por IMPRESSÃO DIGITAL (fallback para itens sem UUID ou UUID ausente)
@@ -2325,7 +2330,6 @@ function sincronizarDados() {
             // permitindo que outros DB-items com a mesma fingerprint ainda encontrem seus slots.
             fonteMap.delete(novoId);
             consumedFingerprints.add(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
-            _consumirOcOs_(String(dbItem.row[DB_OC_COL]||'').trim(), String(dbItem.row[10]||'').trim()); // slot consumido → decrementa proteção
 
           } else {
             // NÃO ENCONTROU por ID, UUID nem fingerprint — item não está em PEDIDOS
@@ -2342,11 +2346,25 @@ function sincronizarDados() {
             //                      → NÃO marcar Faturado (sync vai reconsolidar na próxima rodada)
             //   • OC+OS ausente  → item genuinamente saiu do sistema de origem → prossegue normal
             const chaveOcOs = `${ocDB}|${osDB}`;
-            if (dadosImportadosOcs.size > 0 && dadosImportadosOcs.has(chaveOcOs)) {
-              Logger.log(`   🛡️ Proteção: OC+OS "${chaveOcOs}" ainda em DADOS_IMPORTADOS → mismatch de ID, ignorando faturamento`);
-              continue; // Pula — item existe no sistema, só o ID/fingerprint mudou
+            if (dadosImportadosOcs.size > 0) {
+              // Comparação proporcional (order-independent):
+              //   slotsOrigem  = quantas vezes OC+OS aparece em DADOS_IMPORTADOS
+              //   slotsDbAtivos = quantos itens ATIVOS no DB têm este OC+OS (pré-computado)
+              //
+              // Se fonte >= DB ativo → source tem slot para cada DB-item → possível mismatch de ID → PROTEGE
+              // Se fonte <  DB ativo → DB tem itens a mais que a fonte → item em excesso → NÃO PROTEGE
+              // Se fonte =  0       → item removido da fonte por completo → NÃO PROTEGE
+              const slotsOrigem   = dadosImportadosOcs.get(chaveOcOs) || 0;
+              const slotsDbAtivos = dbActiveOcOsCount.get(chaveOcOs)  || 0;
+              if (slotsOrigem > 0 && slotsOrigem >= slotsDbAtivos) {
+                Logger.log(`   🛡️ Proteção: OC+OS "${chaveOcOs}" fonte=${slotsOrigem} ≥ DB ativo=${slotsDbAtivos} → possível mismatch de ID, ignorando faturamento`);
+                continue; // Pula — source tem slot para este item
+              }
+              if (slotsOrigem > 0) {
+                Logger.log(`   ⚠️ OC+OS "${chaveOcOs}" fonte=${slotsOrigem} < DB ativo=${slotsDbAtivos} → item em excesso no DB, prossegue`);
+              }
             }
-            // OC+OS ausente de DADOS_IMPORTADOS → item saiu do sistema de origem → prossegue
+            // OC+OS ausente de DADOS_IMPORTADOS, ou DB excede a fonte → prossegue
 
             // FIX: Se o usuário do HTML já marcou o item para faturar (MARCAR_FATURAR=SIM),
             // o item pode ter sido fechado/removido pelo sistema de origem mas ainda não foi
