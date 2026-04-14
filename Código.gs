@@ -2352,47 +2352,54 @@ function sincronizarDados() {
             //                      → NÃO marcar Faturado (sync vai reconsolidar na próxima rodada)
             //   • OC+OS ausente  → item genuinamente saiu do sistema de origem → prossegue normal
             const chaveOcOs = `${ocDB}|${osDB}`;
+
+            // PROTEÇÃO ANTI-FATURAMENTO INDEVIDO (proporcional, sem bloquear ações do usuário):
+            // Compara contagem de slots em DADOS_IMPORTADOS vs DB ativo por OC+OS.
+            //   fonte >= DB ativo → possível mismatch de ID (rebuild) → proteção ativa
+            //   fonte <  DB ativo → item em excesso → proteção inativa (prossegue)
+            //   fonte = 0         → item saiu do sistema → proteção inativa (prossegue)
+            //
+            // A proteção NÃO bloqueia:
+            //   • MARCAR_FATURAR=SIM já setado (usuário marcou explicitamente)
+            //   • QTD=0 (baixas completas — item entregue, pode faturar)
+            //   • idsBaixados (usuário fez ao menos uma baixa — item sendo trabalhado)
+            // A proteção BLOQUEIA apenas:
+            //   • QTD>0 + sem baixas + sem marcação → possível ID-mismatch, aguarda reconsolidação
+            let protecaoAtiva = false;
             if (dadosImportadosOcs.size > 0) {
-              // Comparação proporcional (order-independent):
-              //   slotsOrigem  = quantas vezes OC+OS aparece em DADOS_IMPORTADOS
-              //   slotsDbAtivos = quantos itens ATIVOS no DB têm este OC+OS (pré-computado)
-              //
-              // Se fonte >= DB ativo → source tem slot para cada DB-item → possível mismatch de ID → PROTEGE
-              // Se fonte <  DB ativo → DB tem itens a mais que a fonte → item em excesso → NÃO PROTEGE
-              // Se fonte =  0       → item removido da fonte por completo → NÃO PROTEGE
               const slotsOrigem   = dadosImportadosOcs.get(chaveOcOs) || 0;
               const slotsDbAtivos = dbActiveOcOsCount.get(chaveOcOs)  || 0;
               if (slotsOrigem > 0 && slotsOrigem >= slotsDbAtivos) {
-                Logger.log(`   🛡️ Proteção: OC+OS "${chaveOcOs}" fonte=${slotsOrigem} ≥ DB ativo=${slotsDbAtivos} → possível mismatch de ID, ignorando faturamento`);
-                continue; // Pula — source tem slot para este item
-              }
-              if (slotsOrigem > 0) {
+                protecaoAtiva = true;
+                Logger.log(`   🛡️ Proteção: OC+OS "${chaveOcOs}" fonte=${slotsOrigem} ≥ DB ativo=${slotsDbAtivos}`);
+              } else if (slotsOrigem > 0) {
                 Logger.log(`   ⚠️ OC+OS "${chaveOcOs}" fonte=${slotsOrigem} < DB ativo=${slotsDbAtivos} → item em excesso no DB, prossegue`);
               }
             }
-            // OC+OS ausente de DADOS_IMPORTADOS, ou DB excede a fonte → prossegue
 
             // FIX: Se o usuário do HTML já marcou o item para faturar (MARCAR_FATURAR=SIM),
             // o item pode ter sido fechado/removido pelo sistema de origem mas ainda não foi
             // faturado. Manter visível e ativo para o usuário do HTML concluir o processo.
+            // SEMPRE processado, independente da proteção.
             const marcarFaturar = String(dbItem.row[MARCAR_FATURAR_COL] || '').trim().toUpperCase();
             const aguardandoNF = marcarFaturar === 'SIM';
+            const qtdAberta    = Number(dbItem.row[DB_QTD_COL] || 0);
+            const temBaixas    = idsBaixados.has(id); // usuário já processou pelo menos uma baixa
 
             if (aguardandoNF) {
-              const qtdAtual = Number(dbItem.row[DB_QTD_COL] || 0);
-              // Diagnóstico: verificar se o item ainda existe em PEDIDOS sob fingerprint diferente
+              // Usuário marcou explicitamente — respeitar SEMPRE (ignora proteção)
               const fpDB = _criarImpressaoDigital_(dbItem.row, true);
               const aindaEmPedidos = fonteImpressoes.has(fpDB) && fonteImpressoes.get(fpDB).some(i => !i.usado);
               if (aindaEmPedidos) {
                 // Item ainda existe em PEDIDOS com ID diferente — provável duplicata (ID mudou em sincronizarPedidosComFonte)
-                Logger.log(`   ⚠️ DUPLICATA: Item aguardando NF existe em PEDIDOS com ID diferente — OC="${dbItem.row[DB_OC_COL]}" QTD=${qtdAtual} ID="${id}"`);
+                Logger.log(`   ⚠️ DUPLICATA: Item aguardando NF existe em PEDIDOS com ID diferente — OC="${dbItem.row[DB_OC_COL]}" QTD=${qtdAberta} ID="${id}"`);
                 // Mantém Ativo — o item correto (novo ID) já está sendo processado neste ciclo
-              } else if (qtdAtual === 0) {
+              } else if (qtdAberta === 0) {
                 // QTD=0: baixa foi completamente registrada no HTML — seguro faturar automaticamente
                 Logger.log(`   ✋→✅ Aguardando NF + QTD=0 → baixa concluída, marcando Faturado (ID="${id}")`);
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
               } else {
-                Logger.log(`   ✋ Item aguardando NF - mantido Ativo (QTD=${qtdAtual}, ID="${id}")`);
+                Logger.log(`   ✋ Item aguardando NF - mantido Ativo (QTD=${qtdAberta}, ID="${id}")`);
                 // Re-registra o alerta — pode ter sido apagado erroneamente pelo bug do filtro invertido
                 // A deduplicação em _registrarAlertaFaturamento_ impede entradas duplicadas
                 _registrarAlertaFaturamento_({
@@ -2403,22 +2410,24 @@ function sincronizarDados() {
                   oc:         String(dbItem.row[DB_OC_COL]      || ''),
                   desc:       String(dbItem.row[DB_DESC_COL]    || ''),
                   tam:        String(dbItem.row[DB_TAM_COL]     || ''),
-                  qtdAberta:  qtdAtual,
+                  qtdAberta:  qtdAberta,
                   dataEvento: new Date().toISOString()
                 });
               }
             } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
-              // Coleta para processar depois, ordenado por QTD.ABERTA crescente.
-              // Isso garante que, entre itens idênticos (mesma OC), os totalmente
-              // baixados (QTD=0) sejam marcados Faturado silenciosamente primeiro,
-              // e os parciais (QTD>0) gerem alerta apenas se a conta bater.
-              itensFaturarPendentes.push({
-                id: id,
-                linha: dbItem.linha,
-                row: dbItem.row,
-                statusAtual: statusAtual,
-                qtdAberta: Number(dbItem.row[DB_QTD_COL] || 0)
-              });
+              if (qtdAberta === 0) {
+                // QTD=0: baixas completas → faturado independente da proteção
+                // Coleta junto com os demais para processar ordenado (QTD=0 primeiro)
+                itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
+              } else if (!protecaoAtiva || temBaixas) {
+                // QTD>0: gera alerta SE proteção inativa OU SE usuário já fez baixas (item sendo trabalhado)
+                // Coleta para processar depois, ordenado por QTD.ABERTA crescente.
+                itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: qtdAberta });
+              } else {
+                // QTD>0 + proteção ativa + sem baixas → aguarda reconsolidação de ID
+                // Não gera alerta: item provavelmente ainda ativo na fonte com ID diferente
+                Logger.log(`   ⏭️ Proteção ativa (QTD=${qtdAberta}, sem baixas) → aguarda reconsolidação — OC+OS="${chaveOcOs}"`);
+              }
             } else {
               Logger.log(`   ℹ️ Não alterado (status: ${statusAtual})`);
             }
