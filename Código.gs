@@ -1066,7 +1066,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // Isso evita que itens ganhem novos IDs após o usuário apagar PEDIDOS e o IMPORTRANGE
     // repopular só as colunas B-O (sem a coluna A que é gerenciada por script).
     const idsUsados = new Set();
-    const dbFingerprintMap = new Map(); // fingerprint → id (recuperação de ID)
+    const dbFingerprintMap = new Map(); // fingerprint → [id, ...] (array FIFO — suporta itens 100% idênticos)
     const dbCodigoFixoMap  = new Map(); // id → codigoFixo (reutilizar UUID já gravado no DB)
     const dbSheetRef = SS.getSheetByName(DB_SHEET_NAME);
     if (dbSheetRef && dbSheetRef.getLastRow() >= 2) {
@@ -1078,8 +1078,11 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         if (dbId) {
           idsUsados.add(dbId);
           const fp = _criarImpressaoDigital_(dbRow, true);
-          if (fp && !dbFingerprintMap.has(fp)) {
-            dbFingerprintMap.set(fp, dbId); // primeiro ID encontrado para este fingerprint
+          if (fp) {
+            // Array FIFO por fingerprint — para itens 100% idênticos cada um tem seu próprio slot.
+            // shift() consome um ID por vez, garantindo que cada item da fonte recupere um ID distinto.
+            if (!dbFingerprintMap.has(fp)) dbFingerprintMap.set(fp, []);
+            dbFingerprintMap.get(fp).push(dbId);
           }
           const cf = String(dbRow[DB_CODIGO_FIXO_COL] || '').trim();
           if (cf) dbCodigoFixoMap.set(dbId, cf); // UUID fixo já gravado no DB para este item
@@ -1172,7 +1175,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
           // gerar um novo — evita que itens existentes ganhem novos IDs.
           const idExistente = String(matchEscolhido.id || '').trim();
           if (!idExistente) {
-            const idRecuperado = dbFingerprintMap.get(impressao);
+            const _fpList1_ = dbFingerprintMap.get(impressao);
+            const idRecuperado = (_fpList1_ && _fpList1_.length > 0) ? _fpList1_.shift() : null;
             if (idRecuperado) {
               Logger.log(`   🔄 ID recuperado do DB para item sem ID em PEDIDOS: "${idRecuperado}"`);
               idFinal = idRecuperado;
@@ -1199,8 +1203,10 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         }
       } else {
         // NÃO TEM MATCH em PEDIDOS - pode ser item novo ou PEDIDOS estava vazio
-        // Tenta recuperar ID do DB pela fingerprint antes de gerar novo
-        const idRecuperado = dbFingerprintMap.get(impressao);
+        // Tenta recuperar ID do DB pela fingerprint antes de gerar novo.
+        // shift() consome o primeiro slot disponível — cada item idêntico pega seu próprio ID.
+        const _fpList2_ = dbFingerprintMap.get(impressao);
+        const idRecuperado = (_fpList2_ && _fpList2_.length > 0) ? _fpList2_.shift() : null;
         if (idRecuperado) {
           Logger.log(`   🔄 ID recuperado do DB (sem match em PEDIDOS): "${idRecuperado}"`);
           idFinal = idRecuperado;
