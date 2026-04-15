@@ -2195,14 +2195,27 @@ function sincronizarDados() {
         // Posição 15 é MARCAR_FATURAR na coluna P
         const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
         const cfMatch = dbItem.row[DB_CODIGO_FIXO_COL] || fonteRow[PEDIDOS_CODIGO_FIXO_COL] || '';
+
+        // Determina QTD antes de montar novaLinha para que o loop "mudou" detecte a diferença.
+        // • Sem baixas registradas → fonte é autoritativa: sincroniza QTD.ABERTA com PEDIDOS.
+        //   Cobre reduções parciais de pedido (ex: 1050→800) e aumentos que o DB não refletiu.
+        // • Com baixas → usuário está gerenciando QTD manualmente; preserva valor do DB.
+        const pedidosQtd = Number(fonteRow[QTD_COL] || 0);
+        const dbQtd      = Number(dbItem.row[DB_QTD_COL] || 0);
+        const temBaixasId = idsBaixados.has(id);
+        const qtdParaDB  = temBaixasId ? dbQtd : pedidosQtd;
+        if (!temBaixasId && pedidosQtd !== dbQtd) {
+          Logger.log(`   🔄 QTD sincronizada com fonte: ${dbQtd} → ${pedidosQtd} (sem baixas registradas, ID="${id}")`);
+        }
+
         const novaLinha = [
           fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
           fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
           fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
-          dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
+          qtdParaDB,             fonteRow[OS_COL],      fonteRow[DTREC_COL],
           fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
           dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfMatch  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: CÓDIGO_FIXO
-        ]; // QTD. ABERTA preservada do DB via DB_QTD_COL=9 (índice correto no Relatorio_DB)
+        ];
 
         let mudou = false;
         // Compara as 14 primeiras colunas (0-13), excluindo Status e MARCAR_FATURAR
@@ -2220,23 +2233,15 @@ function sincronizarDados() {
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: novoStatus, id: id });
         }
 
-        // Detecta divergência de QTD: PEDIDOS reduziu sem baixa correspondente no relatório online.
-        // Condições para alertar (ambas precisam ser verdadeiras):
-        //   1) O item tem histórico de baixa no HTML (idsBaixados) — sem isso, a diferença de QTD
-        //      provavelmente é desalinhamento de IDs causado por itens duplicados no IMPORTRANGE.
-        //   2) A fingerprint deste item é ÚNICA em PEDIDOS — se existirem múltiplos itens com a
-        //      mesma fingerprint (mesmo produto, qtds diferentes), a comparação pode estar errada.
-        const pedidosQtd   = Number(fonteRow[QTD_COL] || 0);
-        const dbQtd        = Number(dbItem.row[DB_QTD_COL] || 0);
+        // Detecta divergência de QTD quando o usuário tem baixas (sem-baixas é auto-corrigido acima).
+        // Alerta apenas quando: item tem baixas E fonte reduziu abaixo do DB E fingerprint é única.
         const fpFonte      = _criarImpressaoDigital_(fonteRow);
         const fpDuplicados = (fonteImpressoesCount.get(fpFonte) || 1) > 1;
-        if (pedidosQtd < dbQtd && statusAtual !== "Faturado" && statusAtual !== "Finalizado") {
+        if (temBaixasId && pedidosQtd < dbQtd && statusAtual !== "Faturado" && statusAtual !== "Finalizado") {
           if (fpDuplicados) {
             Logger.log(`   ⚠️ QTD difere mas fingerprint tem ${fonteImpressoesCount.get(fpFonte)} itens em PEDIDOS: ID="${id}" PEDIDOS=${pedidosQtd} DB=${dbQtd} — desalinhamento esperado entre itens duplicados, ignorado`);
-          } else if (!idsBaixados.has(id)) {
-            Logger.log(`   ℹ️ QTD difere mas sem histórico de baixa: ID="${id}" PEDIDOS=${pedidosQtd} DB=${dbQtd} — possível desalinhamento de IDs, ignorado`);
           } else {
-            Logger.log(`   ⚠️ DIVERGÊNCIA QTD: ID="${id}" PEDIDOS=${pedidosQtd} < DB=${dbQtd} — faturamento parcial sem baixa no relatório`);
+            Logger.log(`   ⚠️ DIVERGÊNCIA QTD (com baixas): ID="${id}" PEDIDOS=${pedidosQtd} < DB=${dbQtd} — fonte reduziu mas há baixas registradas`);
             _registrarAlertaFaturamento_({
               tipo: 'divergencia_qtd',
               id: id,
@@ -2275,11 +2280,19 @@ function sincronizarDados() {
           const fonteRow = fonteItemByCf.row;
           const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
 
+          const pedidosQtdCf = Number(fonteRow[QTD_COL] || 0);
+          const dbQtdCf      = Number(dbItem.row[DB_QTD_COL] || 0);
+          const temBaixasCf  = idsBaixados.has(id);
+          const qtdParaDBCf  = temBaixasCf ? dbQtdCf : pedidosQtdCf;
+          if (!temBaixasCf && pedidosQtdCf !== dbQtdCf) {
+            Logger.log(`   🔄 QTD sincronizada com fonte (UUID): ${dbQtdCf} → ${pedidosQtdCf} (sem baixas registradas, ID="${id}")`);
+          }
+
           const novaLinha = [
             novoId,                fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
             fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
-            dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
+            qtdParaDBCf,           fonteRow[OS_COL],      fonteRow[DTREC_COL],
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
             dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfDb  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: UUID preservado
           ];
@@ -2315,15 +2328,23 @@ function sincronizarDados() {
             const fonteRow = fonteItem.row;
             const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
 
+            const pedidosQtdFp = Number(fonteRow[QTD_COL] || 0);
+            const dbQtdFp      = Number(dbItem.row[DB_QTD_COL] || 0);
+            const temBaixasFp  = idsBaixados.has(id);
+            const qtdParaDBFp  = temBaixasFp ? dbQtdFp : pedidosQtdFp;
+            if (!temBaixasFp && pedidosQtdFp !== dbQtdFp) {
+              Logger.log(`   🔄 QTD sincronizada com fonte (fingerprint): ${dbQtdFp} → ${pedidosQtdFp} (sem baixas registradas, ID="${id}")`);
+            }
+
             const cfFp = dbItem.row[DB_CODIGO_FIXO_COL] || fonteRow[PEDIDOS_CODIGO_FIXO_COL] || '';
             const novaLinha = [
               novoId,                fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
               fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
               fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
-              dbItem.row[DB_QTD_COL], fonteRow[OS_COL],     fonteRow[DTREC_COL],
+              qtdParaDBFp,           fonteRow[OS_COL],      fonteRow[DTREC_COL],
               fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
               dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfFp  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: CÓDIGO_FIXO
-            ]; // QTD. ABERTA preservada do DB via DB_QTD_COL=9 (índice correto no Relatorio_DB)
+            ];
 
             const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
             novaLinha[STATUS_COL] = novoStatus;
