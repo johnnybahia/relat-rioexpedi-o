@@ -5,7 +5,13 @@
 // ====================================================
 
 // ====== CONFIGURAÇÃO ======
-const SS = SpreadsheetApp.openById("1qPJ8c7cq7qb86VJJ-iByeiaPnALOBcDPrPMeL75N2EI");
+// Lazy getter — evita chamada de API no escopo global, que impede simple triggers (onOpen) de inicializar.
+// getActiveSpreadsheet() funciona no contexto de script vinculado; openById() funciona no web app (doGet).
+let _SS = null;
+function getSpreadsheet_() {
+  if (!_SS) _SS = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.openById("1qPJ8c7cq7qb86VJJ-iByeiaPnALOBcDPrPMeL75N2EI");
+  return _SS;
+}
 const FONTE_SHEET_NAME = "PEDIDOS";
 const IMPORTRANGE_SHEET_NAME = "DADOS_IMPORTADOS"; // Nova aba intermediária
 const DB_SHEET_NAME = "Relatorio_DB";
@@ -142,10 +148,10 @@ function _toNumber_(v) {
 // ====== FUNÇÕES DE BAIXAS PARCIAIS ======
 
 function _getBaixasSheet_() {
-  let sheet = SS.getSheetByName(BAIXAS_SHEET_NAME);
+  let sheet = getSpreadsheet_().getSheetByName(BAIXAS_SHEET_NAME);
   if (!sheet) {
     Logger.log(`📝 Criando aba ${BAIXAS_SHEET_NAME}...`);
-    sheet = SS.insertSheet(BAIXAS_SHEET_NAME);
+    sheet = getSpreadsheet_().insertSheet(BAIXAS_SHEET_NAME);
     // Criar cabeçalho
     sheet.getRange(1, 1, 1, 6).setValues([[
       'ID_ITEM', 'DATA_HORA', 'QTD_BAIXADA', 'QTD_RESTANTE', 'QTD_ORIGINAL', 'USUARIO'
@@ -409,7 +415,7 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada) {
     sheet.getRange(ultimaLinha, colMap['DATA_HORA'] + 1).setValue(new Date());
 
     // Atualiza a QTD. ABERTA na planilha Relatorio_DB
-    const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
+    const dbSheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     if (dbSheet && planilhaLinha) {
       const dbHeaders = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
       const dbColMap = _getColumnIndexes_(dbHeaders);
@@ -613,7 +619,7 @@ function resetarEReprocessar() {
   Logger.log('=== RESET COMPLETO INICIADO ===');
 
   // 1. Limpa Relatorio_DB (mantém cabeçalho na linha 1)
-  const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
+  const dbSheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
   if (dbSheet && dbSheet.getLastRow() > 1) {
     dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, dbSheet.getLastColumn()).clearContent();
     SpreadsheetApp.flush();
@@ -624,7 +630,7 @@ function resetarEReprocessar() {
   limparCache();
 
   // 2. Limpa coluna A (IDs) da aba PEDIDOS para forçar regeneração com nova fórmula
-  const pedidosSheet = SS.getSheetByName(FONTE_SHEET_NAME);
+  const pedidosSheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
   if (pedidosSheet && pedidosSheet.getLastRow() >= FONTE_DATA_START_ROW) {
     const numLinhas = pedidosSheet.getLastRow() - FONTE_DATA_START_ROW + 1;
     pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, numLinhas, 1).clearContent();
@@ -649,7 +655,7 @@ function resetarEReprocessarSilencioso() {
   Logger.log('=== RESET COMPLETO INICIADO (modo silencioso) ===');
 
   // 1. Limpa Relatorio_DB (mantém cabeçalho na linha 1)
-  const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
+  const dbSheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
   if (dbSheet && dbSheet.getLastRow() > 1) {
     dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, dbSheet.getLastColumn()).clearContent();
     SpreadsheetApp.flush();
@@ -660,7 +666,7 @@ function resetarEReprocessarSilencioso() {
   limparCache();
 
   // 2. Limpa coluna A (IDs) da aba PEDIDOS para forçar regeneração com nova fórmula
-  const pedidosSheet = SS.getSheetByName(FONTE_SHEET_NAME);
+  const pedidosSheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
   if (pedidosSheet && pedidosSheet.getLastRow() >= FONTE_DATA_START_ROW) {
     const numLinhas = pedidosSheet.getLastRow() - FONTE_DATA_START_ROW + 1;
     pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, numLinhas, 1).clearContent();
@@ -689,7 +695,7 @@ function resetarEReprocessarSilencioso() {
 function gerarIDsUnicos() {
   Logger.log("=== GERANDO IDs COM SUFIXO NUMÉRICO ===");
 
-  const sheet = SS.getSheetByName(FONTE_SHEET_NAME);
+  const sheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
 
   if (!sheet) {
     Logger.log('❌ A aba "' + FONTE_SHEET_NAME + '" não foi encontrada!');
@@ -792,7 +798,7 @@ function gerarIDsUnicos() {
  */
 function verificarEGerarIDs() {
   try {
-    const sheet = SS.getSheetByName(FONTE_SHEET_NAME);
+    const sheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
     if (!sheet) return { regenerou: false, motivo: 'Aba não encontrada' };
 
     const ultimaLinha = sheet.getLastRow();
@@ -910,7 +916,7 @@ function importarDadosExternos() {
       row[COL_J] = colJDisplay[i][0]; // colJDisplay é array de 1 coluna → índice 0
     });
 
-    const destSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
+    const destSheet = getSpreadsheet_().getSheetByName(IMPORTRANGE_SHEET_NAME);
     if (!destSheet) throw new Error(`Aba "${IMPORTRANGE_SHEET_NAME}" não encontrada.`);
 
     const numCols   = dadosFiltrados[0].length;
@@ -962,7 +968,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
 
   try {
     // PASSO 1: Ler aba DADOS_IMPORTADOS (fonte com IMPORTRANGE)
-    const fonteSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
+    const fonteSheet = getSpreadsheet_().getSheetByName(IMPORTRANGE_SHEET_NAME);
     if (!fonteSheet) {
       Logger.log(`❌ Aba ${IMPORTRANGE_SHEET_NAME} não encontrada!`);
       Logger.log(`   Crie a aba e configure o IMPORTRANGE primeiro.`);
@@ -1007,7 +1013,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     Logger.log(`📥 Leu ${fonteData.length} linhas de ${IMPORTRANGE_SHEET_NAME}`);
 
     // PASSO 2: Ler aba PEDIDOS (atual com IDs)
-    const pedidosSheet = SS.getSheetByName(FONTE_SHEET_NAME);
+    const pedidosSheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
     if (!pedidosSheet) {
       Logger.log(`❌ Aba ${FONTE_SHEET_NAME} não encontrada!`);
       return { houveMudancas: false, erro: 'Aba PEDIDOS não existe' };
@@ -1068,7 +1074,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     const idsUsados = new Set();
     const dbFingerprintMap = new Map(); // fingerprint → [id, ...] (array FIFO — suporta itens 100% idênticos)
     const dbCodigoFixoMap  = new Map(); // id → codigoFixo (reutilizar UUID já gravado no DB)
-    const dbSheetRef = SS.getSheetByName(DB_SHEET_NAME);
+    const dbSheetRef = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     if (dbSheetRef && dbSheetRef.getLastRow() >= 2) {
       const numDbRows = dbSheetRef.getLastRow() - 1;
       // Lê 19 colunas (A até S) — inclui CÓDIGO_FIXO na coluna S (índice 18)
@@ -1097,7 +1103,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // Regra: uma vez encontrada, a posição NUNCA muda — mesmo que QTD seja alterada depois.
     const originalPosMap = new Map();
     try {
-      const origSheet = SS.getSheetByName(ORIGINAL_SHEET_NAME);
+      const origSheet = getSpreadsheet_().getSheetByName(ORIGINAL_SHEET_NAME);
       if (origSheet && origSheet.getLastRow() > 1) {
         const origLastRow = origSheet.getLastRow() - 1; // exclui cabeçalho
         const origData = origSheet.getRange(2, 1, origLastRow, 12).getValues();
@@ -1831,7 +1837,7 @@ function gerarIdsFaltantes() {
   Logger.clear();
   Logger.log("=== GERANDO IDs COMPOSTOS (FORMATO LEGADO) ===");
 
-  const sheet = SS.getSheetByName(FONTE_SHEET_NAME);
+  const sheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
   if (!sheet) { Logger.log("❌ Aba PEDIDOS não encontrada"); return; }
 
   const lastRow = sheet.getLastRow();
@@ -1965,8 +1971,8 @@ function sincronizarDados() {
   const startTime = Date.now();
   
   try {
-    const fonteSheet = SS.getSheetByName(FONTE_SHEET_NAME);
-    const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
+    const fonteSheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
+    const dbSheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     
     if (!fonteSheet || !dbSheet) { Logger.log("❌ Planilhas não encontradas"); return; }
     
@@ -2093,7 +2099,7 @@ function sincronizarDados() {
     // após 2 matches o count cai a 0 e o 3º item NÃO é mais protegido → faturamento correto.
     const dadosImportadosOcs = new Map(); // chave: "OC|OS" → contagem de ocorrências
     try {
-      const importSheet = SS.getSheetByName(IMPORTRANGE_SHEET_NAME);
+      const importSheet = getSpreadsheet_().getSheetByName(IMPORTRANGE_SHEET_NAME);
       if (importSheet && importSheet.getLastRow() >= FONTE_DATA_START_ROW) {
         const impLastRow = importSheet.getLastRow();
         // Col J (10) = OC, Col L (12) = OS — lê 3 colunas (J, K, L) e usa índices 0 e 2
@@ -2151,7 +2157,7 @@ function sincronizarDados() {
     // Precarrega IDs com histórico de baixas para detectar itens parcializados removidos
     const idsBaixados = new Set();
     try {
-      const baixasSheet = SS.getSheetByName(BAIXAS_SHEET_NAME);
+      const baixasSheet = getSpreadsheet_().getSheetByName(BAIXAS_SHEET_NAME);
       if (baixasSheet && baixasSheet.getLastRow() > 1) {
         const baixasIds = baixasSheet.getRange(2, 1, baixasSheet.getLastRow() - 1, 1).getValues();
         baixasIds.forEach(r => { if (r[0]) idsBaixados.add(String(r[0]).trim()); });
@@ -2694,7 +2700,7 @@ const ALERTAS_PROP_KEY = 'ALERTAS_FATURAMENTO';
  */
 function _getSenha_() {
   try {
-    const sheet = SS.getSheetByName('SENHA');
+    const sheet = getSpreadsheet_().getSheetByName('SENHA');
     if (!sheet) return null;
     const val = sheet.getRange('A2').getValue();
     return val ? String(val).trim() : null;
@@ -2761,7 +2767,7 @@ function obterAlertasPendentes() {
     const faturadosNoDb = new Set();
     const dbQtdAtual    = new Map(); // itemId → QTD atual no DB
     try {
-      const dbSheet = SS.getSheetByName(DB_SHEET_NAME);
+      const dbSheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
       if (dbSheet && dbSheet.getLastRow() > 1) {
         const dados = dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, STATUS_COL + 1).getValues();
         dados.forEach(row => {
@@ -2850,7 +2856,7 @@ function confirmarAlerta(alertaId, senhaDigitada) {
  */
 function purgarItensFinalizados() {
   const STATUS_FINAIS = new Set(['Faturado', 'Finalizado', 'Excluido']);
-  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) {
     Logger.log('ℹ️ purgarItensFinalizados: DB vazio, nada a fazer.');
     return { purgados: 0 };
@@ -2911,9 +2917,9 @@ function purgarItensFinalizados() {
  */
 function _gravarDuplicatasDebug_(rows) {
   const SHEET_NAME = 'Duplicatas_Debug';
-  let sheet = SS.getSheetByName(SHEET_NAME);
+  let sheet = getSpreadsheet_().getSheetByName(SHEET_NAME);
   if (!sheet) {
-    sheet = SS.insertSheet(SHEET_NAME);
+    sheet = getSpreadsheet_().insertSheet(SHEET_NAME);
   }
   sheet.clearContents();
 
@@ -2941,7 +2947,7 @@ function compactarDB() {
   Logger.clear();
   Logger.log("=== COMPACTAR Relatorio_DB ===");
 
-  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
   if (!sheet) { Logger.log("❌ Aba não encontrada"); return; }
 
   const lastRow = sheet.getLastRow();
@@ -3072,12 +3078,12 @@ const RELATORIO_DB_HEADERS = [
  */
 function _garantirHeadersRelatorio_DB_() {
   try {
-    let sheet = SS.getSheetByName(DB_SHEET_NAME);
+    let sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
 
     // Cria a aba se não existir
     if (!sheet) {
       Logger.log(`📝 Criando aba ${DB_SHEET_NAME}...`);
-      sheet = SS.insertSheet(DB_SHEET_NAME);
+      sheet = getSpreadsheet_().insertSheet(DB_SHEET_NAME);
     }
 
     // Verifica se a linha 1 está vazia ou sem ID_UNICO
@@ -3365,7 +3371,7 @@ function getItensForOrdCompra(ordCompraId) {
 // ====== AÇÕES (com validação de linha e batches tolerantes) ======
 function marcarFaturado(uniqueId, planilhaLinha) {
   try {
-    const sheet = SS.getSheetByName(DB_SHEET_NAME);
+    const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
     if (!sheet) throw new Error("Aba DB não encontrada");
     if (!isFinite(linhaNum) || linhaNum < 2 || linhaNum > sheet.getLastRow()) {
@@ -3394,7 +3400,7 @@ function marcarFaturado(uniqueId, planilhaLinha) {
 
 function excluirItem(uniqueId, planilhaLinha) {
   try {
-    const sheet = SS.getSheetByName(DB_SHEET_NAME);
+    const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
     if (!sheet) throw new Error("Aba DB não encontrada");
     if (!isFinite(linhaNum) || linhaNum < 2 || linhaNum > sheet.getLastRow()) {
@@ -3423,7 +3429,7 @@ function excluirItem(uniqueId, planilhaLinha) {
 
 function finalizarItem(uniqueId, planilhaLinha) {
   try {
-    const sheet = SS.getSheetByName(DB_SHEET_NAME);
+    const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
     if (!sheet) throw new Error("Aba DB não encontrada");
     if (!isFinite(linhaNum) || linhaNum < 2 || linhaNum > sheet.getLastRow()) {
@@ -3494,7 +3500,7 @@ function finalizarMultiplosItens(items) {
 
 function marcarParaFaturar(uniqueId, planilhaLinha, marcar) {
   try {
-    const sheet = SS.getSheetByName(DB_SHEET_NAME);
+    const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
 
     if (!sheet) throw new Error("Aba DB não encontrada");
@@ -3541,7 +3547,7 @@ function obterItensMarcadosParaFaturar() {
   Logger.log("🔍 INÍCIO obterItensMarcadosParaFaturar");
 
   try {
-    const sheet = SS.getSheetByName(DB_SHEET_NAME);
+    const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     if (!sheet) {
       Logger.log("❌ Aba DB não encontrada");
       return { success: false, error: "Aba DB não encontrada", items: [] };
@@ -3682,7 +3688,7 @@ function confirmarTodosAlertasMenu() {
 }
 
 function confirmarTodosAlertas() {
-  const sheet = SS.getSheetByName(DB_SHEET_NAME);
+  const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
   if (!sheet || sheet.getLastRow() < 2) {
     Logger.log('⚠️ confirmarTodosAlertas: DB vazio ou não encontrado.');
     return;
