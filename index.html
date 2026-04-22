@@ -260,6 +260,11 @@
     body.acesso-parcial #btn-etiqueta-nf,
     body.acesso-parcial #lote-floating-bar,
     body.acesso-parcial #alertaFaturamentoModal { display: none !important; }
+    /* Botões dinâmicos nas linhas da tabela */
+    body.acesso-parcial .btn-etiqueta,
+    body.acesso-parcial .btn-baixa,
+    body.acesso-parcial .checkbox-faturar,
+    body.acesso-parcial .checkbox-lote { display: none !important; }
 
     /* ===== MODAL DE LOGIN ===== */
     #loginModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); display: flex; align-items: center; justify-content: center; z-index: 99999; }
@@ -929,6 +934,7 @@
     window.ACCESS_NIVEL = null; // 'TOTAL' | 'PARCIAL' | null (não autenticado)
     let _loginCheckTimer = null;
     let _loginTimerInterval = null;
+    let _appStarted = false; // garante que carregarListaOcs/initAutoRefresh rodam uma só vez
 
     function _getSessaoLocal() {
       try {
@@ -963,13 +969,15 @@
     }
 
     function _mostrarLoginModal(expirou) {
+      // Para os timers antes de exibir o modal (evita re-disparo em loop)
+      if (_loginCheckTimer) { clearInterval(_loginCheckTimer); _loginCheckTimer = null; }
+      if (_loginTimerInterval) { clearInterval(_loginTimerInterval); _loginTimerInterval = null; }
       document.getElementById('loginModal').classList.remove('hidden');
       document.getElementById('loginExpirouMsg').style.display = expirou ? 'block' : 'none';
       document.getElementById('loginErro').style.display = 'none';
       document.getElementById('loginUsuario').value = '';
       document.getElementById('loginSenha').value = '';
       document.getElementById('loginTimer').style.display = 'none';
-      if (_loginTimerInterval) { clearInterval(_loginTimerInterval); _loginTimerInterval = null; }
       setTimeout(() => document.getElementById('loginUsuario').focus(), 120);
     }
 
@@ -1032,6 +1040,7 @@
             _aplicarNivel(result.nivel);
             _fecharLoginModal();
             _iniciarTimerSessao();
+            _iniciarApp(); // Inicia carregamento de dados SÓ após login confirmado
           } else {
             const msg = (result && result.erro) ? result.erro : 'Usuário ou senha incorretos.';
             $erro.textContent = msg;
@@ -1049,15 +1058,25 @@
         .autenticarLogin(usuario, senha);
     }
 
+    function _iniciarApp() {
+      if (_appStarted) return; // evita duplo start em re-login após expiração
+      _appStarted = true;
+      carregarListaOcs();
+      initAutoRefresh();
+      verificarAlertasFaturamento();
+    }
+
     function _initLogin() {
       if (_sessaoValida()) {
         const d = _getSessaoLocal();
         _aplicarNivel(d.nivel);
         _fecharLoginModal();
         _iniciarTimerSessao();
+        _iniciarApp(); // Sessão ainda válida: inicia o app diretamente
       } else {
         _limparSessaoLocal();
         _mostrarLoginModal(false);
+        // App NÃO inicia aqui — só após login bem-sucedido
       }
     }
     // ===== FIM SISTEMA DE LOGIN =====
@@ -4892,10 +4911,7 @@ ${gerarEtiquetaRevisao()}
 
     // ==== INICIALIZAÇÃO ====
     document.addEventListener('DOMContentLoaded', () => {
-        _initLogin();
-        carregarListaOcs();
-        initAutoRefresh();
-        verificarAlertasFaturamento();
+        _initLogin(); // carregarListaOcs/initAutoRefresh/verificarAlertasFaturamento são chamados por _iniciarApp()
     });
 
   </script>
