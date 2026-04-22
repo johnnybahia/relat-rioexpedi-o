@@ -963,6 +963,15 @@
       localStorage.removeItem('_relat_sessao_v1');
     }
 
+    // Atualiza nível/tempoSessao sem resetar loginTime (evita extensão indevida de sessão)
+    function _atualizarNivelLocal(nivel, tempoSessao) {
+      const d = _getSessaoLocal();
+      if (!d) return; // sessão já foi limpa (logout), não atualiza
+      localStorage.setItem('_relat_sessao_v1', JSON.stringify({
+        nivel: nivel, tempoSessao: tempoSessao, loginTime: d.loginTime, usuario: d.usuario
+      }));
+    }
+
     function _sessaoValida() {
       const d = _getSessaoLocal();
       if (!d) return false;
@@ -1052,13 +1061,13 @@
           google.script.run
             .withSuccessHandler(function(r) {
               if (!r || !r.success) return;
-              // Atualiza tempo de sessão se mudou em E1
-              if (r.tempoSessao !== d.tempoSessao) {
-                _salvarSessaoLocal(r.nivel, r.tempoSessao, d.usuario);
+              if (!_sessaoValida()) return; // usuário saiu enquanto aguardava resposta
+              const nivelMudou = r.nivel !== window.ACCESS_NIVEL;
+              const tempoMudou = r.tempoSessao !== d.tempoSessao;
+              if (nivelMudou || tempoMudou) {
+                _atualizarNivelLocal(r.nivel, r.tempoSessao); // preserva loginTime original
               }
-              // Se o nível mudou, aplica e re-renderiza a tabela
-              if (r.nivel !== window.ACCESS_NIVEL) {
-                _salvarSessaoLocal(r.nivel, r.tempoSessao, d.usuario);
+              if (nivelMudou) {
                 _aplicarNivel(r.nivel);
                 carregarListaOcs(true);
               }
