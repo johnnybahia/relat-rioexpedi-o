@@ -287,6 +287,11 @@
     .login-nivel-badge.total { background: #dcfce7; color: #166534; }
     .login-nivel-badge.parcial { background: #fef3c7; color: #92400e; }
     .login-timer { position: fixed; bottom: 1rem; left: 1rem; background: #1f2937; color: #9ca3af; font-size: 0.72rem; padding: 0.35rem 0.75rem; border-radius: 9999px; z-index: 5000; pointer-events: none; }
+    /* Barra de usuário no header */
+    .user-info { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+    .user-info-name { font-weight: 600; color: #1f2937; }
+    .btn-logout { padding: 0.35rem 0.75rem; background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; border-radius: 0.375rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+    .btn-logout:hover { background: #dc2626; color: white; border-color: #dc2626; }
   </style>
 </head>
 <body>
@@ -310,6 +315,11 @@
       <div class="header-meta">
         <div id="updated-at">Carregando...</div>
         <div id="stats"></div>
+      </div>
+      <div id="userInfoBar" class="user-info" style="display:none;">
+        <span>👤</span>
+        <span id="headerUsuario" class="user-info-name"></span>
+        <button class="btn-logout" onclick="_logout()">Sair</button>
       </div>
       <div class="auto-refresh-controls">
         <button id="refreshButton" title="Atualizar dados">
@@ -968,10 +978,33 @@
       }
     }
 
+    function _mostrarUserInfo(usuario) {
+      const bar = document.getElementById('userInfoBar');
+      const nome = document.getElementById('headerUsuario');
+      if (bar) bar.style.display = 'flex';
+      if (nome) nome.textContent = usuario || '';
+    }
+
+    function _ocultarUserInfo() {
+      const bar = document.getElementById('userInfoBar');
+      if (bar) bar.style.display = 'none';
+    }
+
+    function _logout() {
+      _limparSessaoLocal();
+      if (_loginCheckTimer) { clearInterval(_loginCheckTimer); _loginCheckTimer = null; }
+      if (_loginTimerInterval) { clearInterval(_loginTimerInterval); _loginTimerInterval = null; }
+      window.ACCESS_NIVEL = null;
+      document.body.classList.remove('acesso-parcial');
+      _ocultarUserInfo();
+      _mostrarLoginModal(false);
+    }
+
     function _mostrarLoginModal(expirou) {
       // Para os timers antes de exibir o modal (evita re-disparo em loop)
       if (_loginCheckTimer) { clearInterval(_loginCheckTimer); _loginCheckTimer = null; }
       if (_loginTimerInterval) { clearInterval(_loginTimerInterval); _loginTimerInterval = null; }
+      _ocultarUserInfo();
       document.getElementById('loginModal').classList.remove('hidden');
       document.getElementById('loginExpirouMsg').style.display = expirou ? 'block' : 'none';
       document.getElementById('loginErro').style.display = 'none';
@@ -1038,6 +1071,7 @@
           if (result && result.success) {
             _salvarSessaoLocal(result.nivel, result.tempoSessao, usuario);
             _aplicarNivel(result.nivel);
+            _mostrarUserInfo(usuario);
             _fecharLoginModal();
             _iniciarTimerSessao();
             _iniciarApp(); // Inicia carregamento de dados SÓ após login confirmado
@@ -1070,6 +1104,7 @@
       if (_sessaoValida()) {
         const d = _getSessaoLocal();
         _aplicarNivel(d.nivel);
+        _mostrarUserInfo(d.usuario || '');
         _fecharLoginModal();
         _iniciarTimerSessao();
         _iniciarApp(); // Sessão ainda válida: inicia o app diretamente
