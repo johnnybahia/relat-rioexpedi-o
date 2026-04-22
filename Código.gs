@@ -3717,3 +3717,54 @@ function confirmarTodosAlertas() {
 
   Logger.log(`✅ confirmarTodosAlertas: ${marcados} item(ns) marcado(s) como Faturado. Alertas limpos.`);
 }
+
+// ====== SISTEMA DE LOGIN COM NÍVEIS DE ACESSO ======
+/**
+ * Autentica usuário contra a aba CADASTRO.
+ * Col A = usuário, Col B = senha, Col C = nível (TOTAL/PARCIAL).
+ * Retorna { success, nivel, tempoSessao } ou { success: false, erro }.
+ */
+function autenticarLogin(usuario, senha) {
+  try {
+    const ss = getSpreadsheet_();
+    const sheet = ss.getSheetByName('CADASTRO');
+    if (!sheet) {
+      return { success: false, erro: 'Aba CADASTRO não encontrada. Crie a aba com os usuários.' };
+    }
+
+    // Lê tempo de sessão de E1 (padrão: 15 minutos)
+    let tempoSessao = 15;
+    try {
+      const e1 = sheet.getRange('E1').getValue();
+      const n = Number(e1);
+      if (!isNaN(n) && n > 0) tempoSessao = n;
+    } catch (e) {}
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 1) {
+      return { success: false, erro: 'Nenhum usuário cadastrado na aba CADASTRO.' };
+    }
+
+    const data = sheet.getRange(1, 1, lastRow, 3).getValues();
+    const usuarioNorm = String(usuario || '').trim().toLowerCase();
+    const senhaNorm = String(senha || '').trim();
+
+    for (const row of data) {
+      const u = String(row[0] || '').trim().toLowerCase();
+      const s = String(row[1] || '').trim();
+      const nivel = String(row[2] || '').trim().toUpperCase();
+      if (u && u === usuarioNorm && s === senhaNorm) {
+        return {
+          success: true,
+          nivel: nivel === 'PARCIAL' ? 'PARCIAL' : 'TOTAL',
+          tempoSessao: tempoSessao
+        };
+      }
+    }
+
+    return { success: false, erro: 'Usuário ou senha incorretos.' };
+  } catch (e) {
+    Logger.log('❌ autenticarLogin: ' + e.message);
+    return { success: false, erro: 'Erro ao autenticar: ' + e.message };
+  }
+}
