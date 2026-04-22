@@ -1036,15 +1036,35 @@
       _atualizarTimer();
       _loginTimerInterval = setInterval(_atualizarTimer, 10000);
 
-      // Verifica expiração a cada 30 segundos
+      // Verifica expiração e nível a cada 30 segundos
       _loginCheckTimer = setInterval(() => {
         if (!_sessaoValida()) {
           _limparSessaoLocal();
           window.ACCESS_NIVEL = null;
           document.body.classList.remove('acesso-parcial');
           _mostrarLoginModal(true);
-        } else {
-          _atualizarTimer();
+          return;
+        }
+        _atualizarTimer();
+        // Re-busca o nível na planilha para aplicar mudanças em tempo real
+        const d = _getSessaoLocal();
+        if (d && d.usuario) {
+          google.script.run
+            .withSuccessHandler(function(r) {
+              if (!r || !r.success) return;
+              // Atualiza tempo de sessão se mudou em E1
+              if (r.tempoSessao !== d.tempoSessao) {
+                _salvarSessaoLocal(r.nivel, r.tempoSessao, d.usuario);
+              }
+              // Se o nível mudou, aplica e re-renderiza a tabela
+              if (r.nivel !== window.ACCESS_NIVEL) {
+                _salvarSessaoLocal(r.nivel, r.tempoSessao, d.usuario);
+                _aplicarNivel(r.nivel);
+                carregarListaOcs(true);
+              }
+            })
+            .withFailureHandler(function() {})
+            .obterNivelUsuario(d.usuario);
         }
       }, 30000);
     }
@@ -1074,7 +1094,11 @@
             _mostrarUserInfo(usuario);
             _fecharLoginModal();
             _iniciarTimerSessao();
-            _iniciarApp(); // Inicia carregamento de dados SÓ após login confirmado
+            if (!_appStarted) {
+              _iniciarApp(); // Primeiro login: inicia tudo
+            } else {
+              carregarListaOcs(true); // Re-login: re-renderiza tabela com novo nível
+            }
           } else {
             const msg = (result && result.erro) ? result.erro : 'Usuário ou senha incorretos.';
             $erro.textContent = msg;

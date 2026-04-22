@@ -3768,3 +3768,44 @@ function autenticarLogin(usuario, senha) {
     return { success: false, erro: 'Erro ao autenticar: ' + e.message };
   }
 }
+
+/**
+ * Retorna o nível atual de um usuário sem precisar da senha.
+ * Usado para re-validação em tempo real a cada 30s.
+ */
+function obterNivelUsuario(usuario) {
+  try {
+    const ss = getSpreadsheet_();
+    const sheet = ss.getSheetByName('CADASTRO');
+    if (!sheet) return { success: false };
+
+    let tempoSessao = 15;
+    try {
+      const e1 = sheet.getRange('E1').getValue();
+      const n = Number(e1);
+      if (!isNaN(n) && n > 0) tempoSessao = n;
+    } catch (e) {}
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 1) return { success: false };
+
+    const data = sheet.getRange(1, 1, lastRow, 3).getValues();
+    const usuarioNorm = String(usuario || '').trim().toLowerCase();
+
+    for (const row of data) {
+      const u = String(row[0] || '').trim().toLowerCase();
+      const nivel = String(row[2] || '').trim().toUpperCase();
+      if (u && u === usuarioNorm) {
+        return {
+          success: true,
+          nivel: nivel === 'PARCIAL' ? 'PARCIAL' : 'TOTAL',
+          tempoSessao: tempoSessao
+        };
+      }
+    }
+    return { success: false };
+  } catch (e) {
+    Logger.log('❌ obterNivelUsuario: ' + e.message);
+    return { success: false };
+  }
+}
