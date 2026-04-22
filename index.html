@@ -963,6 +963,15 @@
       localStorage.removeItem('_relat_sessao_v1');
     }
 
+    // Atualiza nível/tempoSessao sem resetar loginTime (evita extensão indevida de sessão)
+    function _atualizarNivelLocal(nivel, tempoSessao) {
+      const d = _getSessaoLocal();
+      if (!d) return; // sessão já foi limpa (logout), não atualiza
+      localStorage.setItem('_relat_sessao_v1', JSON.stringify({
+        nivel: nivel, tempoSessao: tempoSessao, loginTime: d.loginTime, usuario: d.usuario
+      }));
+    }
+
     function _sessaoValida() {
       const d = _getSessaoLocal();
       if (!d) return false;
@@ -1036,15 +1045,35 @@
       _atualizarTimer();
       _loginTimerInterval = setInterval(_atualizarTimer, 10000);
 
-      // Verifica expiração a cada 30 segundos
+      // Verifica expiração e nível a cada 30 segundos
       _loginCheckTimer = setInterval(() => {
         if (!_sessaoValida()) {
           _limparSessaoLocal();
           window.ACCESS_NIVEL = null;
           document.body.classList.remove('acesso-parcial');
           _mostrarLoginModal(true);
-        } else {
-          _atualizarTimer();
+          return;
+        }
+        _atualizarTimer();
+        // Re-busca o nível na planilha para aplicar mudanças em tempo real
+        const d = _getSessaoLocal();
+        if (d && d.usuario) {
+          google.script.run
+            .withSuccessHandler(function(r) {
+              if (!r || !r.success) return;
+              if (!_sessaoValida()) return; // usuário saiu enquanto aguardava resposta
+              const nivelMudou = r.nivel !== window.ACCESS_NIVEL;
+              const tempoMudou = r.tempoSessao !== d.tempoSessao;
+              if (nivelMudou || tempoMudou) {
+                _atualizarNivelLocal(r.nivel, r.tempoSessao); // preserva loginTime original
+              }
+              if (nivelMudou) {
+                _aplicarNivel(r.nivel);
+                carregarListaOcs(true);
+              }
+            })
+            .withFailureHandler(function() {})
+            .obterNivelUsuario(d.usuario);
         }
       }, 30000);
     }
@@ -1074,7 +1103,11 @@
             _mostrarUserInfo(usuario);
             _fecharLoginModal();
             _iniciarTimerSessao();
-            _iniciarApp(); // Inicia carregamento de dados SÓ após login confirmado
+            if (!_appStarted) {
+              _iniciarApp(); // Primeiro login: inicia tudo
+            } else {
+              carregarListaOcs(true); // Re-login: re-renderiza tabela com novo nível
+            }
           } else {
             const msg = (result && result.erro) ? result.erro : 'Usuário ou senha incorretos.';
             $erro.textContent = msg;
