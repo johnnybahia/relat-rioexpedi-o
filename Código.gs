@@ -58,6 +58,8 @@ const PEDIDOS_CODIGO_FIXO_COL = 18; // S (coluna 19) — UUID fixo por item, ger
 const DB_CODIGO_FIXO_COL      = 18; // S (coluna 19) — mesmo UUID propagado do PEDIDOS para o Relatorio_DB
 const PEDIDOS_POSICAO_FONTE_COL = 16; // Q (coluna 17) — índice do item em DADOS_IMPORTADOS (para manter ordem original)
 const DB_POSICAO_FONTE_COL      = 17; // R (coluna 18) — posição propagada do PEDIDOS para o Relatorio_DB
+const PEDIDOS_COLX_COL          = 19; // T (coluna 20) — campo da coluna X da fonte (informação adicional da OC)
+const DB_COLX_COL               = 19; // T (coluna 20) — campo da coluna X propagado do PEDIDOS para o Relatorio_DB
 
 // ====== ABA ORIGINAL (fonte primária para ordenação dos itens dentro de cada OC) ======
 const ORIGINAL_SHEET_NAME = 'original'; // nome exato da aba
@@ -1034,7 +1036,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
 
     if (pedidosLastRow >= FONTE_DATA_START_ROW) {
       // Lê dados atuais de PEDIDOS (com ID e timestamp)
-      const pedidosNumCols = Math.max(19, pedidosSheet.getLastColumn()); // Garante até coluna S (CÓDIGO_FIXO)
+      const pedidosNumCols = Math.max(20, pedidosSheet.getLastColumn()); // Garante até coluna T (INFO_X)
       pedidosData = pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosNumCols).getValues();
 
       Logger.log(`📋 Leu ${pedidosData.length} linhas de ${FONTE_SHEET_NAME}`);
@@ -1296,7 +1298,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         // 900000+idx como fallback: mantém ordem relativa de DADOS_IMPORTADOS para itens não encontrados
       }
 
-      // Monta linha completa para PEDIDOS (A até S)
+      // Monta linha completa para PEDIDOS (A até T)
       const novaLinha = [
         idFinal,           // A: ID_UNICO
         fonteRow[0],       // B: CARTELA
@@ -1316,7 +1318,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         timestampFinal,    // P: TIMESTAMP_CRIACAO
         posicaoFonte,      // Q: POSICAO_FONTE — índice na aba "original" (fixo, nunca muda)
         '',                // R: (reservado)
-        codigoFixo         // S: CÓDIGO_FIXO — UUID imutável por item
+        codigoFixo,        // S: CÓDIGO_FIXO — UUID imutável por item
+        fonteRow[22] !== undefined ? fonteRow[22] : ''  // T: INFO_X — coluna X da fonte (informação adicional da OC)
       ];
 
       novasPedidosData.push(novaLinha);
@@ -1343,7 +1346,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       pedidosSheet.getRange(1, 20, rowsToFormat, 1).setNumberFormat(txtFmt); // T
 
       // Escreve novos dados
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 19).setValues(novasPedidosData);
+      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 20).setValues(novasPedidosData);
 
       SpreadsheetApp.flush();
 
@@ -2193,7 +2196,8 @@ function sincronizarDados() {
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
             fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               marcarFaturarAtual,
-            '',  fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '',  cfReativa   // Q: DATA_STATUS vazia ao reativar, R: POSICAO_FONTE, S: CÓDIGO_FIXO
+            '',  fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '',  cfReativa,   // Q: DATA_STATUS vazia ao reativar, R: POSICAO_FONTE, S: CÓDIGO_FIXO
+            fonteRow[PEDIDOS_COLX_COL] || ''  // T: INFO_X
           ];
           updates.push({ linha: dbItem.linha, dados: novaLinha, de: statusAtual, para: "Ativo", id: id });
           fonteMap.delete(id);
@@ -2229,7 +2233,8 @@ function sincronizarDados() {
           fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
           qtdParaDB,             fonteRow[OS_COL],      fonteRow[DTREC_COL],
           fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
-          dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfMatch  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: CÓDIGO_FIXO
+          dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfMatch,  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: CÓDIGO_FIXO
+          fonteRow[PEDIDOS_COLX_COL] || ''  // T: INFO_X
         ];
 
         let mudou = false;
@@ -2309,7 +2314,8 @@ function sincronizarDados() {
             fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
             qtdParaDBCf,           fonteRow[OS_COL],      fonteRow[DTREC_COL],
             fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
-            dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfDb  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: UUID preservado
+            dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfDb,  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: UUID preservado
+            fonteRow[PEDIDOS_COLX_COL] || ''  // T: INFO_X
           ];
 
           const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
@@ -2358,7 +2364,8 @@ function sincronizarDados() {
               fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
               qtdParaDBFp,           fonteRow[OS_COL],      fonteRow[DTREC_COL],
               fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "",                    marcarFaturarAtual,
-              dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfFp  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: CÓDIGO_FIXO
+              dbItem.row[DATA_STATUS_COL] || '', fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '', cfFp,  // Q: DATA_STATUS preservado, R: POSICAO_FONTE, S: CÓDIGO_FIXO
+              fonteRow[PEDIDOS_COLX_COL] || ''  // T: INFO_X
             ];
 
             const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
@@ -2536,14 +2543,15 @@ function sincronizarDados() {
       Logger.log(`   🆕 Novo item: ID="${id}" está em PEDIDOS mas não em Relatorio_DB - será adicionado como Ativo`);
       Logger.log(`      CARTELA="${fonteRow[CARTELA_COL]}", CLIENTE="${fonteRow[CLIENTE_COL]}", OC="${fonteRow[OC_COL]}"`);
 
-      // Array de 19 elementos: A-P dados, Q=DATA_STATUS vazio, R=reservado, S=CÓDIGO_FIXO
+      // Array de 20 elementos: A-P dados, Q=DATA_STATUS vazio, R=POSICAO_FONTE, S=CÓDIGO_FIXO, T=INFO_X
       const novaLinha = [
         fonteRow[ID_COL],      fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL],
         fonteRow[PEDIDO_COL],  fonteRow[CODCLI_COL],  fonteRow[MARFIM_COL],
         fonteRow[DESC_COL],    fonteRow[TAM_COL],     fonteRow[OC_COL],
         fonteRow[QTD_COL],     fonteRow[OS_COL],      fonteRow[DTREC_COL],
         fonteRow[DTENT_COL],   fonteRow[PRAZO_COL],   "Ativo",               "",
-        '',  fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '',  fonteRow[PEDIDOS_CODIGO_FIXO_COL] || ''  // Q: DATA_STATUS vazio, R: POSICAO_FONTE, S: CÓDIGO_FIXO
+        '',  fonteRow[PEDIDOS_POSICAO_FONTE_COL] ?? '',  fonteRow[PEDIDOS_CODIGO_FIXO_COL] || '',  // Q: DATA_STATUS vazio, R: POSICAO_FONTE, S: CÓDIGO_FIXO
+        fonteRow[PEDIDOS_COLX_COL] || ''  // T: INFO_X
       ];
       novos.push(novaLinha);
     }
@@ -3077,7 +3085,8 @@ const RELATORIO_DB_HEADERS = [
   'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR',
   'DATA_STATUS',   // Q - data em que o status foi alterado para Faturado/Finalizado/Excluido
   'POSICAO_FONTE', // R - índice do item em DADOS_IMPORTADOS (preserva ordem original)
-  'CODIGO_FIXO'    // S - UUID imutável por item
+  'CODIGO_FIXO',   // S - UUID imutável por item
+  'INFO_X'         // T - campo da coluna X da fonte (informação adicional da OC)
 ];
 
 /**
@@ -3199,7 +3208,8 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     })(),
 
     Status: getDisp('Status', 'Desconhecido'),
-    MARCAR_FATURAR: getDisp('MARCAR_FATURAR', ''), // Nova coluna para marcação de faturamento
+    MARCAR_FATURAR: getDisp('MARCAR_FATURAR', ''),
+    INFO_X: getDisp('INFO_X', ''),
     // Posição original em DADOS_IMPORTADOS — lida por índice fixo (col R = índice 17 no DB)
     posicaoFonte: (typeof row[DB_POSICAO_FONTE_COL] === 'number' && !isNaN(row[DB_POSICAO_FONTE_COL]))
       ? row[DB_POSICAO_FONTE_COL]
@@ -3219,6 +3229,7 @@ function _organizeByOC_(items) {
         ordCompraId: oc,
         ordCompra: oc,      // alias para compatibilidade com o front
         cliente: item.CLIENTE,
+        infoX: item.INFO_X || '',
         posicaoMin: item.posicaoFonte, // menor posição em DADOS_IMPORTADOS para ordenar os cards
         items: []
       };
@@ -3226,6 +3237,10 @@ function _organizeByOC_(items) {
     // mantém a menor posição entre todos os itens do grupo
     if (item.posicaoFonte < byOC[oc].posicaoMin) {
       byOC[oc].posicaoMin = item.posicaoFonte;
+    }
+    // captura o primeiro valor não-vazio de INFO_X entre os itens da OC
+    if (!byOC[oc].infoX && item.INFO_X) {
+      byOC[oc].infoX = item.INFO_X;
     }
     byOC[oc].items.push(item);
   });
