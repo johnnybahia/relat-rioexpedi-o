@@ -1019,7 +1019,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     }
 
     // Lê dados da fonte a partir da coluna B (dados começam em B, coluna A ignorada)
-    const fonteNumCols = fonteSheet.getLastColumn() - 1; // desconta coluna A
+    // Garante pelo menos 23 colunas (B→X) para cobrir fonteRow[22] = col X = INFO_X
+    const fonteNumCols = Math.max(fonteSheet.getLastColumn() - 1, 23);
     const fonteData = fonteSheet.getRange(FONTE_DATA_START_ROW, 2, fonteLastRow - FONTE_DATA_START_ROW + 1, fonteNumCols).getValues();
     Logger.log(`📥 Leu ${fonteData.length} linhas de ${IMPORTRANGE_SHEET_NAME}`);
 
@@ -2030,10 +2031,11 @@ function sincronizarDados() {
     let dbData = [];
 
     if (dbRows > 0) {
-      // Lê 19 colunas: A-S (ID até CÓDIGO_FIXO)
+      // Lê até o número real de colunas do DB (mín. 20 para cobrir INFO_X em T)
       // Status em O (índice 14), MARCAR_FATURAR em P (índice 15),
-      // DATA_STATUS em Q (índice 16), CÓDIGO_FIXO em S (índice 18)
-      dbData = dbSheet.getRange(2, 1, dbRows, 19).getValues();
+      // DATA_STATUS em Q (índice 16), CÓDIGO_FIXO em S (índice 18), INFO_X em T (índice 19)
+      const dbNumCols = Math.max(20, dbSheet.getLastColumn());
+      dbData = dbSheet.getRange(2, 1, dbRows, dbNumCols).getValues();
     }
 
     const dbMap = new Map();
@@ -2238,11 +2240,16 @@ function sincronizarDados() {
         ];
 
         let mudou = false;
-        // Compara as 14 primeiras colunas (0-13), excluindo Status e MARCAR_FATURAR
+        // Compara as 14 primeiras colunas (0-13) mais INFO_X (19), excluindo Status e MARCAR_FATURAR
         for (let i = 0; i < STATUS_COL; i++) {
           let dbVal = (dbItem.row[i] instanceof Date) ? _toISOStringSafe_(dbItem.row[i]) : dbItem.row[i];
           let novoVal = (novaLinha[i] instanceof Date) ? _toISOStringSafe_(novaLinha[i]) : novaLinha[i];
           if (dbVal != novoVal) { mudou = true; break; }
+        }
+        if (!mudou) {
+          const dbInfoX  = String(dbItem.row[DB_COLX_COL]  !== undefined ? dbItem.row[DB_COLX_COL]  : '');
+          const novInfoX = String(novaLinha[DB_COLX_COL] !== undefined ? novaLinha[DB_COLX_COL] : '');
+          if (dbInfoX !== novInfoX) mudou = true;
         }
 
         if (mudou || statusAtual === "Inativo") {
@@ -3120,6 +3127,18 @@ function _garantirHeadersRelatorio_DB_() {
       SpreadsheetApp.flush();
       Logger.log(`✅ Cabeçalhos gravados: ${RELATORIO_DB_HEADERS.join(', ')}`);
       return true; // headers foram criados/corrigidos
+    }
+
+    // Estende cabeçalhos se o DB tem menos colunas que o esperado
+    // (ex: nova coluna INFO_X adicionada a uma instalação existente)
+    const colsExistentes = primeiraLinha.filter(h => String(h).trim() !== '').length;
+    if (colsExistentes < RELATORIO_DB_HEADERS.length) {
+      const faltam = RELATORIO_DB_HEADERS.slice(colsExistentes);
+      sheet.getRange(1, colsExistentes + 1, 1, faltam.length).setValues([faltam]);
+      sheet.getRange(1, colsExistentes + 1, 1, faltam.length).setFontWeight('bold').setBackground('#f0f2f5');
+      SpreadsheetApp.flush();
+      Logger.log(`📝 Cabeçalhos estendidos: adicionado(s) [${faltam.join(', ')}] a partir da col ${colsExistentes + 1}`);
+      return true;
     }
 
     Logger.log(`✅ Cabeçalhos do ${DB_SHEET_NAME} OK (ID_UNICO encontrado)`);
