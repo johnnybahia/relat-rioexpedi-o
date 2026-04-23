@@ -4214,17 +4214,23 @@ ${gerarEtiquetaRevisao()}
 
                 console.log(`✓ ${itensMarcados.length} itens marcados para faturamento`);
 
-                // Organizar itens por OC
-                const itensPorOC = {};
+                // Agrupar por INFO_X → dentro de cada grupo, por OC
+                const gruposPorInfoX = {};
                 itensMarcados.forEach(item => {
-                    const oc = item['ORD. COMPRA'] || 'SEM OC';
-                    if (!itensPorOC[oc]) {
-                        itensPorOC[oc] = {
-                            cliente: item.CLIENTE || 'SEM CLIENTE',
-                            itens: []
-                        };
+                    const infoX = (item.INFO_X || '').trim() || '(Sem Referência)';
+                    const oc    = item['ORD. COMPRA'] || 'SEM OC';
+                    if (!gruposPorInfoX[infoX]) gruposPorInfoX[infoX] = {};
+                    if (!gruposPorInfoX[infoX][oc]) {
+                        gruposPorInfoX[infoX][oc] = { cliente: item.CLIENTE || 'SEM CLIENTE', itens: [] };
                     }
-                    itensPorOC[oc].itens.push(item);
+                    gruposPorInfoX[infoX][oc].itens.push(item);
+                });
+
+                // Ordena grupos: grupos com conteúdo real primeiro, "(Sem Referência)" por último
+                const gruposOrdenados = Object.keys(gruposPorInfoX).sort((a, b) => {
+                    if (a === '(Sem Referência)') return 1;
+                    if (b === '(Sem Referência)') return -1;
+                    return a.localeCompare(b, 'pt-BR');
                 });
 
                 // Criar janela de impressão
@@ -4266,7 +4272,10 @@ ${gerarEtiquetaRevisao()}
                             font-weight: bold;
                             color: #166534;
                         }
-                        .oc-section { page-break-inside: avoid; margin-bottom: 20px; background: #f0fdf4; padding: 8px; border: 2px solid #22c55e; border-radius: 6px; }
+                        .grupo-section { margin-bottom: 28px; }
+                        .grupo-header { background: #1e40af; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; font-size: 13px; font-weight: bold; letter-spacing: 0.3px; }
+                        .grupo-body { border: 2px solid #1e40af; border-top: none; border-radius: 0 0 6px 6px; padding: 10px; background: #f0f7ff; }
+                        .oc-section { page-break-inside: avoid; margin-bottom: 14px; background: #f0fdf4; padding: 8px; border: 2px solid #22c55e; border-radius: 6px; }
                         .oc-header { background: #dcfce7; padding: 8px; border: 2px solid #16a34a; margin-bottom: 8px; border-radius: 4px; }
                         .oc-title { font-size: 13px; font-weight: bold; margin-bottom: 4px; color: #166534; }
                         table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
@@ -4301,12 +4310,20 @@ ${gerarEtiquetaRevisao()}
                     </div>
                 `;
 
-                // Processar cada OC
-                Object.keys(itensPorOC).sort().forEach(ocNum => {
-                    const ocData = itensPorOC[ocNum];
-                    const itens = ocData.itens;
+                // Renderiza: grupo INFO_X → OCs dentro do grupo
+                gruposOrdenados.forEach(infoX => {
+                    const ocsPorGrupo = gruposPorInfoX[infoX];
+                    const ocsOrdenadas = Object.keys(ocsPorGrupo).sort();
 
-                    html += `
+                    html += `<div class="grupo-section">
+                        <div class="grupo-header">📋 ${infoX}</div>
+                        <div class="grupo-body">`;
+
+                    ocsOrdenadas.forEach(ocNum => {
+                        const ocData = ocsPorGrupo[ocNum];
+                        const itens  = ocData.itens;
+
+                        html += `
                         <div class="oc-section">
                             <div class="oc-header">
                                 <div class="oc-title">OC: ${ocNum} - ${ocData.cliente}</div>
@@ -4325,36 +4342,33 @@ ${gerarEtiquetaRevisao()}
                                         <th>Prazo</th>
                                     </tr>
                                 </thead>
-                                <tbody>
-                    `;
+                                <tbody>`;
 
-                    itens.forEach(item => {
-                        const saldo = item.SALDO || 0; // SALDO = soma das baixas
-                        const dtRecebimento = formatarData(item['DATA RECEB.']);
-                        const dtEntrega = formatarData(item['DT. ENTREGA']);
-                        const prazo = formatarPrazoDias(item.PRAZO);
-                        const codOS = item['CÓD. OS'] ?? 'N/A';
+                        itens.forEach(item => {
+                            const saldo = item.SALDO || 0;
+                            const dtRecebimento = formatarData(item['DATA RECEB.']);
+                            const dtEntrega = formatarData(item['DT. ENTREGA']);
+                            const prazo = formatarPrazoDias(item.PRAZO);
+                            const codOS = item['CÓD. OS'] ?? 'N/A';
 
-                        html += `
-                            <tr class="highlight">
-                                <td>${item.CARTELA ?? 'N/A'}</td>
-                                <td>${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
-                                <td>${item.DESCRIÇÃO ?? 'N/A'}</td>
-                                <td>${item.TAMANHO ?? 'N/A'}</td>
-                                <td style="text-align: center; font-weight: 700;">${fmtInt(saldo)}</td>
-                                <td>${codOS}</td>
-                                <td>${dtRecebimento}</td>
-                                <td>${dtEntrega}</td>
-                                <td style="text-align: center;">${prazo}</td>
-                            </tr>
-                        `;
+                            html += `
+                                <tr class="highlight">
+                                    <td>${item.CARTELA ?? 'N/A'}</td>
+                                    <td>${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
+                                    <td>${item.DESCRIÇÃO ?? 'N/A'}</td>
+                                    <td>${item.TAMANHO ?? 'N/A'}</td>
+                                    <td style="text-align:center;font-weight:700;">${fmtInt(saldo)}</td>
+                                    <td>${codOS}</td>
+                                    <td>${dtRecebimento}</td>
+                                    <td>${dtEntrega}</td>
+                                    <td style="text-align:center;">${prazo}</td>
+                                </tr>`;
+                        });
+
+                        html += `</tbody></table></div>`;
                     });
 
-                    html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
+                    html += `</div></div>`;
                 });
 
                 html += `

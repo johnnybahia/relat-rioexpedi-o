@@ -3604,9 +3604,9 @@ function obterItensMarcadosParaFaturar() {
       return { success: true, items: [] };
     }
 
-    // Força leitura de pelo menos 16 colunas (A-P)
-    const lastCol = Math.max(sheet.getLastColumn(), 16);
-    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 16)`);
+    // Força leitura de pelo menos 20 colunas (A-T) para incluir INFO_X
+    const lastCol = Math.max(sheet.getLastColumn(), 20);
+    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 20)`);
 
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     Logger.log(`📋 Headers lidos: ${headers.length} colunas`);
@@ -3670,6 +3670,7 @@ function obterItensMarcadosParaFaturar() {
             'DATA RECEB.': _fmtBR_(item['DATA RECEB.']),  // Converte Date para string
             Status: item.Status,
             MARCAR_FATURAR: item.MARCAR_FATURAR,
+            INFO_X: item.INFO_X || '',
             SALDO: saldo
           };
 
