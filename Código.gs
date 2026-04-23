@@ -923,9 +923,9 @@ function importarDadosExternos() {
     const destLastRow = destSheet.getLastRow();
     const clearRows = Math.max(destLastRow, dadosFiltrados.length);
 
-    // Limpa área anterior
+    // Limpa área anterior (garante pelo menos 24 colunas para cobrir coluna X)
     if (clearRows > 0) {
-      destSheet.getRange(1, 1, clearRows, numCols).clearContent();
+      destSheet.getRange(1, 1, clearRows, Math.max(numCols, 24)).clearContent();
     }
 
     // Formata coluna F como texto — apenas as linhas que serão escritas (não a planilha inteira)
@@ -933,6 +933,15 @@ function importarDadosExternos() {
 
     // Grava dados processados
     destSheet.getRange(1, 1, dadosFiltrados.length, numCols).setValues(dadosFiltrados);
+
+    // Copia explícita da coluna X (24) da fonte → coluna X de DADOS_IMPORTADOS
+    // Necessário pois getLastColumn() pode não detectar a coluna X se ela não tiver cabeçalho
+    const srcRowsParaX = Math.min(5000, srcLastRow);
+    if (srcRowsParaX >= 1) {
+      const colXData = sourceSheet.getRange(1, 24, srcRowsParaX, 1).getValues();
+      destSheet.getRange(1, 24, srcRowsParaX, 1).setValues(colXData);
+      Logger.log(`✅ Coluna X copiada da fonte: ${srcRowsParaX} linhas → DADOS_IMPORTADOS col X`);
+    }
 
     // Atualiza timestamp em H2 — detectado pelo guard em sincronizarPedidosComFonte()
     const ts = Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm:ss');
