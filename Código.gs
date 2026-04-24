@@ -1347,7 +1347,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       );
       pedidosSheet.getRange(1, 6,  rowsToFormat, 2).setNumberFormat(txtFmt); // F, G
       pedidosSheet.getRange(1, 12, rowsToFormat, 1).setNumberFormat(txtFmt); // L
-      pedidosSheet.getRange(1, 20, rowsToFormat, 1).setNumberFormat(txtFmt); // T
+      pedidosSheet.getRange(1, 20, rowsToFormat, 2).setNumberFormat(txtFmt); // T (INFO_X), U (LOTE)
 
       // Escreve novos dados
       pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 21).setValues(novasPedidosData);
