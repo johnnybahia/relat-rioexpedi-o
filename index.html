@@ -1964,11 +1964,12 @@ ALL_OCS_ITEMS = itemsObj;
 
         if (items.length > 0) {
             const _isParcial = window.ACCESS_NIVEL === 'PARCIAL';
-            const _acoesHeader = _isParcial ? '' : '<th title="Selecionar para lote de etiquetas">📦 Lote</th><th>Ações</th>';
+            const _acoesHeader = _isParcial ? '' : '<th title="Selecionar para lote de etiquetas" style="font-size:0.75em;line-height:1.2;">📦 Etiquetas<br>em lote</th><th>Ações</th>';
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
                             <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
                             <th>Tamanho</th><th>Qtd. Original</th><th class="qtd-aberta">Qtd. Aberta</th><th>OS</th>
                             <th>Dt. Recebimento</th><th>Dt. Entrega</th><th class="status-prazo">Prazo</th>
+                            <th>Lote</th>
                             ${_acoesHeader}</tr></thead><tbody>`;
 
             items.forEach(item => {
@@ -1994,7 +1995,8 @@ ALL_OCS_ITEMS = itemsObj;
                         <td class="nowrap">${item['CÓD. OS'] ?? 'N/A'}</td>
                         <td class="nowrap">${formatarData(item['DATA RECEB.'])}</td>
                         <td class="nowrap">${formatarData(item['DT. ENTREGA'])}</td>
-                        <td class="status-prazo nowrap">${formatarPrazoDias(item.PRAZO)}</td>`;
+                        <td class="status-prazo nowrap">${formatarPrazoDias(item.PRAZO)}</td>
+                        <td class="nowrap">${item.LOTE ?? ''}</td>`;
 
                 if (!_isParcial) {
                     bodyHtml += `<td class="nowrap" style="text-align:center;">
@@ -3053,9 +3055,9 @@ ALL_OCS_ITEMS = itemsObj;
         $etiquetaQtdOriginal.textContent = fmtInt(qtdOriginal);
         $etiquetaTotalDisponivel.textContent = fmtInt(qtdOriginal);
 
-        // Limpa campos
+        // Pré-preenche lote com o valor da planilha (editável pelo usuário)
         $etiquetaObs.value = '';
-        document.getElementById('etiqueta-lote').value = '';
+        document.getElementById('etiqueta-lote').value = item.LOTE || '';
 
         // Adiciona primeira etiqueta automaticamente
         adicionarEtiqueta();
@@ -3207,7 +3209,9 @@ ALL_OCS_ITEMS = itemsObj;
             }
         });
         document.getElementById('lote-obs').value = '';
-        document.getElementById('lote-lote-produto').value = '';
+        // Pré-preenche lote: usa o valor comum se todos os itens tiverem o mesmo, senão deixa vazio
+        const lotesUnicos = [...new Set(loteItens.map(e => (e.item.LOTE || '').trim()).filter(v => v))];
+        document.getElementById('lote-lote-produto').value = lotesUnicos.length === 1 ? lotesUnicos[0] : '';
         renderizarItensLote();
         document.getElementById('loteModal').classList.remove('hidden');
         document.getElementById('lote-floating-bar').style.display = 'none';
