@@ -1617,8 +1617,10 @@
                     const primeiroLoad = ALL_OCS_INFO.length === 0;
 
                     ALL_OCS_INFO = (response.ordCompras || []).map(oc => ({
-                      ordCompra: oc.ordCompraId,     // front usa "ordCompra"
-                      cliente: oc.cliente
+                      ordCompra:  oc.ordCompraId,
+                      cliente:    oc.cliente,
+                      infoX:      oc.infoX      || '',
+                      posicaoMin: oc.posicaoMin  ?? 999999
                     }));
 
                     // Detecta e notifica novas OCs (apenas no auto-refresh, não na carga inicial)
