@@ -491,11 +491,8 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa) {
     // Registra no histórico
     const resultHistorico = registrarBaixa(uniqueId, qtdBaixa, novaQtd);
 
-    // Se zerou, marca como Faturado
-    if (novaQtd === 0 && statusCol !== undefined) {
-      sheet.getRange(linhaNum, statusCol + 1).setValue("Faturado");
-      Logger.log(`✅ Item ${uniqueId} zerado e marcado como Faturado`);
-    }
+    // Baixa não altera status — Faturado é definido apenas pela sincronização
+    // quando o item desaparece do PEDIDOS/fonte (sincronizarDados).
 
     SpreadsheetApp.flush();
     limparCache();

@@ -3549,23 +3549,39 @@ ALL_OCS_ITEMS = itemsObj;
 </div>`;
         });
 
-        // Etiqueta mestra LOTE
-        const osText = osCodes.join(' | ') || 'N/A';
-        let totaisHtml = '';
-        if (totalPares > 0) totaisHtml += `${fmtInt(totalPares)} Pares`;
-        if (totalPares > 0 && totalMetros > 0) totaisHtml += '  /  ';
-        if (totalMetros > 0) totaisHtml += `${fmtInt(totalMetros)} m`;
-
-        html += `
-<div class="etiqueta-lote">
-    <div class="dados">
-        <div class="lote-titulo">LOTE</div>
-        <div class="lote-os">
-            <span class="lote-os-label">OS</span>
-            ${osText}
-        </div>
-        <div class="lote-totais">${totaisHtml || 'N/A'}</div>
+        // Etiqueta mestra LOTE — para todos os clientes
+        {
+            let _totalSoma = 0;
+            const _linhasTabela = [];
+            loteItens.forEach(entry => {
+                entry.etiquetas.forEach(etiq => {
+                    const qty = parseInt(etiq.quantidade) || 0;
+                    if (qty <= 0) return;
+                    _totalSoma += qty;
+                    _linhasTabela.push(`<tr>
+                        <td style="border:1px solid #000;padding:0.4mm 1mm;text-align:center;">${entry.item['CÓD. CLIENTE'] || 'N/A'}</td>
+                        <td style="border:1px solid #000;padding:0.4mm 1mm;text-align:center;">${entry.item.TAMANHO || 'N/A'}</td>
+                        <td style="border:1px solid #000;padding:0.4mm 1mm;text-align:center;">${fmtInt(qty)}</td>
+                    </tr>`);
+                });
+            });
+            const _loteValor = loteProduto || osCodes.join(' | ') || 'N/A';
+            html += `
+<div class="etiqueta-lote" style="justify-content:flex-start;padding:3mm;">
+    <div style="font-size:18px;font-weight:900;text-align:center;letter-spacing:3mm;border-bottom:2px solid #000;padding-bottom:1.5mm;margin-bottom:1.5mm;">LOTE</div>
+    <div style="font-size:12px;font-weight:900;text-align:center;margin-bottom:1.5mm;">
+        <span style="font-size:8px;font-weight:700;display:block;color:#555;margin-bottom:0.5mm;">LOTE</span>
+        ${_loteValor}
     </div>
+    <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:1.5mm;">
+        <thead><tr>
+            <th style="background:#000;color:#fff;font-size:8px;border:1px solid #000;padding:0.4mm 1mm;">Cód. Cliente</th>
+            <th style="background:#000;color:#fff;font-size:8px;border:1px solid #000;padding:0.4mm 1mm;">Tamanho</th>
+            <th style="background:#000;color:#fff;font-size:8px;border:1px solid #000;padding:0.4mm 1mm;">Qtd</th>
+        </tr></thead>
+        <tbody>${_linhasTabela.join('')}</tbody>
+    </table>
+    <div style="font-size:11px;font-weight:900;text-align:center;border:2px solid #000;padding:1mm 2mm;margin-bottom:auto;">TOTAL ${fmtInt(_totalSoma)}</div>
     <div class="footer">
         <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
         <div class="footer-text">
@@ -3574,7 +3590,9 @@ ALL_OCS_ITEMS = itemsObj;
             <div>CNPJ: 19.542.918/0001-90</div>
         </div>
     </div>
-</div>
+</div>`;
+        }
+        html += `
 </body>
 </html>`;
 
