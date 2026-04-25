@@ -5065,7 +5065,7 @@ ALL_OCS_ITEMS = itemsObj;
         </div>`;
     }
 
-    document.getElementById('btn-cadastro-revisao').addEventListener('click', () => {
+    (document.getElementById('btn-cadastro-revisao') || {addEventListener:()=>{}}).addEventListener('click', () => {
         renderizarListaRevisores();
         document.getElementById('revisaoModal').classList.remove('hidden');
         setTimeout(() => document.getElementById('revisao-nome-input').focus(), 100);
@@ -5118,16 +5118,18 @@ ALL_OCS_ITEMS = itemsObj;
         renderizarListaConferentes();
     }
 
-    document.getElementById('btn-cadastro-conferentes').addEventListener('click', () => {
+    (document.getElementById('btn-cadastro-conferentes') || {addEventListener:()=>{}}).addEventListener('click', () => {
         renderizarListaConferentes();
         document.getElementById('conferentesModal').classList.remove('hidden');
         setTimeout(() => document.getElementById('conferentes-nome-input').focus(), 100);
     });
 
     // ==== INICIALIZAÇÃO ====
-    document.addEventListener('DOMContentLoaded', () => {
-        _initLogin(); // carregarListaOcs/initAutoRefresh/verificarAlertasFaturamento são chamados por _iniciarApp()
-    });
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => { _initLogin(); });
+    } else {
+        _initLogin(); // DOM já pronto (script carregado ao final do body)
+    }
 
   </script>
 </body>
