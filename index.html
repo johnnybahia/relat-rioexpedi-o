@@ -258,6 +258,7 @@
     body.acesso-parcial #btn-relatorio-producao,
     body.acesso-parcial #btn-relatorio-faturamento,
     body.acesso-parcial #btn-cadastro-revisao,
+    body.acesso-parcial #btn-cadastro-conferentes,
     body.acesso-parcial #btn-etiqueta-nf,
     body.acesso-parcial #lote-floating-bar,
     body.acesso-parcial #alertaFaturamentoModal { display: none !important; }
@@ -391,6 +392,9 @@
         </button>
         <button id="btn-cadastro-revisao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #7c3aed; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
           ✅ Cadastro Revisão
+        </button>
+        <button id="btn-cadastro-conferentes" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #0891b2; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+          📋 Cadastro Conferentes
         </button>
       </div>
 
@@ -824,6 +828,36 @@
       </div>
       <div class="modal-footer">
         <button onclick="document.getElementById('revisaoModal').classList.add('hidden')" class="modal-btn modal-btn-cancel">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MODAL CADASTRO CONFERENTES ===== -->
+  <div id="conferentesModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h2>📋 Cadastro Conferentes</h2>
+      </div>
+      <div class="modal-body">
+        <p style="color:#374151; font-size:0.875rem; margin:0 0 1rem 0;">
+          Os nomes cadastrados aqui serão impressos na seção <strong>"CONFERIDO"</strong>
+          da etiqueta de revisão, com uma caixa ao lado de cada nome para conferência manual.
+        </p>
+        <div style="display:flex; gap:0.5rem; margin-bottom:1rem;">
+          <input type="text" id="conferentes-nome-input" placeholder="Nome do conferente..."
+            style="flex:1; padding:0.6rem 0.75rem; border:2px solid #d1d5db; border-radius:6px; font-size:0.875rem;"
+            onkeydown="if(event.key==='Enter') adicionarConferente()" />
+          <button onclick="adicionarConferente()"
+            style="padding:0.6rem 1rem; background:#0891b2; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:600; font-size:0.875rem;">
+            + Adicionar
+          </button>
+        </div>
+        <div id="conferentes-lista" style="display:flex; flex-direction:column; gap:0.5rem; min-height:60px;">
+          <p style="color:#9ca3af; font-size:0.85rem; text-align:center; padding:1rem 0;">Nenhum conferente cadastrado.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button onclick="document.getElementById('conferentesModal').classList.add('hidden')" class="modal-btn modal-btn-cancel">Fechar</button>
       </div>
     </div>
   </div>
@@ -3502,6 +3536,7 @@ ALL_OCS_ITEMS = itemsObj;
         </div>
     </div>
 </div>`;
+                html += gerarEtiquetaRevisao();
             });
         });
 
@@ -3540,7 +3575,6 @@ ALL_OCS_ITEMS = itemsObj;
         </div>
     </div>
 </div>
-${gerarEtiquetaRevisao()}
 </body>
 </html>`;
 
@@ -3728,6 +3762,7 @@ ${gerarEtiquetaRevisao()}
                 <div class="dilly-item-qtd">${fmtInt(etiq.quantidade)}</div>
                 <div class="dilly-item-ocdes">${currentEtiquetaOC} — ${descricao}</div>
             </div>`;
+                html += gerarEtiquetaRevisao();
             });
 
         } else {
@@ -3783,11 +3818,9 @@ ${gerarEtiquetaRevisao()}
                     </div>
                 </div>
             </div>`;
+                html += gerarEtiquetaRevisao();
             });
         }
-
-        // Etiqueta extra de revisão (se houver revisores cadastrados)
-        html += gerarEtiquetaRevisao();
 
         html += `
         </body>
@@ -5006,20 +5039,29 @@ ${gerarEtiquetaRevisao()}
     }
 
     function gerarEtiquetaRevisao() {
-        const revisores = _getRevisores();
-        if (revisores.length === 0) return '';
-        const linhas = revisores.map(nome =>
+        const revisores   = _getRevisores();
+        const conferentes = _getConferentes();
+        if (revisores.length === 0 && conferentes.length === 0) return '';
+        const mkLinhas = nomes => nomes.map(nome =>
             `<div style="display:flex; align-items:center; gap:3mm; margin-bottom:1.5mm;">
                 <div style="width:4mm; height:4mm; border:1.5px solid #000; flex-shrink:0;"></div>
                 <span style="font-size:11px;">${nome}</span>
             </div>`
         ).join('');
-        return `
-        <div class="etiqueta" style="display:flex; flex-direction:column; justify-content:flex-start; padding:3mm;">
+        const secaoRevisores = revisores.length > 0 ? `
             <div style="font-size:14px; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1.5mm; margin-bottom:2.5mm; letter-spacing:0.05em;">
                 ✅ REVISADO
             </div>
-            ${linhas}
+            ${mkLinhas(revisores)}` : '';
+        const secaoConferentes = conferentes.length > 0 ? `
+            <div style="font-size:12px; font-weight:900; text-align:center; border-bottom:1.5px solid #555; padding-bottom:1mm; margin-bottom:2mm;${revisores.length > 0 ? ' margin-top:2mm;' : ''} letter-spacing:0.05em;">
+                CONFERIDO
+            </div>
+            ${mkLinhas(conferentes)}` : '';
+        return `
+        <div class="etiqueta" style="display:flex; flex-direction:column; justify-content:flex-start; padding:3mm;">
+            ${secaoRevisores}
+            ${secaoConferentes}
         </div>`;
     }
 
@@ -5027,6 +5069,59 @@ ${gerarEtiquetaRevisao()}
         renderizarListaRevisores();
         document.getElementById('revisaoModal').classList.remove('hidden');
         setTimeout(() => document.getElementById('revisao-nome-input').focus(), 100);
+    });
+
+    // ==== CADASTRO CONFERENTES ====
+    const CONFERENTES_KEY = 'cadastroConferentes_nomes';
+
+    function _getConferentes() {
+        try { return JSON.parse(localStorage.getItem(CONFERENTES_KEY) || '[]'); }
+        catch(e) { return []; }
+    }
+    function _saveConferentes(lista) {
+        localStorage.setItem(CONFERENTES_KEY, JSON.stringify(lista));
+    }
+
+    function renderizarListaConferentes() {
+        const lista = _getConferentes();
+        const container = document.getElementById('conferentes-lista');
+        if (!container) return;
+        if (lista.length === 0) {
+            container.innerHTML = '<p style="color:#9ca3af; font-size:0.85rem; text-align:center; padding:1rem 0;">Nenhum conferente cadastrado.</p>';
+            return;
+        }
+        container.innerHTML = lista.map((nome, i) => `
+            <div style="display:flex; align-items:center; gap:0.5rem; padding:0.5rem 0.75rem; background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px;">
+                <span style="flex:1; font-size:0.875rem; color:#374151;">${nome}</span>
+                <button onclick="removerConferente(${i})"
+                    style="padding:0.25rem 0.5rem; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.75rem; font-weight:700;">✕</button>
+            </div>`).join('');
+    }
+
+    function adicionarConferente() {
+        const inp = document.getElementById('conferentes-nome-input');
+        const nome = (inp.value || '').trim();
+        if (!nome) return;
+        const lista = _getConferentes();
+        if (!lista.includes(nome)) {
+            lista.push(nome);
+            _saveConferentes(lista);
+        }
+        inp.value = '';
+        renderizarListaConferentes();
+    }
+
+    function removerConferente(idx) {
+        const lista = _getConferentes();
+        lista.splice(idx, 1);
+        _saveConferentes(lista);
+        renderizarListaConferentes();
+    }
+
+    document.getElementById('btn-cadastro-conferentes').addEventListener('click', () => {
+        renderizarListaConferentes();
+        document.getElementById('conferentesModal').classList.remove('hidden');
+        setTimeout(() => document.getElementById('conferentes-nome-input').focus(), 100);
     });
 
     // ==== INICIALIZAÇÃO ====
