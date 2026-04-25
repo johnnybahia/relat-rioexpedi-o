@@ -3549,9 +3549,8 @@ ALL_OCS_ITEMS = itemsObj;
 </div>`;
         });
 
-        // Etiqueta mestra LOTE — apenas para clientes Dilly
-        const _loteIsDilly = loteItens.some(e => (e.cliente || '').toUpperCase().includes('DILLY'));
-        if (_loteIsDilly) {
+        // Etiqueta mestra LOTE — para todos os clientes
+        {
             let _totalSoma = 0;
             const _linhasTabela = [];
             loteItens.forEach(entry => {
