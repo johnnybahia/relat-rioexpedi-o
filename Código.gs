@@ -175,12 +175,12 @@ function _getBaixasSheet_() {
   return sheet;
 }
 
-function registrarBaixa(uniqueId, qtdBaixada, qtdRestante) {
+function registrarBaixa(uniqueId, qtdBaixada, qtdRestante, usuarioHtml) {
   try {
     Logger.log(`📦 Registrando baixa para ID: "${uniqueId}"`);
     const sheet = _getBaixasSheet_();
     const now = new Date();
-    const usuario = Session.getActiveUser().getEmail() || 'Sistema';
+    const usuario = (usuarioHtml && String(usuarioHtml).trim()) ? String(usuarioHtml).trim() : (Session.getActiveUser().getEmail() || 'Sistema');
 
     const numCols = sheet.getLastColumn();
 
@@ -366,7 +366,7 @@ function obterHistoricoBaixas(uniqueId) {
   }
 }
 
-function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada) {
+function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada, usuarioHtml) {
   try {
     const sheet = _getBaixasSheet_();
     const lastRow = sheet.getLastRow();
@@ -417,6 +417,9 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada) {
     sheet.getRange(ultimaLinha, colMap['QTD_BAIXADA'] + 1).setValue(novaQtdBaixada);
     sheet.getRange(ultimaLinha, colMap['QTD_RESTANTE'] + 1).setValue(novaQtdRestante);
     sheet.getRange(ultimaLinha, colMap['DATA_HORA'] + 1).setValue(new Date());
+    if (usuarioHtml && colMap['USUARIO'] !== undefined) {
+      sheet.getRange(ultimaLinha, colMap['USUARIO'] + 1).setValue(String(usuarioHtml).trim());
+    }
 
     // Atualiza a QTD. ABERTA na planilha Relatorio_DB
     const dbSheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
@@ -448,7 +451,7 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada) {
   }
 }
 
-function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa) {
+function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa, usuarioHtml) {
   try {
     // Abre fresh para evitar leitura em cache de container do Apps Script
     const ssLive = SpreadsheetApp.openById("1qPJ8c7cq7qb86VJJ-iByeiaPnALOBcDPrPMeL75N2EI");
@@ -489,7 +492,7 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa) {
     sheet.getRange(linhaNum, qtdCol + 1).setValue(novaQtd);
 
     // Registra no histórico
-    const resultHistorico = registrarBaixa(uniqueId, qtdBaixa, novaQtd);
+    const resultHistorico = registrarBaixa(uniqueId, qtdBaixa, novaQtd, usuarioHtml);
 
     // Baixa não altera status — Faturado é definido apenas pela sincronização
     // quando o item desaparece do PEDIDOS/fonte (sincronizarDados).

@@ -2833,7 +2833,7 @@ ALL_OCS_ITEMS = itemsObj;
                 $salvarEdicaoBtn.disabled = false;
                 $salvarEdicaoBtn.textContent = 'Salvar';
             })
-            .editarUltimaBaixa(currentBaixaItem.uniqueId, currentBaixaItem.planilhaLinha, novaQtdBaixada);
+            .editarUltimaBaixa(currentBaixaItem.uniqueId, currentBaixaItem.planilhaLinha, novaQtdBaixada, (_getSessaoLocal() || {}).usuario || '');
     }
 
     function aplicarNovaBaixa() {
@@ -2941,7 +2941,7 @@ ALL_OCS_ITEMS = itemsObj;
                 $baixaConfirmBtn.disabled = false;
                 $baixaConfirmBtn.textContent = 'Adicionar Baixa';
             })
-            .aplicarBaixa(currentBaixaItem.uniqueId, currentBaixaItem.planilhaLinha, qtdBaixa);
+            .aplicarBaixa(currentBaixaItem.uniqueId, currentBaixaItem.planilhaLinha, qtdBaixa, (_getSessaoLocal() || {}).usuario || '');
     }
 
     // ==== NAVEGAÇÃO POR TECLADO ====
@@ -3399,7 +3399,7 @@ ALL_OCS_ITEMS = itemsObj;
         }
         .etiqueta-lote {
             width: 100mm; height: 50mm; padding: 2mm;
-            page-break-after: auto;
+            page-break-after: always;
             display: flex; flex-direction: column; justify-content: space-between;
             border: 1px solid #000;
         }
@@ -3657,9 +3657,7 @@ ALL_OCS_ITEMS = itemsObj;
                     justify-content: space-between;
                     border: 1px solid #000;
                 }
-                .etiqueta:last-child {
-                    page-break-after: auto;
-                }
+
                 .dados {
                     flex: 1;
                     display: flex;
@@ -4630,9 +4628,6 @@ ALL_OCS_ITEMS = itemsObj;
                     flex-direction: column;
                     justify-content: space-between;
                     border: 1px solid #000;
-                }
-                .etiqueta:last-child {
-                    page-break-after: auto;
                 }
                 .conteudo {
                     flex: 1;
