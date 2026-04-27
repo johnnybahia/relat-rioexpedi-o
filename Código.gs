@@ -3869,3 +3869,31 @@ function obterNivelUsuario(usuario) {
     return { success: false };
   }
 }
+
+/**
+ * Registra login/logout/expiração na aba Log_Acessos.
+ * Cria a aba e o cabeçalho automaticamente se não existirem.
+ * tipo: 'LOGIN' | 'LOGOUT' | 'EXPIROU'
+ */
+function registrarAcesso(usuario, tipo) {
+  try {
+    const ss = getSpreadsheet_();
+    const ABA = 'Log_Acessos';
+    let sheet = ss.getSheetByName(ABA);
+
+    if (!sheet) {
+      sheet = ss.insertSheet(ABA);
+      sheet.getRange(1, 1, 1, 3).setValues([['DATA/HORA', 'USUÁRIO', 'TIPO']]);
+      sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+      sheet.setColumnWidth(1, 160);
+      sheet.setColumnWidth(2, 140);
+      sheet.setColumnWidth(3, 90);
+    }
+
+    const ts = Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm:ss');
+    sheet.appendRow([ts, String(usuario || '').trim(), String(tipo || '').trim().toUpperCase()]);
+  } catch (e) {
+    Logger.log('❌ registrarAcesso: ' + e.message);
+  }
+}

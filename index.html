@@ -1035,6 +1035,10 @@
     }
 
     function _logout() {
+      const _sessaoLogout = _getSessaoLocal();
+      if (_sessaoLogout && _sessaoLogout.usuario) {
+        google.script.run.registrarAcesso(_sessaoLogout.usuario, 'LOGOUT');
+      }
       _limparSessaoLocal();
       if (_loginCheckTimer) { clearInterval(_loginCheckTimer); _loginCheckTimer = null; }
       if (_loginTimerInterval) { clearInterval(_loginTimerInterval); _loginTimerInterval = null; }
@@ -1083,6 +1087,10 @@
       // Verifica expiração e nível a cada 30 segundos
       _loginCheckTimer = setInterval(() => {
         if (!_sessaoValida()) {
+          const _sessaoExp = _getSessaoLocal();
+          if (_sessaoExp && _sessaoExp.usuario) {
+            google.script.run.registrarAcesso(_sessaoExp.usuario, 'EXPIROU');
+          }
           _limparSessaoLocal();
           window.ACCESS_NIVEL = null;
           document.body.classList.remove('acesso-parcial');
@@ -1138,6 +1146,7 @@
             _mostrarUserInfo(usuario);
             _fecharLoginModal();
             _iniciarTimerSessao();
+            google.script.run.registrarAcesso(usuario, 'LOGIN');
             if (!_appStarted) {
               _iniciarApp(); // Primeiro login: inicia tudo
             } else {
