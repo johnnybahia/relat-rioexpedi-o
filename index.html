@@ -3429,7 +3429,7 @@ ALL_OCS_ITEMS = itemsObj;
         }
         .etiqueta-lote {
             width: 100mm; height: 50mm; padding: 2mm;
-            page-break-after: always;
+            page-break-after: always; break-after: page;
             display: flex; flex-direction: column; justify-content: space-between;
             border: 1px solid #000;
         }
@@ -3468,7 +3468,7 @@ ALL_OCS_ITEMS = itemsObj;
         .lote-totais { font-size: 18px; font-weight: 900; text-align: center; margin-top: 1.5mm; }
         .etiqueta-cliente {
             width: 100mm; height: 50mm; padding: 3mm;
-            page-break-after: always;
+            page-break-after: always; break-after: page;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
             border: 1px solid #000;
         }
@@ -3682,6 +3682,7 @@ ALL_OCS_ITEMS = itemsObj;
                     height: 50mm;
                     padding: 2mm;
                     page-break-after: always;
+                    break-after: page;
                     display: flex;
                     flex-direction: column;
                     justify-content: space-between;
@@ -4670,6 +4671,7 @@ ALL_OCS_ITEMS = itemsObj;
                     height: 50mm;
                     padding: 2mm;
                     page-break-after: always;
+                    break-after: page;
                     display: flex;
                     flex-direction: column;
                     justify-content: space-between;
@@ -5102,35 +5104,51 @@ ALL_OCS_ITEMS = itemsObj;
         const conferentes = _getConferentes();
         if (revisores.length === 0 && conferentes.length === 0) return '';
 
-        const totalNomes = revisores.length + conferentes.length;
-        const cols  = totalNomes <= 5 ? 1 : totalNomes <= 10 ? 2 : 3;
-        const fs    = totalNomes <= 5 ? '11px' : totalNomes <= 10 ? '10px' : '8.5px';
-        const fsHdr = totalNomes <= 5 ? '13px' : totalNomes <= 10 ? '11px' : '10px';
-        const chk   = totalNomes <= 5 ? '4mm' : '3.5mm';
-        const mb    = totalNomes <= 5 ? '1.5mm' : '1mm';
-        const colStyle = cols > 1
-            ? `column-count:${cols}; column-gap:3mm; column-fill:auto;`
-            : '';
+        const hasBoth = revisores.length > 0 && conferentes.length > 0;
+        const maxLen  = Math.max(revisores.length, conferentes.length);
+
+        const fs    = maxLen <= 5 ? '11px' : maxLen <= 8 ? '10px' : '8.5px';
+        const fsHdr = maxLen <= 5 ? '13px' : maxLen <= 8 ? '11px' : '10px';
+        const chk   = maxLen <= 5 ? '4mm'  : '3.5mm';
+        const mb    = maxLen <= 5 ? '1.5mm': '1mm';
 
         const mkLinhas = nomes => nomes.map(nome =>
-            `<div style="display:flex; align-items:center; gap:1.5mm; margin-bottom:${mb}; break-inside:avoid; -webkit-column-break-inside:avoid; overflow:hidden;">
+            `<div style="display:flex; align-items:center; gap:1.5mm; margin-bottom:${mb}; overflow:hidden;">
                 <div style="width:${chk}; height:${chk}; border:1.5px solid #000; flex-shrink:0; min-width:${chk};"></div>
                 <span style="font-size:${fs}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${nome}</span>
             </div>`
         ).join('');
 
-        const secaoRevisores = revisores.length > 0 ? `
-            <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1mm; margin-bottom:1.5mm;">&#x2705; REVISADO</div>
-            <div style="${colStyle}">${mkLinhas(revisores)}</div>` : '';
-
-        const secaoConferentes = conferentes.length > 0 ? `
-            <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:1.5px solid #555; padding-bottom:1mm; margin-bottom:1.5mm;${revisores.length > 0 ? ' margin-top:2mm;' : ''}">CONFERIDO</div>
-            <div style="${colStyle}">${mkLinhas(conferentes)}</div>` : '';
+        let inner;
+        if (hasBoth) {
+            inner = `
+            <div style="display:flex; flex:1; gap:3mm; overflow:hidden;">
+                <div style="flex:1; overflow:hidden; min-width:0;">
+                    <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1mm; margin-bottom:1.5mm;">&#x2705; REVISADO</div>
+                    ${mkLinhas(revisores)}
+                </div>
+                <div style="width:1px; background:#ccc; flex-shrink:0;"></div>
+                <div style="flex:1; overflow:hidden; min-width:0;">
+                    <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:1.5px solid #555; padding-bottom:1mm; margin-bottom:1.5mm;">CONFERIDO</div>
+                    ${mkLinhas(conferentes)}
+                </div>
+            </div>`;
+        } else {
+            const nomes   = revisores.length > 0 ? revisores : conferentes;
+            const isRevis = revisores.length > 0;
+            const colStyle = nomes.length > 5
+                ? `column-count:2; column-gap:3mm; column-fill:balance;`
+                : '';
+            inner = `
+                <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:${isRevis ? '2px solid #000' : '1.5px solid #555'}; padding-bottom:1mm; margin-bottom:1.5mm;">
+                    ${isRevis ? '&#x2705; REVISADO' : 'CONFERIDO'}
+                </div>
+                <div style="${colStyle}">${mkLinhas(nomes)}</div>`;
+        }
 
         return `
-        <div style="width:100mm; height:50mm; padding:3mm; box-sizing:border-box; page-break-after:always; overflow:hidden; font-family:Arial,sans-serif; font-weight:bold;">
-            ${secaoRevisores}
-            ${secaoConferentes}
+        <div style="width:100mm; height:50mm; padding:3mm; box-sizing:border-box; page-break-after:always; break-after:page; overflow:hidden; font-family:Arial,sans-serif; font-weight:bold; display:flex; flex-direction:column;">
+            ${inner}
         </div>`;
     }
 
