@@ -579,23 +579,27 @@
 
         <!-- Lista de Etiquetas -->
         <div style="margin-bottom: 1rem;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-            <h3 style="margin: 0; font-size: 0.95rem; color: #374151;">Etiquetas:</h3>
-            <button id="btn-adicionar-etiqueta" style="padding: 0.5rem 1rem; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600;">
-              + Adicionar Etiqueta
-            </button>
-          </div>
-
-          <!-- Contador -->
-          <div style="background: #fef3c7; border: 2px solid #f59e0b; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; text-align: center;">
-            <span style="font-weight: 600; color: #92400e;">
-              Total alocado: <span id="etiqueta-total-alocado">0</span> / <span id="etiqueta-total-disponivel">0</span>
-            </span>
-          </div>
+          <h3 style="margin: 0 0 0.75rem 0; font-size: 0.95rem; color: #374151;">Etiquetas:</h3>
 
           <!-- Container de Etiquetas -->
-          <div id="etiquetas-lista" style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem;">
+          <div id="etiquetas-lista" style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 0.5rem;">
             <!-- Etiquetas serão inseridas aqui -->
+          </div>
+
+          <!-- Botão adicionar logo abaixo das etiquetas -->
+          <button id="btn-adicionar-etiqueta" style="width: 100%; padding: 0.6rem 1rem; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem; font-weight: 600; margin-bottom: 0.75rem;">
+            + Adicionar Etiqueta
+          </button>
+
+          <!-- Contador -->
+          <div style="background: #fef3c7; border: 2px solid #f59e0b; padding: 0.6rem; border-radius: 6px; text-align: center; font-size: 0.85rem;">
+            <span style="font-weight: 600; color: #92400e;">
+              Alocado: <span id="etiqueta-total-alocado">0</span>
+              &nbsp;|&nbsp;
+              Restante: <span id="etiqueta-total-disponivel" style="color: #166534;">0</span>
+              &nbsp;/&nbsp;
+              Total: <span id="etiqueta-total-max">0</span>
+            </span>
           </div>
         </div>
 
@@ -1288,6 +1292,7 @@
     const $etiquetaQtdOriginal = document.getElementById('etiqueta-qtd-original');
     const $etiquetaTotalAlocado = document.getElementById('etiqueta-total-alocado');
     const $etiquetaTotalDisponivel = document.getElementById('etiqueta-total-disponivel');
+    const $etiquetaTotalMax = document.getElementById('etiqueta-total-max');
     const $etiquetasLista = document.getElementById('etiquetas-lista');
     const $btnAdicionarEtiqueta = document.getElementById('btn-adicionar-etiqueta');
     const $etiquetaObs = document.getElementById('etiqueta-obs');
@@ -3097,6 +3102,7 @@ ALL_OCS_ITEMS = itemsObj;
         $etiquetaItemInfo.textContent = `Item: ${item.DESCRIÇÃO || 'N/A'} - Tamanho: ${item.TAMANHO || 'N/A'}`;
         $etiquetaQtdOriginal.textContent = fmtInt(qtdOriginal);
         $etiquetaTotalDisponivel.textContent = fmtInt(qtdOriginal);
+        if ($etiquetaTotalMax) $etiquetaTotalMax.textContent = fmtInt(qtdOriginal);
 
         // Pré-preenche lote com o valor da planilha (editável pelo usuário)
         $etiquetaObs.value = '';
@@ -3146,15 +3152,20 @@ ALL_OCS_ITEMS = itemsObj;
     function atualizarContadores() {
         const qtdOriginal = currentEtiquetaItem['QTD. ORIGINAL'] || currentEtiquetaItem['QTD. ABERTA'] || 0;
         const totalAlocado = etiquetas.reduce((sum, e) => sum + (parseInt(e.quantidade) || 0), 0);
+        const restante = qtdOriginal - totalAlocado;
 
         $etiquetaTotalAlocado.textContent = fmtInt(totalAlocado);
+        $etiquetaTotalDisponivel.textContent = fmtInt(Math.max(0, restante));
+        if ($etiquetaTotalMax) $etiquetaTotalMax.textContent = fmtInt(qtdOriginal);
 
-        // Valida se excedeu
+        // Cor do restante e validação
         if (totalAlocado > qtdOriginal) {
             $etiquetaTotalAlocado.style.color = '#dc2626';
+            $etiquetaTotalDisponivel.style.color = '#dc2626';
             $etiquetaGerarBtn.disabled = true;
         } else {
-            $etiquetaTotalAlocado.style.color = '#059669';
+            $etiquetaTotalAlocado.style.color = '#92400e';
+            $etiquetaTotalDisponivel.style.color = restante === 0 ? '#059669' : '#1d4ed8';
             $etiquetaGerarBtn.disabled = etiquetas.length === 0 || totalAlocado === 0;
         }
     }
@@ -3174,7 +3185,7 @@ ALL_OCS_ITEMS = itemsObj;
                         type="number"
                         value="${etiq.quantidade}"
                         min="1"
-                        onchange="atualizarQuantidadeEtiqueta(${etiq.id}, this.value)"
+                        oninput="atualizarQuantidadeEtiqueta(${etiq.id}, this.value)"
                         style="flex: 1; padding: 0.5rem; border: 2px solid #d1d5db; border-radius: 4px; font-size: 0.875rem;"
                         placeholder="Quantidade"
                     />
@@ -3793,22 +3804,24 @@ ALL_OCS_ITEMS = itemsObj;
         } else {
             // ── Layout padrão ──────────────────────────────────────
             const totalEtiquetas = etiquetas.length;
-            etiquetas.forEach((etiq, index) => {
-                const numeroEtiqueta = index + 1;
-                const letraPar = String.fromCharCode(65 + index);
+            const _isMM = (currentEtiquetaItem.TAMANHO || '').toUpperCase().includes('MM');
+            const _totalQtdMM = _isMM
+                ? etiquetas.reduce((s, e) => s + (parseInt(e.quantidade) || 0), 0)
+                : 0;
 
-                html += `
+            const _mkParEtiqueta = (qtdExibida, numeroLabel, letraPar, totalLabel) => {
+                return `
             <div class="etiqueta">
                 <div class="dados">
                     <div class="cliente-titulo">
-                        <span class="etiqueta-numero">${numeroEtiqueta}/${totalEtiquetas}</span>
+                        <span class="etiqueta-numero">${numeroLabel}</span>
                         <span>${currentEtiquetaCliente}</span>
-                        <span class="etiqueta-par">PAR ${letraPar}</span>
+                        <span class="etiqueta-par">${letraPar}</span>
                     </div>
                     <div class="linha"><span class="label">Cód. Cliente:</span>${currentEtiquetaItem['CÓD. CLIENTE'] || 'N/A'}</div>
                     <div class="linha"><span class="label">Cód. OS:</span>${currentEtiquetaItem['CÓD. OS'] || 'N/A'}</div>
                     <div class="linha"><span class="label">Tamanho:</span>${currentEtiquetaItem.TAMANHO || 'N/A'}</div>
-                    <div class="linha"><span class="label">Quantidade:</span>${fmtInt(etiq.quantidade)}</div>
+                    <div class="linha"><span class="label">${totalLabel ? '<strong>TOTAL:</strong>' : 'Quantidade:'}</span><strong style="${totalLabel ? 'font-size:14px;' : ''}">${fmtInt(qtdExibida)}</strong></div>
                     <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
                 </div>
                 <div class="footer">
@@ -3823,14 +3836,15 @@ ALL_OCS_ITEMS = itemsObj;
             <div class="etiqueta">
                 <div class="dados">
                     <div class="cliente-titulo">
-                        <span class="etiqueta-numero">${numeroEtiqueta}/${totalEtiquetas}</span>
+                        <span class="etiqueta-numero">${numeroLabel}</span>
                         <span>${currentEtiquetaCliente}</span>
-                        <span class="etiqueta-par">PAR ${letraPar}</span>
+                        <span class="etiqueta-par">${letraPar}</span>
                     </div>
                     <div class="linha"><span class="label">OC:</span>${currentEtiquetaOC}</div>
                     <div class="linha"><span class="label">Descrição:</span>${currentEtiquetaItem.DESCRIÇÃO || 'N/A'}</div>
                     <div class="linha"><span class="label">Tamanho:</span>${currentEtiquetaItem.TAMANHO || 'N/A'}</div>
                     <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
+                    <div class="linha"><span class="label">${totalLabel ? '<strong>TOTAL:</strong>' : 'Quantidade:'}</span><strong style="${totalLabel ? 'font-size:14px;' : ''}">${fmtInt(qtdExibida)}</strong></div>
                     <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
                     ${observacoes ? `<div class="obs"><span class="label">Obs:</span> ${observacoes}</div>` : ''}
                 </div>
@@ -3843,8 +3857,21 @@ ALL_OCS_ITEMS = itemsObj;
                     </div>
                 </div>
             </div>`;
-                html += gerarEtiquetaRevisao();
+            };
+
+            etiquetas.forEach((etiq, index) => {
+                const numeroEtiqueta = index + 1;
+                const letraPar = String.fromCharCode(65 + index);
+                html += _mkParEtiqueta(etiq.quantidade, `${numeroEtiqueta}/${totalEtiquetas}`, `PAR ${letraPar}`, false);
+                if (!_isMM) html += gerarEtiquetaRevisao();
             });
+
+            if (_isMM) {
+                // Par TOTAL para itens MM
+                html += _mkParEtiqueta(_totalQtdMM, 'TOTAL', 'TOTAL MM', true);
+                // Uma única etiqueta de revisão/conferência
+                html += gerarEtiquetaRevisao();
+            }
         }
 
         html += `
@@ -5064,24 +5091,44 @@ ALL_OCS_ITEMS = itemsObj;
         const revisores   = _getRevisores();
         const conferentes = _getConferentes();
         if (revisores.length === 0 && conferentes.length === 0) return '';
+
+        const totalNomes = revisores.length + conferentes.length;
+        // Colunas e tamanhos dinâmicos conforme quantidade de nomes
+        const cols       = totalNomes <= 5 ? 1 : totalNomes <= 10 ? 2 : 3;
+        const fs         = totalNomes <= 5 ? '11px' : totalNomes <= 10 ? '9.5px' : '8px';
+        const fsTitle    = totalNomes <= 5 ? '14px' : totalNomes <= 10 ? '12px' : '10px';
+        const chk        = totalNomes <= 5 ? '4mm' : totalNomes <= 10 ? '3.5mm' : '3mm';
+        const mb         = totalNomes <= 5 ? '1.5mm' : '1mm';
+        const itemW      = cols === 1 ? '100%' : cols === 2 ? 'calc(50% - 1mm)' : 'calc(33.3% - 1mm)';
+        const wrapStyle  = cols > 1
+            ? `display:flex; flex-wrap:wrap; gap:0 2mm;`
+            : `display:flex; flex-direction:column;`;
+
         const mkLinhas = nomes => nomes.map(nome =>
-            `<div style="display:flex; align-items:center; gap:3mm; margin-bottom:1.5mm;">
-                <div style="width:4mm; height:4mm; border:1.5px solid #000; flex-shrink:0;"></div>
-                <span style="font-size:11px;">${nome}</span>
+            `<div style="display:flex; align-items:center; gap:1.5mm; margin-bottom:${mb}; width:${itemW}; min-width:0; overflow:hidden;">
+                <div style="width:${chk}; height:${chk}; border:1.5px solid #000; flex-shrink:0;"></div>
+                <span style="font-size:${fs}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${nome}</span>
             </div>`
         ).join('');
+
         const secaoRevisores = revisores.length > 0 ? `
-            <div style="font-size:14px; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1.5mm; margin-bottom:2.5mm; letter-spacing:0.05em;">
+            <div style="font-size:${fsTitle}; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1.5mm; margin-bottom:2mm; letter-spacing:0.05em; width:100%;">
                 ✅ REVISADO
             </div>
-            ${mkLinhas(revisores)}` : '';
+            <div style="${wrapStyle}">
+                ${mkLinhas(revisores)}
+            </div>` : '';
+
         const secaoConferentes = conferentes.length > 0 ? `
-            <div style="font-size:12px; font-weight:900; text-align:center; border-bottom:1.5px solid #555; padding-bottom:1mm; margin-bottom:2mm;${revisores.length > 0 ? ' margin-top:2mm;' : ''} letter-spacing:0.05em;">
+            <div style="font-size:${fsTitle}; font-weight:900; text-align:center; border-bottom:1.5px solid #555; padding-bottom:1mm; margin-bottom:1.5mm;${revisores.length > 0 ? ' margin-top:1.5mm;' : ''} letter-spacing:0.05em; width:100%;">
                 CONFERIDO
             </div>
-            ${mkLinhas(conferentes)}` : '';
+            <div style="${wrapStyle}">
+                ${mkLinhas(conferentes)}
+            </div>` : '';
+
         return `
-        <div class="etiqueta" style="display:flex; flex-direction:column; justify-content:flex-start; padding:3mm;">
+        <div class="etiqueta" style="display:flex; flex-direction:column; justify-content:flex-start; padding:3mm; overflow:hidden;">
             ${secaoRevisores}
             ${secaoConferentes}
         </div>`;
