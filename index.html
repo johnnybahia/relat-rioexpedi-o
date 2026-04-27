@@ -3030,6 +3030,16 @@ ALL_OCS_ITEMS = itemsObj;
     $etiquetaCancelBtn.addEventListener('click', fecharModalEtiquetas);
     $etiquetaGerarBtn.addEventListener('click', gerarPDFEtiquetas);
 
+    // Delegação de eventos para inputs/botões gerados dinamicamente via innerHTML
+    $etiquetasLista.addEventListener('input', function(e) {
+        const id = parseInt(e.target.dataset.etiquetaId);
+        if (id) atualizarQuantidadeEtiqueta(id, e.target.value);
+    });
+    $etiquetasLista.addEventListener('click', function(e) {
+        const btn = e.target.closest('[data-remove-id]');
+        if (btn) removerEtiqueta(parseInt(btn.dataset.removeId));
+    });
+
     // Modal de lote de etiquetas
     document.getElementById('lote-cancel-btn').addEventListener('click', fecharModalLote);
     document.getElementById('lote-gerar-btn').addEventListener('click', gerarPDFEtiquetasLote);
@@ -3185,12 +3195,12 @@ ALL_OCS_ITEMS = itemsObj;
                         type="number"
                         value="${etiq.quantidade}"
                         min="1"
-                        oninput="atualizarQuantidadeEtiqueta(${etiq.id}, this.value)"
+                        data-etiqueta-id="${etiq.id}"
                         style="flex: 1; padding: 0.5rem; border: 2px solid #d1d5db; border-radius: 4px; font-size: 0.875rem;"
                         placeholder="Quantidade"
                     />
                     <button
-                        onclick="removerEtiqueta(${etiq.id})"
+                        data-remove-id="${etiq.id}"
                         style="padding: 0.5rem 0.75rem; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;"
                         title="Remover etiqueta"
                     >✕</button>
