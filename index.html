@@ -3821,7 +3821,7 @@ ALL_OCS_ITEMS = itemsObj;
                     <div class="linha"><span class="label">Cód. Cliente:</span>${currentEtiquetaItem['CÓD. CLIENTE'] || 'N/A'}</div>
                     <div class="linha"><span class="label">Cód. OS:</span>${currentEtiquetaItem['CÓD. OS'] || 'N/A'}</div>
                     <div class="linha"><span class="label">Tamanho:</span>${currentEtiquetaItem.TAMANHO || 'N/A'}</div>
-                    <div class="linha"><span class="label">${totalLabel ? '<strong>TOTAL:</strong>' : 'Quantidade:'}</span><strong style="${totalLabel ? 'font-size:14px;' : ''}">${fmtInt(qtdExibida)}</strong></div>
+                    <div class="linha"><span class="label">${totalLabel ? 'TOTAL NO PACOTE:' : 'Quantidade:'}</span><strong style="${totalLabel ? 'font-size:14px;' : ''}">${fmtInt(qtdExibida)}</strong></div>
                     <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
                 </div>
                 <div class="footer">
@@ -3844,7 +3844,7 @@ ALL_OCS_ITEMS = itemsObj;
                     <div class="linha"><span class="label">Descrição:</span>${currentEtiquetaItem.DESCRIÇÃO || 'N/A'}</div>
                     <div class="linha"><span class="label">Tamanho:</span>${currentEtiquetaItem.TAMANHO || 'N/A'}</div>
                     <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
-                    <div class="linha"><span class="label">${totalLabel ? '<strong>TOTAL:</strong>' : 'Quantidade:'}</span><strong style="${totalLabel ? 'font-size:14px;' : ''}">${fmtInt(qtdExibida)}</strong></div>
+                    <div class="linha"><span class="label">${totalLabel ? 'TOTAL NO PACOTE:' : 'Quantidade:'}</span><strong style="${totalLabel ? 'font-size:14px;' : ''}">${fmtInt(qtdExibida)}</strong></div>
                     <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
                     ${observacoes ? `<div class="obs"><span class="label">Obs:</span> ${observacoes}</div>` : ''}
                 </div>
@@ -3868,7 +3868,7 @@ ALL_OCS_ITEMS = itemsObj;
 
             if (_isMM) {
                 // Par TOTAL para itens MM
-                html += _mkParEtiqueta(_totalQtdMM, 'TOTAL', 'TOTAL MM', true);
+                html += _mkParEtiqueta(_totalQtdMM, 'TOTAL', 'TOTAL NO PACOTE', true);
                 // Uma única etiqueta de revisão/conferência
                 html += gerarEtiquetaRevisao();
             }
@@ -5093,42 +5093,32 @@ ALL_OCS_ITEMS = itemsObj;
         if (revisores.length === 0 && conferentes.length === 0) return '';
 
         const totalNomes = revisores.length + conferentes.length;
-        // Colunas e tamanhos dinâmicos conforme quantidade de nomes
-        const cols       = totalNomes <= 5 ? 1 : totalNomes <= 10 ? 2 : 3;
-        const fs         = totalNomes <= 5 ? '11px' : totalNomes <= 10 ? '9.5px' : '8px';
-        const fsTitle    = totalNomes <= 5 ? '14px' : totalNomes <= 10 ? '12px' : '10px';
-        const chk        = totalNomes <= 5 ? '4mm' : totalNomes <= 10 ? '3.5mm' : '3mm';
-        const mb         = totalNomes <= 5 ? '1.5mm' : '1mm';
-        const itemW      = cols === 1 ? '100%' : cols === 2 ? 'calc(50% - 1mm)' : 'calc(33.3% - 1mm)';
-        const wrapStyle  = cols > 1
-            ? `display:flex; flex-wrap:wrap; gap:0 2mm;`
-            : `display:flex; flex-direction:column;`;
+        const cols  = totalNomes <= 5 ? 1 : totalNomes <= 10 ? 2 : 3;
+        const fs    = totalNomes <= 5 ? '11px' : totalNomes <= 10 ? '10px' : '8.5px';
+        const fsHdr = totalNomes <= 5 ? '13px' : totalNomes <= 10 ? '11px' : '10px';
+        const chk   = totalNomes <= 5 ? '4mm' : '3.5mm';
+        const mb    = totalNomes <= 5 ? '1.5mm' : '1mm';
+        const colStyle = cols > 1
+            ? `column-count:${cols}; column-gap:3mm; column-fill:auto;`
+            : '';
 
         const mkLinhas = nomes => nomes.map(nome =>
-            `<div style="display:flex; align-items:center; gap:1.5mm; margin-bottom:${mb}; width:${itemW}; min-width:0; overflow:hidden;">
-                <div style="width:${chk}; height:${chk}; border:1.5px solid #000; flex-shrink:0;"></div>
+            `<div style="display:flex; align-items:center; gap:1.5mm; margin-bottom:${mb}; break-inside:avoid; -webkit-column-break-inside:avoid; overflow:hidden;">
+                <div style="width:${chk}; height:${chk}; border:1.5px solid #000; flex-shrink:0; min-width:${chk};"></div>
                 <span style="font-size:${fs}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${nome}</span>
             </div>`
         ).join('');
 
         const secaoRevisores = revisores.length > 0 ? `
-            <div style="font-size:${fsTitle}; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1.5mm; margin-bottom:2mm; letter-spacing:0.05em; width:100%;">
-                ✅ REVISADO
-            </div>
-            <div style="${wrapStyle}">
-                ${mkLinhas(revisores)}
-            </div>` : '';
+            <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1mm; margin-bottom:1.5mm;">&#x2705; REVISADO</div>
+            <div style="${colStyle}">${mkLinhas(revisores)}</div>` : '';
 
         const secaoConferentes = conferentes.length > 0 ? `
-            <div style="font-size:${fsTitle}; font-weight:900; text-align:center; border-bottom:1.5px solid #555; padding-bottom:1mm; margin-bottom:1.5mm;${revisores.length > 0 ? ' margin-top:1.5mm;' : ''} letter-spacing:0.05em; width:100%;">
-                CONFERIDO
-            </div>
-            <div style="${wrapStyle}">
-                ${mkLinhas(conferentes)}
-            </div>` : '';
+            <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:1.5px solid #555; padding-bottom:1mm; margin-bottom:1.5mm;${revisores.length > 0 ? ' margin-top:2mm;' : ''}">CONFERIDO</div>
+            <div style="${colStyle}">${mkLinhas(conferentes)}</div>` : '';
 
         return `
-        <div class="etiqueta" style="display:flex; flex-direction:column; justify-content:flex-start; padding:3mm; overflow:hidden;">
+        <div style="width:100mm; height:50mm; padding:3mm; box-sizing:border-box; page-break-after:always; overflow:hidden; font-family:Arial,sans-serif; font-weight:bold;">
             ${secaoRevisores}
             ${secaoConferentes}
         </div>`;
