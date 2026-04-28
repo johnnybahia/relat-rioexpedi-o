@@ -5103,18 +5103,19 @@ ALL_OCS_ITEMS = itemsObj;
         renderizarListaRevisores();
     }
 
-    function gerarEtiquetaRevisao() {
-        const revisores   = _getRevisores();
-        const conferentes = _getConferentes();
-        if (revisores.length === 0 && conferentes.length === 0) return '';
+    // Máximo de nomes por coluna por etiqueta (calculado para 8.5px + 1mm margem ≈ 4.5mm/linha em 38mm disponíveis)
+    const REVISAO_MAX_POR_COL = 8;
 
-        const hasBoth = revisores.length > 0 && conferentes.length > 0;
-        const maxLen  = Math.max(revisores.length, conferentes.length);
-
-        const fs    = maxLen <= 5 ? '11px' : maxLen <= 8 ? '10px' : '8.5px';
-        const fsHdr = maxLen <= 5 ? '13px' : maxLen <= 8 ? '11px' : '10px';
+    function _mkPaginaRevisao(revChunk, confChunk, hasBoth, pageIdx, totalPages) {
+        const maxLen = Math.max(revChunk.length, confChunk.length, 1);
+        const fs    = maxLen <= 5 ? '11px' : maxLen <= 7 ? '10px' : '8.5px';
+        const fsHdr = maxLen <= 5 ? '13px' : maxLen <= 7 ? '11px' : '10px';
         const chk   = maxLen <= 5 ? '4mm'  : '3.5mm';
         const mb    = maxLen <= 5 ? '1.5mm': '1mm';
+
+        const pageNum = totalPages > 1
+            ? `<div style="position:absolute; top:2mm; right:3mm; font-size:7px; color:#888; font-weight:400;">${pageIdx + 1}/${totalPages}</div>`
+            : '';
 
         const mkLinhas = nomes => nomes.map(nome =>
             `<div style="display:flex; align-items:center; gap:1.5mm; margin-bottom:${mb}; overflow:hidden;">
@@ -5129,17 +5130,17 @@ ALL_OCS_ITEMS = itemsObj;
             <div style="display:flex; flex:1; gap:3mm; overflow:hidden;">
                 <div style="flex:1; overflow:hidden; min-width:0;">
                     <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:2px solid #000; padding-bottom:1mm; margin-bottom:1.5mm;">&#x2705; REVISADO</div>
-                    ${mkLinhas(revisores)}
+                    ${mkLinhas(revChunk)}
                 </div>
                 <div style="width:1px; background:#ccc; flex-shrink:0;"></div>
                 <div style="flex:1; overflow:hidden; min-width:0;">
                     <div style="font-size:${fsHdr}; font-weight:900; text-align:center; border-bottom:1.5px solid #555; padding-bottom:1mm; margin-bottom:1.5mm;">CONFERIDO</div>
-                    ${mkLinhas(conferentes)}
+                    ${mkLinhas(confChunk)}
                 </div>
             </div>`;
         } else {
-            const nomes   = revisores.length > 0 ? revisores : conferentes;
-            const isRevis = revisores.length > 0;
+            const nomes   = revChunk.length > 0 ? revChunk : confChunk;
+            const isRevis = revChunk.length > 0;
             const colStyle = nomes.length > 5
                 ? `column-count:2; column-gap:3mm; column-fill:balance;`
                 : '';
@@ -5151,9 +5152,46 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         return `
-        <div style="width:100mm; height:50mm; padding:3mm; box-sizing:border-box; page-break-after:always; break-after:page; overflow:hidden; font-family:Arial,sans-serif; font-weight:bold; display:flex; flex-direction:column;">
+        <div style="position:relative; width:100mm; height:50mm; padding:3mm; box-sizing:border-box; page-break-after:always; break-after:page; overflow:hidden; font-family:Arial,sans-serif; font-weight:bold; display:flex; flex-direction:column;">
+            ${pageNum}
             ${inner}
         </div>`;
+    }
+
+    function gerarEtiquetaRevisao() {
+        const revisores   = _getRevisores();
+        const conferentes = _getConferentes();
+        if (revisores.length === 0 && conferentes.length === 0) return '';
+
+        const hasBoth = revisores.length > 0 && conferentes.length > 0;
+        let html = '';
+
+        if (hasBoth) {
+            // Pagina independentemente cada seção: REVISADO à esq, CONFERIDO à dir
+            const pages = Math.max(
+                Math.ceil(revisores.length / REVISAO_MAX_POR_COL),
+                Math.ceil(conferentes.length / REVISAO_MAX_POR_COL)
+            );
+            for (let p = 0; p < pages; p++) {
+                const revSlice  = revisores.slice(p * REVISAO_MAX_POR_COL, (p + 1) * REVISAO_MAX_POR_COL);
+                const confSlice = conferentes.slice(p * REVISAO_MAX_POR_COL, (p + 1) * REVISAO_MAX_POR_COL);
+                html += _mkPaginaRevisao(revSlice, confSlice, true, p, pages);
+            }
+        } else {
+            const nomes   = revisores.length > 0 ? revisores : conferentes;
+            const isRevis = revisores.length > 0;
+            // Seção única: até 5 nomes → 1 coluna; acima → 2 colunas (max 16/página)
+            const maxPorPag = nomes.length <= 5 ? 5 : REVISAO_MAX_POR_COL * 2;
+            const pages = Math.ceil(nomes.length / maxPorPag);
+            for (let p = 0; p < pages; p++) {
+                const slice = nomes.slice(p * maxPorPag, (p + 1) * maxPorPag);
+                const rev  = isRevis ? slice : [];
+                const conf = isRevis ? [] : slice;
+                html += _mkPaginaRevisao(rev, conf, false, p, pages);
+            }
+        }
+
+        return html;
     }
 
     (document.getElementById('btn-cadastro-revisao') || {addEventListener:()=>{}}).addEventListener('click', () => {
