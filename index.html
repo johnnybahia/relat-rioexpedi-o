@@ -3499,6 +3499,14 @@ ALL_OCS_ITEMS = itemsObj;
             entry.etiquetas.forEach((etiq, index) => {
                 const numeroEtiqueta = index + 1;
                 const letraPar = String.fromCharCode(65 + index);
+                // Label 1 do lote: Cód.Cliente, Cód.OS, Tamanho, [Marca], Qtd, Data = 5 ou 6 linhas
+                const _marcaVal = item.INFO_X || '';
+                const _nL1 = 5 + (_marcaVal ? 1 : 0);
+                const _fs1 = _nL1 > 5 ? '11px' : '13px';
+                const _mb1 = _nL1 > 5 ? '1mm' : '1.5mm';
+                const _marcaHtml = _marcaVal
+                    ? '<div class="linha"><span class="label">Marca:</span>' + _marcaVal + '</div>'
+                    : '';
                 // Labels 2 e 3 do lote: OC, Descrição, Tamanho, Lote, Data [+Obs] = 5 ou 6 linhas
                 const _nLOC = 5 + (observacoes ? 1 : 0);
                 const _fsOC = _nLOC > 5 ? '11px' : '13px';
@@ -3506,7 +3514,7 @@ ALL_OCS_ITEMS = itemsObj;
                 const _obsHtml = observacoes ? '<div class="obs"><span class="label">Obs:</span> ' + observacoes + '</div>' : '';
                 html += `
 <div class="etiqueta">
-    <div class="dados">
+    <div class="dados" style="--linha-fs:${_fs1}; --linha-mb:${_mb1};">
         <div class="cliente-titulo">
             <span class="etiqueta-numero">${numeroEtiqueta}/${totalEtiquetas}</span>
             <span>${cliente}</span>
@@ -3515,6 +3523,7 @@ ALL_OCS_ITEMS = itemsObj;
         <div class="linha"><span class="label">Cód. Cliente:</span>${item['CÓD. CLIENTE'] || 'N/A'}</div>
         <div class="linha"><span class="label">Cód. OS:</span>${item['CÓD. OS'] || 'N/A'}</div>
         <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
+        ${_marcaHtml}
         <div class="linha"><span class="label">Quantidade:</span>${fmtInt(etiq.quantidade)}</div>
         <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
     </div>
@@ -3777,13 +3786,21 @@ ALL_OCS_ITEMS = itemsObj;
                 : 0;
 
             const _mkParEtiqueta = (qtdExibida, numeroLabel, letraPar, totalLabel) => {
-                // Label 2 tem: OC, Descrição, Tamanho, Lote, Qtd/TOTAL, Data [+Obs] = 6 ou 7 linhas
+                // Label 1: Cód.Cliente, Cód.OS, Tamanho, [Marca], Qtd, Data = 5 ou 6 linhas
+                const marcaVal = currentEtiquetaItem.INFO_X || '';
+                const nL1 = 5 + (marcaVal ? 1 : 0);
+                const fs1 = nL1 > 5 ? '11px' : '13px';
+                const mb1 = nL1 > 5 ? '1mm' : '1.5mm';
+                const marcaHtml = marcaVal
+                    ? '<div class="linha"><span class="label">Marca:</span>' + marcaVal + '</div>'
+                    : '';
+                // Label 2: OC, Descrição, Tamanho, Lote, Qtd/TOTAL, Data [+Obs] = 6 ou 7 linhas
                 const nL2 = 6 + (observacoes ? 1 : 0);
                 const fs2 = nL2 > 6 ? '9.5px' : '11px';
                 const mb2 = nL2 > 6 ? '0.75mm' : '1mm';
                 return `
             <div class="etiqueta">
-                <div class="dados">
+                <div class="dados" style="--linha-fs:${fs1}; --linha-mb:${mb1};">
                     <div class="cliente-titulo">
                         <span class="etiqueta-numero">${numeroLabel}</span>
                         <span>${currentEtiquetaCliente}</span>
@@ -3792,6 +3809,7 @@ ALL_OCS_ITEMS = itemsObj;
                     <div class="linha"><span class="label">Cód. Cliente:</span>${currentEtiquetaItem['CÓD. CLIENTE'] || 'N/A'}</div>
                     <div class="linha"><span class="label">Cód. OS:</span>${currentEtiquetaItem['CÓD. OS'] || 'N/A'}</div>
                     <div class="linha"><span class="label">Tamanho:</span>${currentEtiquetaItem.TAMANHO || 'N/A'}</div>
+                    ${marcaHtml}
                     <div class="linha"><span class="label">${totalLabel ? 'TOTAL NO PACOTE:' : 'Quantidade:'}</span><strong style="${totalLabel ? 'font-size:14px;' : ''}">${fmtInt(qtdExibida)}</strong></div>
                     <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
                 </div>
