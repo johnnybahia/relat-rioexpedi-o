@@ -3758,20 +3758,7 @@ ALL_OCS_ITEMS = itemsObj;
                 .footer-text {
                     flex: 1;
                 }
-                /* ── Etiquetas especiais Dilly ─────────────────── */
-                .etiqueta-dilly-capa { justify-content: flex-start; }
-                .dilly-nome { font-size: 24px; font-weight: 900; text-transform: uppercase; text-align: center; border-bottom: 2.5px solid #000; padding-bottom: 1mm; margin-bottom: 1.5mm; letter-spacing: 1px; }
-                .dilly-lote-os { font-size: 20px; font-weight: 900; text-align: center; margin-bottom: 2mm; }
-                .dilly-tabela { width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 1.5mm; }
-                .dilly-tabela th, .dilly-tabela td { border: 1px solid #000; padding: 0.4mm 1mm; text-align: center; }
-                .dilly-tabela th { background: #000; color: #fff; font-size: 8px; }
-                .dilly-total { font-size: 12px; font-weight: 900; text-align: center; border: 2px solid #000; padding: 1mm 2mm; }
-                .etiqueta-dilly-item { justify-content: space-evenly; }
-                .dilly-item-cod { font-size: 20px; font-weight: 900; text-align: center; border-bottom: 1.5px solid #000; padding-bottom: 1mm; margin-bottom: 0.5mm; }
-                .dilly-item-lote { font-size: 16px; font-weight: 900; text-align: center; }
-                .dilly-item-tam  { font-size: 16px; font-weight: 900; text-align: center; }
-                .dilly-item-qtd  { font-size: 22px; font-weight: 900; text-align: center; }
-                .dilly-item-ocdes { font-size: 9px; font-weight: bold; text-align: center; margin-top: 0.5mm; }
+                /* ── Etiquetas especiais Dilly removidas — usa layout padrão ── */
                 @media print {
                     body { margin: 0; }
                     .etiqueta { border: none; }
@@ -3781,48 +3768,8 @@ ALL_OCS_ITEMS = itemsObj;
         <body>
         `;
 
-        // Detecta cliente Dilly para layout especial
-        const _isDilly = currentEtiquetaCliente.toUpperCase().includes('DILLY');
-
-        if (_isDilly) {
-            // ── Layout especial Dilly ──────────────────────────────
-            const totalLote = etiquetas.reduce((sum, e) => sum + (parseInt(e.quantidade) || 0), 0);
-            const codOS     = currentEtiquetaItem['CÓD. OS']     || '';
-            const codCli    = currentEtiquetaItem['CÓD. CLIENTE'] || 'N/A';
-            const tamanho   = currentEtiquetaItem.TAMANHO          || 'N/A';
-            const descricao = currentEtiquetaItem.DESCRIÇÃO         || 'N/A';
-
-            // ETIQUETA CAPA: nome grande + LOTE [OS] + tabela de splits + TOTAL
-            const linhasTabela = etiquetas.map(e =>
-                `<tr><td>${codCli}</td><td>${tamanho}</td><td>${fmtInt(e.quantidade)}</td></tr>`
-            ).join('');
-
-            html += `
-            <div class="etiqueta etiqueta-dilly-capa">
-                <div class="dilly-nome">${currentEtiquetaCliente}</div>
-                <div class="dilly-lote-os">LOTE ${codOS}</div>
-                <table class="dilly-tabela">
-                    <thead><tr><th>Cód. Cliente</th><th>Tamanho</th><th>Qtd</th></tr></thead>
-                    <tbody>${linhasTabela}</tbody>
-                </table>
-                <div class="dilly-total">TOTAL DO LOTE ${fmtInt(totalLote)}</div>
-            </div>`;
-
-            // ETIQUETA ITEM: uma por split de quantidade
-            etiquetas.forEach(etiq => {
-                html += `
-            <div class="etiqueta etiqueta-dilly-item">
-                <div class="dilly-item-cod">${codCli}</div>
-                <div class="dilly-item-lote">LOTE ${loteProduto || codOS}</div>
-                <div class="dilly-item-tam">${tamanho}</div>
-                <div class="dilly-item-qtd">${fmtInt(etiq.quantidade)}</div>
-                <div class="dilly-item-ocdes">${currentEtiquetaOC} — ${descricao}</div>
-            </div>`;
-                html += gerarEtiquetaRevisao();
-            });
-
-        } else {
-            // ── Layout padrão ──────────────────────────────────────
+        {
+            // ── Layout padrão (todos os clientes) ─────────────────
             const totalEtiquetas = etiquetas.length;
             const _isMM = (currentEtiquetaItem.TAMANHO || '').toUpperCase().includes('MM');
             const _totalQtdMM = _isMM
