@@ -3499,6 +3499,11 @@ ALL_OCS_ITEMS = itemsObj;
             entry.etiquetas.forEach((etiq, index) => {
                 const numeroEtiqueta = index + 1;
                 const letraPar = String.fromCharCode(65 + index);
+                // Labels 2 e 3 do lote: OC, Descrição, Tamanho, Lote, Data [+Obs] = 5 ou 6 linhas
+                const _nLOC = 5 + (observacoes ? 1 : 0);
+                const _fsOC = _nLOC > 5 ? '11px' : '13px';
+                const _mbOC = _nLOC > 5 ? '1mm' : '1.5mm';
+                const _obsHtml = observacoes ? '<div class="obs"><span class="label">Obs:</span> ' + observacoes + '</div>' : '';
                 html += `
 <div class="etiqueta">
     <div class="dados">
@@ -3522,14 +3527,8 @@ ALL_OCS_ITEMS = itemsObj;
         </div>
     </div>
 </div>
-${(() => {
-    // Labels 2 e 3 do lote: OC, Descrição, Tamanho, Lote, Data [+Obs] = 5 ou 6 linhas
-    const _nL = 5 + (observacoes ? 1 : 0);
-    const _fs = _nL > 5 ? '11px' : '13px';
-    const _mb = _nL > 5 ? '1mm' : '1.5mm';
-    const _ocLabel = `
 <div class="etiqueta">
-    <div class="dados" style="--linha-fs:${_fs}; --linha-mb:${_mb};">
+    <div class="dados" style="--linha-fs:${_fsOC}; --linha-mb:${_mbOC};">
         <div class="cliente-titulo">
             <span class="etiqueta-numero">${numeroEtiqueta}/${totalEtiquetas}</span>
             <span>${cliente}</span>
@@ -3540,7 +3539,30 @@ ${(() => {
         <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
         <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
         <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
-        ${observacoes ? `<div class="obs"><span class="label">Obs:</span> ${observacoes}</div>` : ''}
+        ${_obsHtml}
+    </div>
+    <div class="footer">
+        <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
+        <div class="footer-text">
+            <div><strong>MARFIM IND. TÊXTIL DO CEARÁ LTDA.</strong></div>
+            <div>Av. José Amora de Sá, 1086 - Autódromo, Eusébio - CE</div>
+            <div>CNPJ: 19.542.918/0001-90</div>
+        </div>
+    </div>
+</div>
+<div class="etiqueta">
+    <div class="dados" style="--linha-fs:${_fsOC}; --linha-mb:${_mbOC};">
+        <div class="cliente-titulo">
+            <span class="etiqueta-numero">${numeroEtiqueta}/${totalEtiquetas}</span>
+            <span>${cliente}</span>
+            <span class="etiqueta-par">PAR ${letraPar}</span>
+        </div>
+        <div class="linha"><span class="label">OC:</span>${oc}</div>
+        <div class="linha"><span class="label">Descrição:</span>${item.DESCRIÇÃO || 'N/A'}</div>
+        <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
+        <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
+        <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
+        ${_obsHtml}
     </div>
     <div class="footer">
         <img src="https://i.ibb.co/FGGjdsM/LOGO-MARFIM.jpg" alt="MARFIM" class="footer-logo" onerror="this.style.display='none'">
@@ -3551,8 +3573,6 @@ ${(() => {
         </div>
     </div>
 </div>`;
-    return _ocLabel + _ocLabel;
-})()}
                 html += gerarEtiquetaRevisao();
             });
         });
