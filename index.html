@@ -98,7 +98,9 @@
     .item-table th.qtd-aberta { color: #b91c1c; background-color: #fef2f2; }
     .item-table td.qtd-aberta { color: #b91c1c; font-weight: 700; background-color: #fff5f5; }
     .item-table tr.item-faturado { background-color: #dcfce7; font-weight: 500; }
-    .item-table tr.item-marcado-faturar { background-color: #90EE90 !important; font-weight: 600; }
+    .item-table tr.item-marcado-faturar { font-weight: 600; }
+    .item-table tr.item-marcado-faturar td.qtd-aberta { filter: brightness(0.92); }
+    .faturar-badge-usuario { display: inline-block; font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; color: white; opacity: 0.9; letter-spacing: 0.03em; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .badge-faturado { display: inline-block; background-color: #16a34a; color: white; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 0.25rem; letter-spacing: 0.05em; vertical-align: middle; }
 
     .item-table tr.keyboard-focus { outline: 3px solid #3b82f6; outline-offset: -3px; }
@@ -2020,18 +2022,24 @@ ALL_OCS_ITEMS = itemsObj;
                             <th>Lote</th>
                             ${_acoesHeader}</tr></thead><tbody>`;
 
+            const _sessaoAtual = _getSessaoLocal();
+            const _usuarioAtual = (_sessaoAtual && _sessaoAtual.usuario) ? _sessaoAtual.usuario.trim() : '';
+
             items.forEach(item => {
                 if (!item) return;
                 const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
                 const itemId = `item-linha-${item.planilhaLinha}`;
                 const isFaturado = item.Status?.toLowerCase() === 'faturado';
                 const isMarcadoFaturar = item.MARCAR_FATURAR && String(item.MARCAR_FATURAR).toUpperCase() === 'SIM';
+                const usuarioQueMarkou = isMarcadoFaturar ? String(item.MARCAR_FATURAR_USUARIO || '').trim() : '';
+                const corUsuario = isMarcadoFaturar ? _getUsuarioColor(usuarioQueMarkou || _usuarioAtual) : null;
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
 
                 const classeMarcado = isMarcadoFaturar ? 'item-marcado-faturar' : '';
-                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
+                const inlineStyle = corUsuario ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"` : '';
+                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${usuarioQueMarkou}"` : ''}>`;
 
                 bodyHtml += `
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
@@ -2061,7 +2069,18 @@ ALL_OCS_ITEMS = itemsObj;
                     if (!isFaturado) {
                         bodyHtml += ` <button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
                         const checkedAttr = isMarcadoFaturar ? 'checked' : '';
-                        bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="Marcar para faturamento">`;
+                        const outrousuario = isMarcadoFaturar && usuarioQueMarkou && _usuarioAtual && usuarioQueMarkou.toLowerCase() !== _usuarioAtual.toLowerCase();
+                        const cbDisabled = outrousuario ? 'disabled' : '';
+                        const cbTitle = isMarcadoFaturar
+                            ? (outrousuario
+                                ? `Marcado por: ${usuarioQueMarkou} — apenas ${usuarioQueMarkou} pode desmarcar`
+                                : `Marcado por: ${usuarioQueMarkou || _usuarioAtual} — clique para desmarcar`)
+                            : 'Marcar para faturamento';
+                        const cbStyle = outrousuario ? 'opacity:0.5; cursor:not-allowed;' : '';
+                        const badgeHtml = (isMarcadoFaturar && (usuarioQueMarkou || _usuarioAtual))
+                            ? (() => { const c = _getUsuarioColor(usuarioQueMarkou || _usuarioAtual); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${usuarioQueMarkou || _usuarioAtual}</span>` : ''; })()
+                            : '';
+                        bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} ${cbDisabled} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="${cbTitle}" style="${cbStyle}" data-marcado-por="${usuarioQueMarkou}">${badgeHtml}`;
                     } else {
                         bodyHtml += ` <span class="badge-faturado">FATURADO</span>`;
                     }
@@ -2591,9 +2610,53 @@ ALL_OCS_ITEMS = itemsObj;
             .finalizarItem(uniqueId, linha);
     }
 
+    // ==== PALETA DE CORES POR USUÁRIO ====
+    const _USER_COLOR_PALETTE = [
+        { bg: '#bbf7d0', border: '#16a34a', text: '#14532d' }, // verde
+        { bg: '#bfdbfe', border: '#2563eb', text: '#1e3a8a' }, // azul
+        { bg: '#fde68a', border: '#d97706', text: '#78350f' }, // amarelo
+        { bg: '#fecaca', border: '#dc2626', text: '#7f1d1d' }, // vermelho
+        { bg: '#ddd6fe', border: '#7c3aed', text: '#3b0764' }, // roxo
+        { bg: '#fed7aa', border: '#ea580c', text: '#7c2d12' }, // laranja
+        { bg: '#a5f3fc', border: '#0891b2', text: '#164e63' }, // ciano
+        { bg: '#fbcfe8', border: '#db2777', text: '#831843' }, // rosa
+        { bg: '#d9f99d', border: '#65a30d', text: '#365314' }, // lima
+        { bg: '#e9d5ff', border: '#9333ea', text: '#581c87' }, // violeta
+    ];
+    const _userColorMap = {};
+    let _userColorIndex = 0;
+
+    function _getUsuarioColor(usuario) {
+        if (!usuario) return null;
+        const key = usuario.trim().toLowerCase();
+        if (!_userColorMap[key]) {
+            _userColorMap[key] = _USER_COLOR_PALETTE[_userColorIndex % _USER_COLOR_PALETTE.length];
+            _userColorIndex++;
+        }
+        return _userColorMap[key];
+    }
+
+    function _aplicarCorUsuarioLinha(row, usuarioQueMarkou) {
+        const cor = _getUsuarioColor(usuarioQueMarkou);
+        if (cor) {
+            row.style.backgroundColor = cor.bg;
+            row.style.outline = `2px solid ${cor.border}`;
+            row.style.outlineOffset = '-2px';
+            row.dataset.marcadoPor = usuarioQueMarkou;
+        } else {
+            row.style.backgroundColor = '';
+            row.style.outline = '';
+            row.style.outlineOffset = '';
+            delete row.dataset.marcadoPor;
+        }
+    }
+
     // ==== FUNÇÃO PARA MARCAR/DESMARCAR ITEM PARA FATURAMENTO ====
     function handleMarcarFaturar(uniqueId, linha, marcar) {
-        console.log(`${marcar ? '✓' : '✗'} Marcando item para faturar: ${uniqueId} (linha ${linha})`);
+        const sessao = _getSessaoLocal();
+        const usuarioAtual = (sessao && sessao.usuario) ? sessao.usuario.trim() : '';
+
+        console.log(`${marcar ? '✓' : '✗'} Marcando item para faturar: ${uniqueId} (linha ${linha}) por "${usuarioAtual}"`);
 
         google.script.run
             .withSuccessHandler(result => {
@@ -2603,30 +2666,54 @@ ALL_OCS_ITEMS = itemsObj;
                     if (row) {
                         if (marcar) {
                             row.classList.add('item-marcado-faturar');
+                            _aplicarCorUsuarioLinha(row, usuarioAtual);
+                            // Atualiza badge e desabilita checkbox para outros usuários
+                            const cb = row.querySelector('.checkbox-faturar');
+                            if (cb) {
+                                const cor = _getUsuarioColor(usuarioAtual);
+                                cb.title = `Marcado por: ${usuarioAtual} — apenas ${usuarioAtual} pode desmarcar`;
+                                cb.dataset.marcadoPor = usuarioAtual;
+                                let badge = row.querySelector('.faturar-badge-usuario');
+                                if (!badge) {
+                                    badge = document.createElement('span');
+                                    badge.className = 'faturar-badge-usuario';
+                                    cb.parentNode.insertBefore(badge, cb.nextSibling);
+                                }
+                                badge.textContent = usuarioAtual;
+                                if (cor) badge.style.backgroundColor = cor.border;
+                            }
                         } else {
                             row.classList.remove('item-marcado-faturar');
+                            _aplicarCorUsuarioLinha(row, null);
+                            const cb = row.querySelector('.checkbox-faturar');
+                            if (cb) {
+                                cb.title = 'Marcar para faturamento';
+                                cb.disabled = false;
+                                delete cb.dataset.marcadoPor;
+                            }
+                            const badge = row.querySelector('.faturar-badge-usuario');
+                            if (badge) badge.remove();
                         }
                     }
                     console.log(`✅ Item ${marcar ? 'marcado' : 'desmarcado'} para faturamento!`);
                 } else {
-                    showError('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
+                    if (result.bloqueado) {
+                        showError(result.error);
+                    } else {
+                        showError('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
+                    }
                     // Reverte checkbox em caso de erro
                     const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
-                    if (checkbox) {
-                        checkbox.checked = !marcar;
-                    }
+                    if (checkbox) checkbox.checked = !marcar;
                 }
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao marcar item:', error);
                 showError('Falha ao marcar item: ' + error.message);
-                // Reverte checkbox em caso de erro
                 const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
-                if (checkbox) {
-                    checkbox.checked = !marcar;
-                }
+                if (checkbox) checkbox.checked = !marcar;
             })
-            .marcarParaFaturar(uniqueId, linha, marcar);
+            .marcarParaFaturar(uniqueId, linha, marcar, usuarioAtual);
     }
 
     // ==== MODAL DE BAIXA PARCIAL ====

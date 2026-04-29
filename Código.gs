@@ -54,6 +54,7 @@ const DB_QTD_COL     = 9;  // QTD. ABERTA (≠ QTD_COL=10 que é da aba PEDIDOS)
 const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
 const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova coluna para marcar itens para faturamento
 const DATA_STATUS_COL = 16;    // Q (coluna 17) - Data em que o status foi alterado para Faturado/Finalizado/Excluido
+const MARCAR_FATURAR_USUARIO_COL = 21; // V (coluna 22) - Usuário que marcou o item para faturamento
 const PEDIDOS_CODIGO_FIXO_COL = 18; // S (coluna 19) — UUID fixo por item, gerado uma vez e preservado para sempre
 const DB_CODIGO_FIXO_COL      = 18; // S (coluna 19) — mesmo UUID propagado do PEDIDOS para o Relatorio_DB
 const PEDIDOS_POSICAO_FONTE_COL = 16; // Q (coluna 17) — índice do item em DADOS_IMPORTADOS (para manter ordem original)
@@ -3103,11 +3104,12 @@ const RELATORIO_DB_HEADERS = [
   'ID_UNICO', 'CARTELA', 'CLIENTE', 'PEDIDO', 'CÓD. CLIENTE',
   'CÓD. MARFIM', 'DESCRIÇÃO', 'TAMANHO', 'ORD. COMPRA', 'QTD. ABERTA',
   'CÓD. OS', 'DATA RECEB.', 'DT. ENTREGA', 'PRAZO', 'Status', 'MARCAR_FATURAR',
-  'DATA_STATUS',   // Q - data em que o status foi alterado para Faturado/Finalizado/Excluido
-  'POSICAO_FONTE', // R - índice do item em DADOS_IMPORTADOS (preserva ordem original)
-  'CODIGO_FIXO',   // S - UUID imutável por item
-  'INFO_X',        // T - campo da coluna X da fonte (informação adicional da OC)
-  'LOTE'           // U - número de lote da coluna Y da fonte
+  'DATA_STATUS',            // Q - data em que o status foi alterado para Faturado/Finalizado/Excluido
+  'POSICAO_FONTE',          // R - índice do item em DADOS_IMPORTADOS (preserva ordem original)
+  'CODIGO_FIXO',            // S - UUID imutável por item
+  'INFO_X',                 // T - campo da coluna X da fonte (informação adicional da OC)
+  'LOTE',                   // U - número de lote da coluna Y da fonte
+  'MARCAR_FATURAR_USUARIO'  // V - usuário que marcou o item para faturamento
 ];
 
 /**
@@ -3242,6 +3244,7 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
 
     Status: getDisp('Status', 'Desconhecido'),
     MARCAR_FATURAR: getDisp('MARCAR_FATURAR', ''),
+    MARCAR_FATURAR_USUARIO: getDisp('MARCAR_FATURAR_USUARIO', ''),
     INFO_X: getDisp('INFO_X', ''),
     LOTE:   getDisp('LOTE',   ''),
     // Posição original em DADOS_IMPORTADOS — lida por índice fixo (col R = índice 17 no DB)
@@ -3556,7 +3559,7 @@ function finalizarMultiplosItens(items) {
 
 // ====== FUNÇÕES PARA MARCAR ITENS PARA FATURAMENTO ======
 
-function marcarParaFaturar(uniqueId, planilhaLinha, marcar) {
+function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario) {
   try {
     const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
@@ -3566,35 +3569,58 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar) {
       throw new Error(`Linha inválida: ${planilhaLinha}`);
     }
 
-    // Lê cabeçalhos - força leitura de pelo menos 16 colunas (A-P)
-    const numCols = Math.max(sheet.getLastColumn(), 16);
+    // Lê cabeçalhos - força leitura de pelo menos 22 colunas (A-V)
+    const numCols = Math.max(sheet.getLastColumn(), 22);
     const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
     const colMap = _getColumnIndexes_(headers);
     let marcarCol = colMap['MARCAR_FATURAR'];
+    let usuarioCol = colMap['MARCAR_FATURAR_USUARIO'];
 
     Logger.log(`📋 DEBUG marcarParaFaturar - Colunas lidas: ${numCols}, Headers: ${headers.length}`);
-    Logger.log(`📋 DEBUG - Coluna P1 contém: "${headers[15] || 'VAZIO'}"`);
     Logger.log(`📋 DEBUG - MARCAR_FATURAR encontrada no índice: ${marcarCol}`);
+    Logger.log(`📋 DEBUG - MARCAR_FATURAR_USUARIO encontrada no índice: ${usuarioCol}`);
 
     if (marcarCol === undefined) {
       Logger.log("⚠️ Coluna 'MARCAR_FATURAR' não encontrada - criando automaticamente...");
-
-      // Cria a coluna MARCAR_FATURAR no cabeçalho (coluna P = 16)
       sheet.getRange(1, 16).setValue('MARCAR_FATURAR');
-      marcarCol = 15; // índice da coluna P (base 0)
-
+      marcarCol = 15;
       Logger.log("✅ Coluna 'MARCAR_FATURAR' criada na coluna P");
+    }
+
+    if (usuarioCol === undefined) {
+      Logger.log("⚠️ Coluna 'MARCAR_FATURAR_USUARIO' não encontrada - criando automaticamente...");
+      sheet.getRange(1, 22).setValue('MARCAR_FATURAR_USUARIO');
+      usuarioCol = 21;
+      Logger.log("✅ Coluna 'MARCAR_FATURAR_USUARIO' criada na coluna V");
+    }
+
+    // Ao desmarcar: valida que é o mesmo usuário que marcou
+    if (!marcar) {
+      const usuarioQueMarkou = String(sheet.getRange(linhaNum, usuarioCol + 1).getValue() || '').trim();
+      const usuarioAtual = String(usuario || '').trim();
+      if (usuarioQueMarkou && usuarioAtual && usuarioQueMarkou.toLowerCase() !== usuarioAtual.toLowerCase()) {
+        Logger.log(`🚫 Desmarcação bloqueada: item marcado por "${usuarioQueMarkou}", tentativa de "${usuarioAtual}"`);
+        return {
+          success: false,
+          bloqueado: true,
+          error: `Este item foi marcado por "${usuarioQueMarkou}". Apenas esse usuário pode desmarcá-lo.`,
+          id: uniqueId,
+          linha: linhaNum
+        };
+      }
     }
 
     // Marca ou desmarca
     const valor = marcar ? "SIM" : "";
+    const usuarioValor = marcar ? String(usuario || '').trim() : "";
     sheet.getRange(linhaNum, marcarCol + 1).setValue(valor);
+    sheet.getRange(linhaNum, usuarioCol + 1).setValue(usuarioValor);
 
     SpreadsheetApp.flush();
     limparCache();
 
-    Logger.log(`✓ ${uniqueId} → Marcado para faturar: ${marcar} (linha ${linhaNum})`);
-    return { success: true, id: uniqueId, linha: linhaNum, marcado: marcar };
+    Logger.log(`✓ ${uniqueId} → Marcado para faturar: ${marcar} por "${usuarioValor}" (linha ${linhaNum})`);
+    return { success: true, id: uniqueId, linha: linhaNum, marcado: marcar, usuario: usuarioValor };
   } catch (e) {
     Logger.log(`❌ marcarParaFaturar: ${e.message}`);
     return { success: false, error: e.message, id: uniqueId || null, linha: planilhaLinha };
@@ -3685,6 +3711,7 @@ function obterItensMarcadosParaFaturar() {
             'DATA RECEB.': _fmtBR_(item['DATA RECEB.']),  // Converte Date para string
             Status: item.Status,
             MARCAR_FATURAR: item.MARCAR_FATURAR,
+            MARCAR_FATURAR_USUARIO: item.MARCAR_FATURAR_USUARIO || '',
             INFO_X: item.INFO_X || '',
             LOTE:   item.LOTE   || '',
             SALDO: saldo
