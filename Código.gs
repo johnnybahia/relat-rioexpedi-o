@@ -3857,6 +3857,27 @@ function autenticarLogin(usuario, senha) {
 }
 
 /**
+ * Retorna lista de todos os usuários cadastrados na aba CADASTRO.
+ * Usado pelo filtro de usuários no relatório de faturamento.
+ */
+function listarUsuariosCadastrados() {
+  try {
+    const sheet = getSpreadsheet_().getSheetByName('CADASTRO');
+    if (!sheet) return { success: false, usuarios: [] };
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 1) return { success: true, usuarios: [] };
+    const data = sheet.getRange(1, 1, lastRow, 1).getValues();
+    const usuarios = data
+      .map(row => String(row[0] || '').trim())
+      .filter(u => u.length > 0);
+    return { success: true, usuarios };
+  } catch (e) {
+    Logger.log('❌ listarUsuariosCadastrados: ' + e.message);
+    return { success: false, usuarios: [] };
+  }
+}
+
+/**
  * Retorna o nível atual de um usuário sem precisar da senha.
  * Usado para re-validação em tempo real a cada 30s.
  */
