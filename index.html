@@ -2073,14 +2073,14 @@ ALL_OCS_ITEMS = itemsObj;
                 const isFaturado = item.Status?.toLowerCase() === 'faturado';
                 const isMarcadoFaturar = item.MARCAR_FATURAR && String(item.MARCAR_FATURAR).toUpperCase() === 'SIM';
                 const usuarioQueMarkou = isMarcadoFaturar ? String(item.MARCAR_FATURAR_USUARIO || '').trim() : '';
-                const corUsuario = isMarcadoFaturar ? _getUsuarioColor(usuarioQueMarkou || _usuarioAtual) : null;
+                const corUsuario = (isMarcadoFaturar && usuarioQueMarkou) ? _getUsuarioColor(usuarioQueMarkou) : null;
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
 
                 const classeMarcado = isMarcadoFaturar ? 'item-marcado-faturar' : '';
                 const inlineStyle = corUsuario ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"` : '';
-                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${usuarioQueMarkou}"` : ''}>`;
+                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${_escapeHtml(usuarioQueMarkou)}"` : ''}>`;
 
                 bodyHtml += `
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
@@ -2112,16 +2112,18 @@ ALL_OCS_ITEMS = itemsObj;
                         const checkedAttr = isMarcadoFaturar ? 'checked' : '';
                         const outrousuario = isMarcadoFaturar && usuarioQueMarkou && _usuarioAtual && usuarioQueMarkou.toLowerCase() !== _usuarioAtual.toLowerCase();
                         const cbDisabled = outrousuario ? 'disabled' : '';
+                        const _uEsc = _escapeHtml(usuarioQueMarkou);
+                        const _uAtualEsc = _escapeHtml(_usuarioAtual);
                         const cbTitle = isMarcadoFaturar
                             ? (outrousuario
-                                ? `Marcado por: ${usuarioQueMarkou} — apenas ${usuarioQueMarkou} pode desmarcar`
-                                : `Marcado por: ${usuarioQueMarkou || _usuarioAtual} — clique para desmarcar`)
+                                ? `Marcado por: ${_uEsc} — apenas ${_uEsc} pode desmarcar`
+                                : `Marcado por: ${_uEsc || _uAtualEsc} — clique para desmarcar`)
                             : 'Marcar para faturamento';
                         const cbStyle = outrousuario ? 'opacity:0.5; cursor:not-allowed;' : '';
-                        const badgeHtml = (isMarcadoFaturar && (usuarioQueMarkou || _usuarioAtual))
-                            ? (() => { const c = _getUsuarioColor(usuarioQueMarkou || _usuarioAtual); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${usuarioQueMarkou || _usuarioAtual}</span>` : ''; })()
+                        const badgeHtml = (isMarcadoFaturar && usuarioQueMarkou)
+                            ? (() => { const c = _getUsuarioColor(usuarioQueMarkou); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${_uEsc}</span>` : ''; })()
                             : '';
-                        bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} ${cbDisabled} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="${cbTitle}" style="${cbStyle}" data-marcado-por="${usuarioQueMarkou}">${badgeHtml}`;
+                        bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} ${cbDisabled} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="${cbTitle}" style="${cbStyle}" data-marcado-por="${_uEsc}">${badgeHtml}`;
                     } else {
                         bodyHtml += ` <span class="badge-faturado">FATURADO</span>`;
                     }
@@ -2649,6 +2651,11 @@ ALL_OCS_ITEMS = itemsObj;
                 showError('Falha ao finalizar item: ' + error.message);
             })
             .finalizarItem(uniqueId, linha);
+    }
+
+    // Escapa caracteres HTML para evitar XSS em strings inseridas no DOM
+    function _escapeHtml(str) {
+        return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
     // ==== PALETA DE CORES POR USUÁRIO ====
@@ -4517,12 +4524,13 @@ ALL_OCS_ITEMS = itemsObj;
         $lista.innerHTML = '';
         lista.forEach(({ nome, count, temItens }) => {
             const cor = _getUsuarioColor(nome);
+            const nomeEsc = _escapeHtml(nome);
             const li = document.createElement('li');
             if (!temItens) li.classList.add('sem-itens');
             li.innerHTML = `
-                <input type="checkbox" ${temItens ? 'checked' : 'disabled'} data-usuario="${nome.toLowerCase()}">
+                <input type="checkbox" ${temItens ? 'checked' : 'disabled'} data-usuario="${_escapeHtml(nome.toLowerCase())}">
                 ${cor ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${cor.border};flex-shrink:0;"></span>` : ''}
-                <span class="filtro-fatur-nome">${nome}</span>
+                <span class="filtro-fatur-nome">${nomeEsc}</span>
                 <span class="filtro-fatur-count">${temItens ? count + (count === 1 ? ' item' : ' itens') : 'sem itens'}</span>`;
             if (temItens) {
                 li.querySelector('input').addEventListener('change', function() {
@@ -4574,8 +4582,9 @@ ALL_OCS_ITEMS = itemsObj;
         _fecharFiltroFatur();
 
         const itensFiltrados = _filtroFaturItens.filter(item => {
-            const u = String(item.MARCAR_FATURAR_USUARIO || '').trim().toLowerCase() || '__sem_usuario__';
-            return selecionados.has(u) || selecionados.has('(sem usuário)'.toLowerCase());
+            const u = String(item.MARCAR_FATURAR_USUARIO || '').trim().toLowerCase();
+            // Itens sem usuário são tratados separadamente com a chave '(sem usuário)'
+            return u ? selecionados.has(u) : selecionados.has('(sem usuário)');
         });
 
         if (itensFiltrados.length === 0) {
@@ -4587,6 +4596,11 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     function _imprimirRelatorioFaturamento(itensMarcados, usuarioLogado, usuariosFiltro) {
+        const usuarioLogadoEsc = _escapeHtml(usuarioLogado);
+        const filtroTextoEsc = _escapeHtml(
+            usuariosFiltro && usuariosFiltro.length > 0 ? usuariosFiltro.join(', ') : 'Todos'
+        );
+
         // Agrupar por INFO_X → dentro de cada grupo, por OC
         const gruposPorInfoX = {};
         itensMarcados.forEach(item => {
@@ -4608,9 +4622,9 @@ ALL_OCS_ITEMS = itemsObj;
         const printWindow = window.open('', '_blank');
         const dataHoje = new Date().toLocaleDateString('pt-BR');
         const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-        const filtroTexto = usuariosFiltro && usuariosFiltro.length > 0
-            ? usuariosFiltro.join(', ')
-            : 'Todos';
+        // filtroTexto e usuarioLogado já escapados em _imprimirRelatorioFaturamento()
+        const filtroTexto = filtroTextoEsc;
+        const usuarioLogadoSafe = usuarioLogadoEsc;
 
         let html = `
         <!DOCTYPE html>
@@ -4648,7 +4662,7 @@ ALL_OCS_ITEMS = itemsObj;
             <h1>💰 RELATÓRIO PARA FATURAMENTO</h1>
             <div class="info">
                 Gerado em: ${dataHoje} às ${horaAgora}
-                ${usuarioLogado ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogado}</span>` : ''}
+                ${usuarioLogadoSafe ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogadoSafe}</span>` : ''}
                 <br><span class="info-filtro">Usuários: ${filtroTexto}</span>
             </div>
         `;
@@ -4693,7 +4707,7 @@ ALL_OCS_ITEMS = itemsObj;
                     const dtEntrega = formatarData(item['DT. ENTREGA']);
                     const prazo = formatarPrazoDias(item.PRAZO);
                     const codOS = item['CÓD. OS'] ?? 'N/A';
-                    const marcadoPor = item.MARCAR_FATURAR_USUARIO || '';
+                    const marcadoPor = _escapeHtml(item.MARCAR_FATURAR_USUARIO || '');
 
                     html += `
                         <tr class="highlight">
