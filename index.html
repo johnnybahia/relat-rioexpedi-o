@@ -98,7 +98,9 @@
     .item-table th.qtd-aberta { color: #b91c1c; background-color: #fef2f2; }
     .item-table td.qtd-aberta { color: #b91c1c; font-weight: 700; background-color: #fff5f5; }
     .item-table tr.item-faturado { background-color: #dcfce7; font-weight: 500; }
-    .item-table tr.item-marcado-faturar { background-color: #90EE90 !important; font-weight: 600; }
+    .item-table tr.item-marcado-faturar { font-weight: 600; }
+    .item-table tr.item-marcado-faturar td.qtd-aberta { filter: brightness(0.92); }
+    .faturar-badge-usuario { display: inline-block; font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; color: white; opacity: 0.9; letter-spacing: 0.03em; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .badge-faturado { display: inline-block; background-color: #16a34a; color: white; font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 0.25rem; letter-spacing: 0.05em; vertical-align: middle; }
 
     .item-table tr.keyboard-focus { outline: 3px solid #3b82f6; outline-offset: -3px; }
@@ -152,6 +154,26 @@
     .modal-btn-danger:hover { background-color: #dc2626; }
     .modal-btn-cancel { background-color: #e5e7eb; color: #374151; }
     .modal-btn-cancel:hover { background-color: #d1d5db; }
+
+    /* === MODAL FILTRO DE USUÁRIOS PARA FATURAMENTO === */
+    #filtroUsuarioFaturModal { z-index: 3000; }
+    #filtroUsuarioFaturModal .modal-content { max-width: 480px; }
+    #filtroUsuarioFaturModal .modal-header { background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-bottom-color: #6ee7b7; }
+    #filtroUsuarioFaturModal .modal-header h2 { color: #065f46; font-size: 1.1rem; }
+    .filtro-fatur-lista { list-style: none; padding: 0; margin: 0 0 1rem 0; }
+    .filtro-fatur-lista li { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.75rem; border-radius: 0.5rem; margin-bottom: 0.4rem; border: 1px solid #e5e7eb; cursor: pointer; transition: background 0.15s; }
+    .filtro-fatur-lista li:hover:not(.sem-itens) { background-color: #f0fdf4; }
+    .filtro-fatur-lista li.sem-itens { opacity: 0.45; cursor: default; background: #f9fafb; }
+    .filtro-fatur-lista li input[type=checkbox] { width: 17px; height: 17px; cursor: pointer; flex-shrink: 0; accent-color: #16a34a; }
+    .filtro-fatur-lista li.sem-itens input[type=checkbox] { cursor: not-allowed; }
+    .filtro-fatur-nome { font-weight: 600; font-size: 0.9rem; color: #1f2937; flex: 1; }
+    .filtro-fatur-lista li.sem-itens .filtro-fatur-nome { color: #9ca3af; }
+    .filtro-fatur-count { font-size: 0.72rem; font-weight: 700; padding: 2px 7px; border-radius: 9999px; background: #16a34a; color: white; white-space: nowrap; }
+    .filtro-fatur-lista li.sem-itens .filtro-fatur-count { background: #d1d5db; color: #6b7280; }
+    .filtro-fatur-atalhos { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .filtro-fatur-atalhos button { flex: 1; padding: 0.35rem 0; font-size: 0.78rem; font-weight: 600; border: 1px solid #d1d5db; border-radius: 0.375rem; cursor: pointer; background: white; color: #374151; transition: all 0.15s; }
+    .filtro-fatur-atalhos button:hover { background: #f3f4f6; border-color: #9ca3af; }
+    .filtro-fatur-aviso { font-size: 0.8rem; color: #6b7280; text-align: center; margin-top: 0.5rem; }
 
     /* === MODAL ALERTA FATURAMENTO === */
     #alertaFaturamentoModal { z-index: 9999; background-color: rgba(0,0,0,0.75); }
@@ -931,6 +953,27 @@
       </div>
       <div class="modal-footer">
         <button id="alertaConfirmarBtn" class="modal-btn" onclick="confirmarAlertaAtual()">Confirmar e continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: filtro de usuários para relatório de faturamento -->
+  <div id="filtroUsuarioFaturModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>🖨️ Filtrar Usuários — Relatório de Faturamento</h2>
+      </div>
+      <div class="modal-body">
+        <div class="filtro-fatur-atalhos">
+          <button onclick="_filtroFaturSelecionarTodos()">Marcar todos</button>
+          <button onclick="_filtroFaturDesmarcarTodos()">Desmarcar todos</button>
+        </div>
+        <ul id="filtroFaturLista" class="filtro-fatur-lista"></ul>
+        <p class="filtro-fatur-aviso">Usuários sem itens marcados aparecem desabilitados.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-cancel" onclick="_fecharFiltroFatur()">Cancelar</button>
+        <button class="modal-btn modal-btn-confirm" onclick="_confirmarFiltroFatur()">Imprimir selecionados</button>
       </div>
     </div>
   </div>
@@ -2020,18 +2063,24 @@ ALL_OCS_ITEMS = itemsObj;
                             <th>Lote</th>
                             ${_acoesHeader}</tr></thead><tbody>`;
 
+            const _sessaoAtual = _getSessaoLocal();
+            const _usuarioAtual = (_sessaoAtual && _sessaoAtual.usuario) ? _sessaoAtual.usuario.trim() : '';
+
             items.forEach(item => {
                 if (!item) return;
                 const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
                 const itemId = `item-linha-${item.planilhaLinha}`;
                 const isFaturado = item.Status?.toLowerCase() === 'faturado';
                 const isMarcadoFaturar = item.MARCAR_FATURAR && String(item.MARCAR_FATURAR).toUpperCase() === 'SIM';
+                const usuarioQueMarkou = isMarcadoFaturar ? String(item.MARCAR_FATURAR_USUARIO || '').trim() : '';
+                const corUsuario = (isMarcadoFaturar && usuarioQueMarkou) ? _getUsuarioColor(usuarioQueMarkou) : null;
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
 
                 const classeMarcado = isMarcadoFaturar ? 'item-marcado-faturar' : '';
-                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}">`;
+                const inlineStyle = corUsuario ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"` : '';
+                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${_escapeHtml(usuarioQueMarkou)}"` : ''}>`;
 
                 bodyHtml += `
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
@@ -2061,7 +2110,20 @@ ALL_OCS_ITEMS = itemsObj;
                     if (!isFaturado) {
                         bodyHtml += ` <button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
                         const checkedAttr = isMarcadoFaturar ? 'checked' : '';
-                        bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="Marcar para faturamento">`;
+                        const outrousuario = isMarcadoFaturar && usuarioQueMarkou && _usuarioAtual && usuarioQueMarkou.toLowerCase() !== _usuarioAtual.toLowerCase();
+                        const cbDisabled = outrousuario ? 'disabled' : '';
+                        const _uEsc = _escapeHtml(usuarioQueMarkou);
+                        const _uAtualEsc = _escapeHtml(_usuarioAtual);
+                        const cbTitle = isMarcadoFaturar
+                            ? (outrousuario
+                                ? `Marcado por: ${_uEsc} — apenas ${_uEsc} pode desmarcar`
+                                : `Marcado por: ${_uEsc || _uAtualEsc} — clique para desmarcar`)
+                            : 'Marcar para faturamento';
+                        const cbStyle = outrousuario ? 'opacity:0.5; cursor:not-allowed;' : '';
+                        const badgeHtml = (isMarcadoFaturar && usuarioQueMarkou)
+                            ? (() => { const c = _getUsuarioColor(usuarioQueMarkou); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${_uEsc}</span>` : ''; })()
+                            : '';
+                        bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} ${cbDisabled} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="${cbTitle}" style="${cbStyle}" data-marcado-por="${_uEsc}">${badgeHtml}`;
                     } else {
                         bodyHtml += ` <span class="badge-faturado">FATURADO</span>`;
                     }
@@ -2591,9 +2653,58 @@ ALL_OCS_ITEMS = itemsObj;
             .finalizarItem(uniqueId, linha);
     }
 
+    // Escapa caracteres HTML para evitar XSS em strings inseridas no DOM
+    function _escapeHtml(str) {
+        return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // ==== PALETA DE CORES POR USUÁRIO ====
+    const _USER_COLOR_PALETTE = [
+        { bg: '#bbf7d0', border: '#16a34a', text: '#14532d' }, // verde
+        { bg: '#bfdbfe', border: '#2563eb', text: '#1e3a8a' }, // azul
+        { bg: '#fde68a', border: '#d97706', text: '#78350f' }, // amarelo
+        { bg: '#fecaca', border: '#dc2626', text: '#7f1d1d' }, // vermelho
+        { bg: '#ddd6fe', border: '#7c3aed', text: '#3b0764' }, // roxo
+        { bg: '#fed7aa', border: '#ea580c', text: '#7c2d12' }, // laranja
+        { bg: '#a5f3fc', border: '#0891b2', text: '#164e63' }, // ciano
+        { bg: '#fbcfe8', border: '#db2777', text: '#831843' }, // rosa
+        { bg: '#d9f99d', border: '#65a30d', text: '#365314' }, // lima
+        { bg: '#e9d5ff', border: '#9333ea', text: '#581c87' }, // violeta
+    ];
+    const _userColorMap = {};
+    let _userColorIndex = 0;
+
+    function _getUsuarioColor(usuario) {
+        if (!usuario) return null;
+        const key = usuario.trim().toLowerCase();
+        if (!_userColorMap[key]) {
+            _userColorMap[key] = _USER_COLOR_PALETTE[_userColorIndex % _USER_COLOR_PALETTE.length];
+            _userColorIndex++;
+        }
+        return _userColorMap[key];
+    }
+
+    function _aplicarCorUsuarioLinha(row, usuarioQueMarkou) {
+        const cor = _getUsuarioColor(usuarioQueMarkou);
+        if (cor) {
+            row.style.backgroundColor = cor.bg;
+            row.style.outline = `2px solid ${cor.border}`;
+            row.style.outlineOffset = '-2px';
+            row.dataset.marcadoPor = usuarioQueMarkou;
+        } else {
+            row.style.backgroundColor = '';
+            row.style.outline = '';
+            row.style.outlineOffset = '';
+            delete row.dataset.marcadoPor;
+        }
+    }
+
     // ==== FUNÇÃO PARA MARCAR/DESMARCAR ITEM PARA FATURAMENTO ====
     function handleMarcarFaturar(uniqueId, linha, marcar) {
-        console.log(`${marcar ? '✓' : '✗'} Marcando item para faturar: ${uniqueId} (linha ${linha})`);
+        const sessao = _getSessaoLocal();
+        const usuarioAtual = (sessao && sessao.usuario) ? sessao.usuario.trim() : '';
+
+        console.log(`${marcar ? '✓' : '✗'} Marcando item para faturar: ${uniqueId} (linha ${linha}) por "${usuarioAtual}"`);
 
         google.script.run
             .withSuccessHandler(result => {
@@ -2603,30 +2714,54 @@ ALL_OCS_ITEMS = itemsObj;
                     if (row) {
                         if (marcar) {
                             row.classList.add('item-marcado-faturar');
+                            _aplicarCorUsuarioLinha(row, usuarioAtual);
+                            // Atualiza badge e desabilita checkbox para outros usuários
+                            const cb = row.querySelector('.checkbox-faturar');
+                            if (cb) {
+                                const cor = _getUsuarioColor(usuarioAtual);
+                                cb.title = `Marcado por: ${usuarioAtual} — apenas ${usuarioAtual} pode desmarcar`;
+                                cb.dataset.marcadoPor = usuarioAtual;
+                                let badge = row.querySelector('.faturar-badge-usuario');
+                                if (!badge) {
+                                    badge = document.createElement('span');
+                                    badge.className = 'faturar-badge-usuario';
+                                    cb.parentNode.insertBefore(badge, cb.nextSibling);
+                                }
+                                badge.textContent = usuarioAtual;
+                                if (cor) badge.style.backgroundColor = cor.border;
+                            }
                         } else {
                             row.classList.remove('item-marcado-faturar');
+                            _aplicarCorUsuarioLinha(row, null);
+                            const cb = row.querySelector('.checkbox-faturar');
+                            if (cb) {
+                                cb.title = 'Marcar para faturamento';
+                                cb.disabled = false;
+                                delete cb.dataset.marcadoPor;
+                            }
+                            const badge = row.querySelector('.faturar-badge-usuario');
+                            if (badge) badge.remove();
                         }
                     }
                     console.log(`✅ Item ${marcar ? 'marcado' : 'desmarcado'} para faturamento!`);
                 } else {
-                    showError('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
+                    if (result.bloqueado) {
+                        showError(result.error);
+                    } else {
+                        showError('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
+                    }
                     // Reverte checkbox em caso de erro
                     const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
-                    if (checkbox) {
-                        checkbox.checked = !marcar;
-                    }
+                    if (checkbox) checkbox.checked = !marcar;
                 }
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao marcar item:', error);
                 showError('Falha ao marcar item: ' + error.message);
-                // Reverte checkbox em caso de erro
                 const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
-                if (checkbox) {
-                    checkbox.checked = !marcar;
-                }
+                if (checkbox) checkbox.checked = !marcar;
             })
-            .marcarParaFaturar(uniqueId, linha, marcar);
+            .marcarParaFaturar(uniqueId, linha, marcar, usuarioAtual);
     }
 
     // ==== MODAL DE BAIXA PARCIAL ====
@@ -4284,6 +4419,11 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     // ==== RELATÓRIO PARA FATURAMENTO ====
+
+    // Armazena estado do filtro de usuários
+    let _filtroFaturItens = [];
+    let _filtroFaturUsuarioLogado = '';
+
     function gerarRelatorioFaturamento() {
         console.log('💰 Gerando Relatório para Faturamento...');
 
@@ -4294,20 +4434,16 @@ ALL_OCS_ITEMS = itemsObj;
             .withSuccessHandler(function(result) {
                 show($loader, false);
 
-                // Validação robusta da resposta
                 if (!result || result === null || result === undefined) {
                     showError('ERRO: A coluna MARCAR_FATURAR não existe na planilha Relatorio_DB.\n\nSOLUÇÃO: Clique no botão "Atualizar" para sincronizar e criar a coluna automaticamente.');
-                    console.error('❌ Resposta nula do backend - coluna MARCAR_FATURAR pode não existir');
                     return;
                 }
-
                 if (!result.success) {
                     showError('Erro ao obter itens marcados: ' + (result.error || 'Erro desconhecido'));
                     return;
                 }
 
                 const itensMarcados = result.items || [];
-
                 if (itensMarcados.length === 0) {
                     showError('Nenhum item está marcado para faturamento. Marque ao menos um item antes de gerar o relatório.');
                     return;
@@ -4315,177 +4451,25 @@ ALL_OCS_ITEMS = itemsObj;
 
                 console.log(`✓ ${itensMarcados.length} itens marcados para faturamento`);
 
-                // Agrupar por INFO_X → dentro de cada grupo, por OC
-                const gruposPorInfoX = {};
-                itensMarcados.forEach(item => {
-                    const infoX = (item.INFO_X || '').trim() || '(Sem Referência)';
-                    const oc    = item['ORD. COMPRA'] || 'SEM OC';
-                    if (!gruposPorInfoX[infoX]) gruposPorInfoX[infoX] = {};
-                    if (!gruposPorInfoX[infoX][oc]) {
-                        gruposPorInfoX[infoX][oc] = { cliente: item.CLIENTE || 'SEM CLIENTE', itens: [] };
-                    }
-                    gruposPorInfoX[infoX][oc].itens.push(item);
-                });
-
-                // Ordena grupos: grupos com conteúdo real primeiro, "(Sem Referência)" por último
-                const gruposOrdenados = Object.keys(gruposPorInfoX).sort((a, b) => {
-                    if (a === '(Sem Referência)') return 1;
-                    if (b === '(Sem Referência)') return -1;
-                    return a.localeCompare(b, 'pt-BR');
-                });
-
-                // Criar janela de impressão
-                const printWindow = window.open('', '_blank');
-                const dataHoje = new Date().toLocaleDateString('pt-BR');
-                const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                 const sessao = _getSessaoLocal();
-                const usuarioLogado = (sessao && sessao.usuario) ? sessao.usuario : '';
+                _filtroFaturItens = itensMarcados;
+                _filtroFaturUsuarioLogado = (sessao && sessao.usuario) ? sessao.usuario : '';
 
-                let html = `
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="UTF-8">
-                    <title>Relatório para Faturamento</title>
-                    <style>
-                        * { margin: 0; padding: 0; box-sizing: border-box; }
-                        body {
-                            font-family: Arial, sans-serif;
-                            font-size: 14px;
-                            orphans: 3;
-                            widows: 3;
-                        }
-                        h1 {
-                            text-align: center;
-                            margin: 0 0 5px 0;
-                            padding: 10px 0 0 0;
-                            font-size: 20px;
-                            color: #10b981;
-                        }
-                        .info {
-                            text-align: center;
-                            margin: 0 0 10px 0;
-                            color: #666;
-                            font-size: 11px;
-                            line-height: 1.3;
-                        }
-                        .info-usuario {
-                            font-weight: bold;
-                            color: #166534;
-                        }
-                        .grupo-section { margin-bottom: 28px; }
-                        .grupo-header { background: #1e40af; color: white; padding: 9px 12px; border-radius: 6px 6px 0 0; font-size: 15px; font-weight: bold; letter-spacing: 0.3px; }
-                        .grupo-body { border: 2px solid #1e40af; border-top: none; border-radius: 0 0 6px 6px; padding: 10px; background: #f0f7ff; }
-                        .oc-section { page-break-inside: avoid; margin-bottom: 14px; background: #f0fdf4; padding: 8px; border: 2px solid #22c55e; border-radius: 6px; }
-                        .oc-header { background: #dcfce7; padding: 8px; border: 2px solid #16a34a; margin-bottom: 8px; border-radius: 4px; }
-                        .oc-title { font-size: 15px; font-weight: bold; margin-bottom: 4px; color: #166534; }
-                        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-                        th { background: #16a34a; color: white; padding: 7px 4px; text-align: left; font-size: 11px; border: 1px solid #166534; }
-                        td { padding: 6px 4px; border: 1px solid #dcfce7; font-size: 11px; background: white; }
-                        tr:nth-child(even) td { background: #f0fdf4; }
-                        .highlight { background: #90EE90 !important; font-weight: 600; }
-                        @media print {
-                            @page {
-                                size: A4 landscape;
-                                margin: 0.8cm;
-                            }
-                            body {
-                                margin: 0;
-                                padding: 0;
-                            }
-                            h1, .info {
-                                page-break-after: avoid;
-                                page-break-inside: avoid;
-                            }
-                            .oc-section {
-                                page-break-inside: avoid;
-                            }
-                        }
-                    </style>
-                </head>
-                <body>
-                    <h1>💰 RELATÓRIO PARA FATURAMENTO</h1>
-                    <div class="info">
-                        Gerado em: ${dataHoje} às ${horaAgora}
-                        ${usuarioLogado ? `&nbsp;|&nbsp; Usuário: <span class="info-usuario">${usuarioLogado}</span>` : ''}
-                    </div>
-                `;
-
-                // Renderiza: grupo INFO_X → OCs dentro do grupo
-                gruposOrdenados.forEach(infoX => {
-                    const ocsPorGrupo = gruposPorInfoX[infoX];
-                    const ocsOrdenadas = Object.keys(ocsPorGrupo).sort();
-
-                    html += `<div class="grupo-section">
-                        <div class="grupo-header">📋 ${infoX}</div>
-                        <div class="grupo-body">`;
-
-                    ocsOrdenadas.forEach(ocNum => {
-                        const ocData = ocsPorGrupo[ocNum];
-                        const itens  = ocData.itens;
-
-                        html += `
-                        <div class="oc-section">
-                            <div class="oc-header">
-                                <div class="oc-title">OC: ${ocNum} - ${ocData.cliente}</div>
-                            </div>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Pedido</th>
-                                        <th>Cód. Cliente</th>
-                                        <th>Descrição</th>
-                                        <th>Tamanho</th>
-                                        <th>QUANTIDADE</th>
-                                        <th>OS</th>
-                                        <th>Dt. Recebimento</th>
-                                        <th>Dt. Entrega</th>
-                                        <th>Prazo</th>
-                                    </tr>
-                                </thead>
-                                <tbody>`;
-
-                        itens.forEach(item => {
-                            const saldo = item.SALDO || 0;
-                            const dtRecebimento = formatarData(item['DATA RECEB.']);
-                            const dtEntrega = formatarData(item['DT. ENTREGA']);
-                            const prazo = formatarPrazoDias(item.PRAZO);
-                            const codOS = item['CÓD. OS'] ?? 'N/A';
-
-                            html += `
-                                <tr class="highlight">
-                                    <td>${item.PEDIDO ?? 'N/A'}</td>
-                                    <td>${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
-                                    <td>${item.DESCRIÇÃO ?? 'N/A'}</td>
-                                    <td>${item.TAMANHO ?? 'N/A'}</td>
-                                    <td style="text-align:center;font-weight:700;">${fmtInt(saldo)}</td>
-                                    <td>${codOS}</td>
-                                    <td>${dtRecebimento}</td>
-                                    <td>${dtEntrega}</td>
-                                    <td style="text-align:center;">${prazo}</td>
-                                </tr>`;
-                        });
-
-                        html += `</tbody></table></div>`;
-                    });
-
-                    html += `</div></div>`;
-                });
-
-                html += `
-                </body>
-                </html>
-                `;
-
-                printWindow.document.write(html);
-                printWindow.document.close();
-
-                // Aguardar carregamento e imprimir
-                setTimeout(() => {
-                    printWindow.print();
-                }, 250);
-
-                console.log('✅ Relatório de Faturamento gerado com sucesso!');
+                // Busca lista de todos os usuários cadastrados
+                show($loader, true);
+                $loadingText.textContent = 'Carregando usuários...';
+                google.script.run
+                    .withSuccessHandler(function(resUsuarios) {
+                        show($loader, false);
+                        const todosUsuarios = (resUsuarios && resUsuarios.usuarios) ? resUsuarios.usuarios : [];
+                        _mostrarFiltroFatur(itensMarcados, todosUsuarios);
+                    })
+                    .withFailureHandler(function() {
+                        show($loader, false);
+                        // Se falhar ao buscar usuários, abre com lista apenas dos que têm itens
+                        _mostrarFiltroFatur(itensMarcados, []);
+                    })
+                    .listarUsuariosCadastrados();
             })
             .withFailureHandler(function(error) {
                 show($loader, false);
@@ -4493,6 +4477,266 @@ ALL_OCS_ITEMS = itemsObj;
                 showError('Falha ao gerar relatório: ' + error.message);
             })
             .obterItensMarcadosParaFaturar();
+    }
+
+    function _mostrarFiltroFatur(itensMarcados, todosUsuarios) {
+        // Coleta usuários que têm itens, com contagem
+        const contagemPorUsuario = {};
+        itensMarcados.forEach(item => {
+            const u = String(item.MARCAR_FATURAR_USUARIO || '').trim();
+            const key = u.toLowerCase() || '__sem_usuario__';
+            if (!contagemPorUsuario[key]) contagemPorUsuario[key] = { nome: u || '(sem usuário)', count: 0 };
+            contagemPorUsuario[key].count++;
+        });
+
+        // Monta lista final: usuários cadastrados + usuários com itens que não estão no cadastro
+        const usuariosNormalizados = new Set(todosUsuarios.map(u => u.toLowerCase()));
+        const lista = [];
+
+        // Primeiro: todos os cadastrados (com ou sem itens)
+        todosUsuarios.forEach(u => {
+            const key = u.toLowerCase();
+            const temItens = contagemPorUsuario[key];
+            lista.push({ nome: u, count: temItens ? temItens.count : 0, temItens: !!temItens });
+        });
+
+        // Depois: usuários com itens que não estão no cadastro (ex: legado)
+        Object.values(contagemPorUsuario).forEach(({ nome, count }) => {
+            const key = nome.toLowerCase();
+            if (key !== '__sem_usuario__' && !usuariosNormalizados.has(key)) {
+                lista.push({ nome, count, temItens: true });
+            }
+        });
+
+        // Se há itens sem usuário atribuído, adiciona entrada
+        if (contagemPorUsuario['__sem_usuario__']) {
+            lista.push({ nome: '(sem usuário)', count: contagemPorUsuario['__sem_usuario__'].count, temItens: true });
+        }
+
+        // Ordena: com itens primeiro (por nome), sem itens depois
+        lista.sort((a, b) => {
+            if (a.temItens !== b.temItens) return a.temItens ? -1 : 1;
+            return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+        });
+
+        // Renderiza lista no modal
+        const $lista = document.getElementById('filtroFaturLista');
+        $lista.innerHTML = '';
+        lista.forEach(({ nome, count, temItens }) => {
+            const cor = _getUsuarioColor(nome);
+            const nomeEsc = _escapeHtml(nome);
+            const li = document.createElement('li');
+            if (!temItens) li.classList.add('sem-itens');
+            li.innerHTML = `
+                <input type="checkbox" ${temItens ? 'checked' : 'disabled'} data-usuario="${_escapeHtml(nome.toLowerCase())}">
+                ${cor ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${cor.border};flex-shrink:0;"></span>` : ''}
+                <span class="filtro-fatur-nome">${nomeEsc}</span>
+                <span class="filtro-fatur-count">${temItens ? count + (count === 1 ? ' item' : ' itens') : 'sem itens'}</span>`;
+            if (temItens) {
+                li.querySelector('input').addEventListener('change', function() {
+                    li.style.opacity = this.checked ? '1' : '0.5';
+                });
+                li.addEventListener('click', function(e) {
+                    if (e.target.tagName !== 'INPUT') {
+                        const cb = li.querySelector('input');
+                        cb.checked = !cb.checked;
+                        cb.dispatchEvent(new Event('change'));
+                    }
+                });
+            }
+            $lista.appendChild(li);
+        });
+
+        document.getElementById('filtroUsuarioFaturModal').classList.remove('hidden');
+    }
+
+    function _filtroFaturSelecionarTodos() {
+        document.querySelectorAll('#filtroFaturLista input[type=checkbox]:not([disabled])').forEach(cb => {
+            cb.checked = true;
+            cb.closest('li').style.opacity = '1';
+        });
+    }
+
+    function _filtroFaturDesmarcarTodos() {
+        document.querySelectorAll('#filtroFaturLista input[type=checkbox]:not([disabled])').forEach(cb => {
+            cb.checked = false;
+            cb.closest('li').style.opacity = '0.5';
+        });
+    }
+
+    function _fecharFiltroFatur() {
+        document.getElementById('filtroUsuarioFaturModal').classList.add('hidden');
+    }
+
+    function _confirmarFiltroFatur() {
+        const selecionados = new Set();
+        document.querySelectorAll('#filtroFaturLista input[type=checkbox]:not([disabled]):checked').forEach(cb => {
+            selecionados.add(cb.dataset.usuario);
+        });
+
+        if (selecionados.size === 0) {
+            showError('Selecione ao menos um usuário para imprimir.');
+            return;
+        }
+
+        _fecharFiltroFatur();
+
+        const itensFiltrados = _filtroFaturItens.filter(item => {
+            const u = String(item.MARCAR_FATURAR_USUARIO || '').trim().toLowerCase();
+            // Itens sem usuário são tratados separadamente com a chave '(sem usuário)'
+            return u ? selecionados.has(u) : selecionados.has('(sem usuário)');
+        });
+
+        if (itensFiltrados.length === 0) {
+            showError('Nenhum item encontrado para os usuários selecionados.');
+            return;
+        }
+
+        _imprimirRelatorioFaturamento(itensFiltrados, _filtroFaturUsuarioLogado, [...selecionados]);
+    }
+
+    function _imprimirRelatorioFaturamento(itensMarcados, usuarioLogado, usuariosFiltro) {
+        const usuarioLogadoEsc = _escapeHtml(usuarioLogado);
+        const filtroTextoEsc = _escapeHtml(
+            usuariosFiltro && usuariosFiltro.length > 0 ? usuariosFiltro.join(', ') : 'Todos'
+        );
+
+        // Agrupar por INFO_X → dentro de cada grupo, por OC
+        const gruposPorInfoX = {};
+        itensMarcados.forEach(item => {
+            const infoX = (item.INFO_X || '').trim() || '(Sem Referência)';
+            const oc    = item['ORD. COMPRA'] || 'SEM OC';
+            if (!gruposPorInfoX[infoX]) gruposPorInfoX[infoX] = {};
+            if (!gruposPorInfoX[infoX][oc]) {
+                gruposPorInfoX[infoX][oc] = { cliente: item.CLIENTE || 'SEM CLIENTE', itens: [] };
+            }
+            gruposPorInfoX[infoX][oc].itens.push(item);
+        });
+
+        const gruposOrdenados = Object.keys(gruposPorInfoX).sort((a, b) => {
+            if (a === '(Sem Referência)') return 1;
+            if (b === '(Sem Referência)') return -1;
+            return a.localeCompare(b, 'pt-BR');
+        });
+
+        const printWindow = window.open('', '_blank');
+        const dataHoje = new Date().toLocaleDateString('pt-BR');
+        const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        // filtroTexto e usuarioLogado já escapados em _imprimirRelatorioFaturamento()
+        const filtroTexto = filtroTextoEsc;
+        const usuarioLogadoSafe = usuarioLogadoEsc;
+
+        let html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Relatório para Faturamento</title>
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: Arial, sans-serif; font-size: 14px; orphans: 3; widows: 3; }
+                h1 { text-align: center; margin: 0 0 5px 0; padding: 10px 0 0 0; font-size: 20px; color: #10b981; }
+                .info { text-align: center; margin: 0 0 10px 0; color: #666; font-size: 11px; line-height: 1.3; }
+                .info-usuario { font-weight: bold; color: #166534; }
+                .info-filtro { display: inline-block; margin-top: 3px; font-size: 10px; color: #1e40af; font-weight: 600; }
+                .grupo-section { margin-bottom: 28px; }
+                .grupo-header { background: #1e40af; color: white; padding: 9px 12px; border-radius: 6px 6px 0 0; font-size: 15px; font-weight: bold; letter-spacing: 0.3px; }
+                .grupo-body { border: 2px solid #1e40af; border-top: none; border-radius: 0 0 6px 6px; padding: 10px; background: #f0f7ff; }
+                .oc-section { page-break-inside: avoid; margin-bottom: 14px; background: #f0fdf4; padding: 8px; border: 2px solid #22c55e; border-radius: 6px; }
+                .oc-header { background: #dcfce7; padding: 8px; border: 2px solid #16a34a; margin-bottom: 8px; border-radius: 4px; }
+                .oc-title { font-size: 15px; font-weight: bold; margin-bottom: 4px; color: #166534; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+                th { background: #16a34a; color: white; padding: 7px 4px; text-align: left; font-size: 11px; border: 1px solid #166534; }
+                td { padding: 6px 4px; border: 1px solid #dcfce7; font-size: 11px; background: white; }
+                tr:nth-child(even) td { background: #f0fdf4; }
+                .highlight { background: #90EE90 !important; font-weight: 600; }
+                @media print {
+                    @page { size: A4 landscape; margin: 0.8cm; }
+                    body { margin: 0; padding: 0; }
+                    h1, .info { page-break-after: avoid; page-break-inside: avoid; }
+                    .oc-section { page-break-inside: avoid; }
+                }
+            </style>
+        </head>
+        <body>
+            <h1>💰 RELATÓRIO PARA FATURAMENTO</h1>
+            <div class="info">
+                Gerado em: ${dataHoje} às ${horaAgora}
+                ${usuarioLogadoSafe ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogadoSafe}</span>` : ''}
+                <br><span class="info-filtro">Usuários: ${filtroTexto}</span>
+            </div>
+        `;
+
+        gruposOrdenados.forEach(infoX => {
+            const ocsPorGrupo = gruposPorInfoX[infoX];
+            const ocsOrdenadas = Object.keys(ocsPorGrupo).sort();
+
+            html += `<div class="grupo-section">
+                <div class="grupo-header">📋 ${infoX}</div>
+                <div class="grupo-body">`;
+
+            ocsOrdenadas.forEach(ocNum => {
+                const ocData = ocsPorGrupo[ocNum];
+                const itens  = ocData.itens;
+
+                html += `
+                <div class="oc-section">
+                    <div class="oc-header">
+                        <div class="oc-title">OC: ${ocNum} - ${ocData.cliente}</div>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Pedido</th>
+                                <th>Cód. Cliente</th>
+                                <th>Descrição</th>
+                                <th>Tamanho</th>
+                                <th>QUANTIDADE</th>
+                                <th>OS</th>
+                                <th>Dt. Recebimento</th>
+                                <th>Dt. Entrega</th>
+                                <th>Prazo</th>
+                                <th>Marcado por</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+                itens.forEach(item => {
+                    const saldo = item.SALDO || 0;
+                    const dtRecebimento = formatarData(item['DATA RECEB.']);
+                    const dtEntrega = formatarData(item['DT. ENTREGA']);
+                    const prazo = formatarPrazoDias(item.PRAZO);
+                    const codOS = item['CÓD. OS'] ?? 'N/A';
+                    const marcadoPor = _escapeHtml(item.MARCAR_FATURAR_USUARIO || '');
+
+                    html += `
+                        <tr class="highlight">
+                            <td>${item.PEDIDO ?? 'N/A'}</td>
+                            <td>${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
+                            <td>${item.DESCRIÇÃO ?? 'N/A'}</td>
+                            <td>${item.TAMANHO ?? 'N/A'}</td>
+                            <td style="text-align:center;font-weight:700;">${fmtInt(saldo)}</td>
+                            <td>${codOS}</td>
+                            <td>${dtRecebimento}</td>
+                            <td>${dtEntrega}</td>
+                            <td style="text-align:center;">${prazo}</td>
+                            <td style="font-size:10px;color:#374151;">${marcadoPor}</td>
+                        </tr>`;
+                });
+
+                html += `</tbody></table></div>`;
+            });
+
+            html += `</div></div>`;
+        });
+
+        html += `</body></html>`;
+
+        printWindow.document.write(html);
+        printWindow.document.close();
+        setTimeout(() => { printWindow.print(); }, 250);
+
+        console.log('✅ Relatório de Faturamento gerado com sucesso!');
     }
 
     // ==== ETIQUETA NF ====
