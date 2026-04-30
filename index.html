@@ -2781,9 +2781,11 @@ ALL_OCS_ITEMS = itemsObj;
         $baixaMaxQtd.textContent = fmtInt(qtdAberta);
         $baixaItemDesc.textContent = formatItemInfo(desc, tamanho, qtdAberta);
 
-        // Limpa input
+        // Limpa input e estado anterior do histórico antes de abrir
         $novaBaixaInput.value = '';
         $editarBaixaForm.style.display = 'none';
+        $historicoCount.textContent = '...';
+        $historicoList.innerHTML = '<div style="padding: 1rem; text-align: center; color: #9ca3af; font-size: 0.875rem;">Carregando...</div>';
 
         // Carrega histórico
         carregarHistorico(item.uniqueId);
