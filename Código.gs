@@ -1302,6 +1302,21 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         // 900000+idx como fallback: mantém ordem relativa de DADOS_IMPORTADOS para itens não encontrados
       }
 
+      // Para o cliente Dilly: corrige CÓD. MARFIM (col G) substituindo a parte
+      // após o último "-" pelo valor numérico extraído do TAMANHO (col I).
+      // Ex.: CÓD="202480-105", TAMANHO="100CM" → "202480-100"
+      const _clienteDilly_ = String(fonteRow[1] || '').trim().toUpperCase().includes('DILLY');
+      let _codMarfimFinal_ = fonteRow[5];
+      if (_clienteDilly_) {
+        const _codOrig_ = String(fonteRow[5] || '').trim();
+        const _tamanho_ = String(fonteRow[7] || '').trim();
+        const _dashIdx_ = _codOrig_.lastIndexOf('-');
+        const _numTam_  = _tamanho_.replace(/[^0-9]/g, '');
+        if (_dashIdx_ !== -1 && _numTam_) {
+          _codMarfimFinal_ = _codOrig_.substring(0, _dashIdx_ + 1) + _numTam_;
+        }
+      }
+
       // Monta linha completa para PEDIDOS (A até T)
       const novaLinha = [
         idFinal,           // A: ID_UNICO
@@ -1310,7 +1325,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         fonteRow[2],       // D: CÓD. FILIAL
         fonteRow[3],       // E: PEDIDO
         String(fonteRow[4] !== null && fonteRow[4] !== undefined ? fonteRow[4] : ''), // F: CÓD. CLIENTE — string evita "7490-1" virar data
-        fonteRow[5],       // G: CÓD. MARFIM
+        _codMarfimFinal_,  // G: CÓD. MARFIM (Dilly: corrigido com numérico do TAMANHO)
         String(fonteRow[6] || '') + (codigoFixo ? ' [' + codigoFixo + ']' : ''),  // H: DESCRIÇÃO [UUID] — âncora de identidade visível na planilha
         fonteRow[7],       // I: TAMANHO
         fonteRow[8],       // J: ORD. COMPRA
