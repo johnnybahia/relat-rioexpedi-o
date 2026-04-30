@@ -2630,6 +2630,8 @@ ALL_OCS_ITEMS = itemsObj;
                         // Atualiza a linha na tabela
                         const row = document.getElementById(`item-linha-${planilhaLinha}`);
                         if (row) {
+                            row.dataset.itemQtd = String(result.novaQtd);
+
                             // Atualiza QTD. ABERTA
                             const cells = row.querySelectorAll('td');
                             const hasCheckbox = cells[0] && cells[0].querySelector('.item-checkbox');
