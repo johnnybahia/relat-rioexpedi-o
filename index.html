@@ -2021,7 +2021,7 @@ ALL_OCS_ITEMS = itemsObj;
 
                 const classeMarcado = isMarcadoFaturar ? 'item-marcado-faturar' : '';
                 const inlineStyle = corUsuario ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"` : '';
-                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${_escapeHtml(usuarioQueMarkou)}"` : ''}>`;
+                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-qtd-original="${qtdOriginal}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${_escapeHtml(usuarioQueMarkou)}"` : ''}>`;
 
                 bodyHtml += `
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
@@ -2407,6 +2407,53 @@ ALL_OCS_ITEMS = itemsObj;
 
         console.log(`${marcar ? '✓' : '✗'} Marcando item para faturar: ${uniqueId} (linha ${linha}) por "${usuarioAtual}"`);
 
+        if (!marcar) {
+            _executarMarcarFaturar(uniqueId, linha, false, usuarioAtual);
+            return;
+        }
+
+        const row = document.getElementById(`item-linha-${linha}`);
+        const qtdAberta = row ? Number(row.dataset.itemQtd || 0) : 0;
+        const qtdOriginal = row ? Number(row.dataset.itemQtdOriginal || 0) : 0;
+        const temBaixaParcial = qtdAberta < qtdOriginal;
+
+        if (temBaixaParcial) {
+            _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual);
+            return;
+        }
+
+        if (!confirm(`Nenhuma baixa registrada para este item.\n\nConfirmar baixa total de ${fmtInt(qtdAberta)} unidades e marcar para faturamento?`)) {
+            const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
+            if (checkbox) checkbox.checked = false;
+            return;
+        }
+
+        const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
+        if (checkbox) checkbox.disabled = true;
+
+        google.script.run
+            .withSuccessHandler(result => {
+                if (!result.success) {
+                    showError('Erro ao aplicar baixa: ' + (result.error || 'Erro desconhecido'));
+                    if (checkbox) { checkbox.disabled = false; checkbox.checked = false; }
+                    return;
+                }
+                if (row) {
+                    row.dataset.itemQtd = '0';
+                    const qtdAbertaCell = row.querySelector('.qtd-aberta');
+                    if (qtdAbertaCell) qtdAbertaCell.textContent = fmtInt(0);
+                }
+                if (checkbox) checkbox.disabled = false;
+                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual);
+            })
+            .withFailureHandler(error => {
+                showError('Falha ao aplicar baixa: ' + error.message);
+                if (checkbox) { checkbox.disabled = false; checkbox.checked = false; }
+            })
+            .aplicarBaixa(uniqueId, linha, qtdAberta, usuarioAtual);
+    }
+
+    function _executarMarcarFaturar(uniqueId, linha, marcar, usuarioAtual) {
         google.script.run
             .withSuccessHandler(result => {
                 console.log('✓ Resultado da marcação:', result);
@@ -2416,7 +2463,6 @@ ALL_OCS_ITEMS = itemsObj;
                         if (marcar) {
                             row.classList.add('item-marcado-faturar');
                             _aplicarCorUsuarioLinha(row, usuarioAtual);
-                            // Atualiza badge e desabilita checkbox para outros usuários
                             const cb = row.querySelector('.checkbox-faturar');
                             if (cb) {
                                 const cor = _getUsuarioColor(usuarioAtual);
@@ -2451,7 +2497,6 @@ ALL_OCS_ITEMS = itemsObj;
                     } else {
                         showError('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
                     }
-                    // Reverte checkbox em caso de erro
                     const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
                     if (checkbox) checkbox.checked = !marcar;
                 }
