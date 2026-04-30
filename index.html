@@ -2417,7 +2417,7 @@ ALL_OCS_ITEMS = itemsObj;
         const qtdOriginal = row ? Number(row.dataset.itemQtdOriginal || 0) : 0;
         const temBaixaParcial = qtdAberta < qtdOriginal;
 
-        if (temBaixaParcial) {
+        if (temBaixaParcial || qtdAberta <= 0) {
             _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual);
             return;
         }
