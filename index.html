@@ -3114,6 +3114,21 @@ ALL_OCS_ITEMS = itemsObj;
             if (os && os !== 'N/A' && !osCodes.includes(os)) osCodes.push(os);
         });
 
+        // Para DASS e DILLY: o número do LOTE na etiqueta mestra é o CÓD. OS.
+        // Se os OS forem diferentes, avisa e pergunta se quer continuar sem a etiqueta mestra.
+        const _clientesNoLote = loteItens.map(e => (e.cliente || '').toUpperCase());
+        const _isDassDilly = _clientesNoLote.some(c => c.includes('DASS') || c.includes('DILLY'));
+        let _emitirSemLoteMestre = false;
+        if (_isDassDilly && osCodes.length > 1) {
+            const _continuar = confirm(
+                'Os códigos OS dos itens selecionados não são iguais:\n' +
+                osCodes.join(', ') +
+                '\n\nDeseja continuar sem a etiqueta de soma do lote?'
+            );
+            if (!_continuar) return;
+            _emitirSemLoteMestre = true;
+        }
+
         const printWindow = window.open('', '_blank');
 
         let html = `<!DOCTYPE html>
@@ -3299,8 +3314,8 @@ ALL_OCS_ITEMS = itemsObj;
 </div>`;
         });
 
-        // Etiqueta mestra LOTE — para todos os clientes
-        {
+        // Etiqueta mestra LOTE — omitida para DASS/DILLY com OS divergentes
+        if (!_emitirSemLoteMestre) {
             let _totalSoma = 0;
             const _linhasTabela = [];
             loteItens.forEach(entry => {
@@ -3315,7 +3330,10 @@ ALL_OCS_ITEMS = itemsObj;
                     </tr>`);
                 });
             });
-            const _loteValor = loteProduto || osCodes.join(' | ') || 'N/A';
+            // DASS/DILLY: usa CÓD. OS como número do lote; demais clientes: campo manual ou OS
+            const _loteValor = _isDassDilly
+                ? (osCodes[0] || loteProduto || 'N/A')
+                : (loteProduto || osCodes.join(' | ') || 'N/A');
             html += `
 <div class="etiqueta-lote" style="justify-content:flex-start;padding:3mm;">
     <div style="font-size:18px;font-weight:900;text-align:center;letter-spacing:3mm;border-bottom:2px solid #000;padding-bottom:1.5mm;margin-bottom:1.5mm;">LOTE</div>
