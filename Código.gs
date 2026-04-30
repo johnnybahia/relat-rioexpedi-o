@@ -2449,49 +2449,31 @@ function sincronizarDados() {
             const qtdAberta    = Number(dbItem.row[DB_QTD_COL] || 0);
             const temBaixas    = idsBaixados.has(id); // usuário já processou pelo menos uma baixa
 
+            // Proteção extra: se MARCAR_FATURAR=SIM, verifica fingerprint para detectar
+            // ID mudado (item ainda existe em PEDIDOS com outro ID) — mantém Ativo nesses casos.
+            let itemAindaEmPedidosPorFingerprint = false;
             if (aguardandoNF) {
-              // Usuário marcou explicitamente — respeitar SEMPRE (ignora proteção)
               const fpDB = _criarImpressaoDigital_(dbItem.row, true);
-              const aindaEmPedidos = fonteImpressoes.has(fpDB) && fonteImpressoes.get(fpDB).some(i => !i.usado);
-              if (aindaEmPedidos) {
-                // Item ainda existe em PEDIDOS com ID diferente — provável duplicata (ID mudou em sincronizarPedidosComFonte)
-                Logger.log(`   ⚠️ DUPLICATA: Item aguardando NF existe em PEDIDOS com ID diferente — OC="${dbItem.row[DB_OC_COL]}" QTD=${qtdAberta} ID="${id}"`);
-                // Mantém Ativo — o item correto (novo ID) já está sendo processado neste ciclo
-              } else if (qtdAberta === 0) {
-                // QTD=0: baixa foi completamente registrada no HTML — seguro faturar automaticamente
-                Logger.log(`   ✋→✅ Aguardando NF + QTD=0 → baixa concluída, marcando Faturado (ID="${id}")`);
-                itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
-              } else {
-                Logger.log(`   ✋ Item aguardando NF - mantido Ativo (QTD=${qtdAberta}, ID="${id}")`);
-                // Re-registra o alerta — pode ter sido apagado erroneamente pelo bug do filtro invertido
-                // A deduplicação em _registrarAlertaFaturamento_ impede entradas duplicadas
-                _registrarAlertaFaturamento_({
-                  id: id,
-                  cartela:    String(dbItem.row[CARTELA_COL]    || ''),
-                  cliente:    String(dbItem.row[CLIENTE_COL]    || ''),
-                  pedido:     String(dbItem.row[DB_PEDIDO_COL]  || ''),
-                  oc:         String(dbItem.row[DB_OC_COL]      || ''),
-                  desc:       String(dbItem.row[DB_DESC_COL]    || ''),
-                  tam:        String(dbItem.row[DB_TAM_COL]     || ''),
-                  qtdAberta:  qtdAberta,
-                  dataEvento: new Date().toISOString()
-                });
+              itemAindaEmPedidosPorFingerprint = fonteImpressoes.has(fpDB) && fonteImpressoes.get(fpDB).some(i => !i.usado);
+              if (itemAindaEmPedidosPorFingerprint) {
+                Logger.log(`   ⚠️ DUPLICATA: Item aguardando NF existe em PEDIDOS com ID diferente — mantido Ativo OC="${dbItem.row[DB_OC_COL]}" QTD=${qtdAberta} ID="${id}"`);
               }
-            } else if (statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
+            }
+
+            // STATUS=Faturado é determinado EXCLUSIVAMENTE pela análise PEDIDOS vs DB.
+            // MARCAR_FATURAR=SIM não influencia esta decisão em nenhuma circunstância.
+            if (!itemAindaEmPedidosPorFingerprint && statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
               if (qtdAberta === 0) {
                 // QTD=0: baixas completas → faturado independente da proteção
-                // Coleta junto com os demais para processar ordenado (QTD=0 primeiro)
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
               } else if (!protecaoAtiva || temBaixas) {
                 // QTD>0: gera alerta SE proteção inativa OU SE usuário já fez baixas (item sendo trabalhado)
-                // Coleta para processar depois, ordenado por QTD.ABERTA crescente.
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: qtdAberta });
               } else {
                 // QTD>0 + proteção ativa + sem baixas → aguarda reconsolidação de ID
-                // Não gera alerta: item provavelmente ainda ativo na fonte com ID diferente
                 Logger.log(`   ⏭️ Proteção ativa (QTD=${qtdAberta}, sem baixas) → aguarda reconsolidação — OC+OS="${chaveOcOs}"`);
               }
-            } else {
+            } else if (!itemAindaEmPedidosPorFingerprint) {
               Logger.log(`   ℹ️ Não alterado (status: ${statusAtual})`);
             }
           }
@@ -3515,20 +3497,6 @@ function finalizarItem(uniqueId, planilhaLinha) {
     Logger.log(`❌ finalizarItem: ${e.message}`);
     return { success: false, error: e.message, id: uniqueId || null, linha: planilhaLinha };
   }
-}
-
-// --------- Batches tolerantes a 'linha' ou 'planilhaLinha' e com resumo ---------
-function marcarMultiplosFaturados(items) {
-  let ok = 0, fail = 0;
-  const results = [];
-  (items || []).forEach(it => {
-    const linha = (it && it.planilhaLinha != null) ? it.planilhaLinha : (it ? it.linha : null);
-    const id = (it && (it.uniqueId || it.id)) || null;
-    const r = marcarFaturado(id, linha);
-    results.push(r);
-    r.success ? ok++ : fail++;
-  });
-  return { success: fail === 0, processados: ok, falhas: fail, results };
 }
 
 function excluirMultiplosItens(items) {
