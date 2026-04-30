@@ -1328,6 +1328,7 @@
 
     // Dados do item atual no modal de baixa
     let currentBaixaItem = null;
+    let _historicoRequestId = 0; // token para descartar respostas stale
 
     // Modal de Etiquetas
     const $etiquetaModal = document.getElementById('etiquetaModal');
@@ -2796,10 +2797,17 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     function carregarHistorico(uniqueId) {
-        console.log(`📋 Carregando histórico para ${uniqueId}`);
+        const requestId = ++_historicoRequestId;
+        console.log(`📋 Carregando histórico para ${uniqueId} (req #${requestId})`);
 
         google.script.run
             .withSuccessHandler(result => {
+                // Descarta resposta de requisição anterior (stale)
+                if (requestId !== _historicoRequestId) {
+                    console.warn(`⚠️ Descartando resposta stale do histórico (req #${requestId}, atual: #${_historicoRequestId})`);
+                    return;
+                }
+
                 console.log('✅ Histórico recebido (RAW):', result);
                 console.log('   - Tipo:', typeof result);
                 console.log('   - É null?', result === null);
@@ -2839,6 +2847,7 @@ ALL_OCS_ITEMS = itemsObj;
                 }
             })
             .withFailureHandler(error => {
+                if (requestId !== _historicoRequestId) return;
                 console.error('❌ Erro ao carregar histórico:', error);
                 // Ainda mostra a seção, mas vazia
                 $historicoSection.style.display = 'block';
@@ -2962,9 +2971,6 @@ ALL_OCS_ITEMS = itemsObj;
                     // Atualiza totalizadores gerais
                     updateTotaisGerais();
 
-                    // Recarrega histórico
-                    carregarHistorico(currentBaixaItem.uniqueId);
-
                     esconderEdicaoBaixa();
                     hideBaixaModal();
                     showSuccessModal('Baixa editada com sucesso!', { noReload: true });
@@ -3035,17 +3041,16 @@ ALL_OCS_ITEMS = itemsObj;
                 console.log('✅ Baixa aplicada:', result);
 
                 if (result.success) {
-                    console.log('✅ Baixa aplicada com sucesso! Recarregando histórico...');
+                    console.log('✅ Baixa aplicada com sucesso!');
+                    // Captura dados necessários antes de fechar o modal (hideBaixaModal zera currentBaixaItem)
+                    const planilhaLinha = currentBaixaItem.planilhaLinha;
+
                     // Atualiza item
                     currentBaixaItem['QTD. ABERTA'] = result.novaQtd;
 
                     // Atualiza modal
                     $baixaQtdAberta.textContent = fmtInt(result.novaQtd);
                     $baixaMaxQtd.textContent = fmtInt(result.novaQtd);
-
-                    // Recarrega histórico
-                    console.log(`🔄 Chamando carregarHistorico("${currentBaixaItem.uniqueId}")`);
-                    carregarHistorico(currentBaixaItem.uniqueId);
 
                     // Limpa input
                     $novaBaixaInput.value = '';
@@ -3060,7 +3065,7 @@ ALL_OCS_ITEMS = itemsObj;
                         setTimeout(() => carregarListaOcs(true, true), 2100);
 
                         // Atualiza a linha na tabela
-                        const row = document.getElementById(`item-linha-${currentBaixaItem.planilhaLinha}`);
+                        const row = document.getElementById(`item-linha-${planilhaLinha}`);
                         if (row) {
                             // Atualiza QTD. ABERTA
                             const cells = row.querySelectorAll('td');
