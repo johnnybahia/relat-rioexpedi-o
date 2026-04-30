@@ -1366,15 +1366,26 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         String(fonteRow[1] || '').trim()
       );
 
+      // Para o cliente Dilly: corrige CÓD. CLIENTE (col F / DB col E) — mesmo padrão.
+      // É neste campo que aparece "196338-120"; CÓD. MARFIM costuma ser número simples ("70893").
+      const _clienteStr_    = String(fonteRow[1] || '').trim();
+      const _codClienteRaw_ = String(fonteRow[4] !== null && fonteRow[4] !== undefined ? fonteRow[4] : '');
+      const _codClienteFinal_ = _normalizarMarfimDilly_(
+        _codClienteRaw_,
+        String(fonteRow[7] || '').trim(),
+        _clienteStr_
+      );
+
       // Para o cliente Dilly: determina CÓD. OS via aba LOTE DILLY (sobrescreve DADOS_IMPORTADOS).
-      // Chave: OC | código-base (prefixo antes do último "-") | tamanho numérico | qtd
+      // Chave: OC | código-base do CÓD. CLIENTE (prefixo antes do último "-") | tamanho numérico | qtd
       // FIFO: cada item consome o próximo Lote disponível na fila para essa chave.
       let _osFinal_ = fonteRow[10]; // padrão: CÓD. OS de DADOS_IMPORTADOS (col L)
-      const _ehDilly_ = String(fonteRow[1] || '').trim().toUpperCase().includes('DILLY');
+      const _ehDilly_ = _clienteStr_.toUpperCase().includes('DILLY');
       if (_ehDilly_ && loteDillyMap.size > 0) {
-        const _codBase_ = _codMarfimFinal_.includes('-')
-          ? _codMarfimFinal_.substring(0, _codMarfimFinal_.lastIndexOf('-'))
-          : _codMarfimFinal_;
+        // Usa o CÓD. CLIENTE corrigido como base da chave (ex: "196338-110" → "196338")
+        const _codBase_ = _codClienteFinal_.includes('-')
+          ? _codClienteFinal_.substring(0, _codClienteFinal_.lastIndexOf('-'))
+          : _codClienteFinal_;
         const _tamNum_  = String(fonteRow[7] || '').trim().replace(/[^0-9]/g, '');
         const _ocStr_   = String(fonteRow[8] || '').trim();
         const _qtdStr_  = String(fonteRow[9] || '').trim();
@@ -1392,8 +1403,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         fonteRow[1],       // C: CLIENTE
         fonteRow[2],       // D: CÓD. FILIAL
         fonteRow[3],       // E: PEDIDO
-        String(fonteRow[4] !== null && fonteRow[4] !== undefined ? fonteRow[4] : ''), // F: CÓD. CLIENTE — string evita "7490-1" virar data
-        _codMarfimFinal_,  // G: CÓD. MARFIM (Dilly: corrigido com numérico do TAMANHO)
+        _codClienteFinal_, // F: CÓD. CLIENTE (Dilly: corrigido com numérico do TAMANHO; guard ≥2 chars protege "7490-1")
+        _codMarfimFinal_,  // G: CÓD. MARFIM (Dilly: corrigido se tiver traço com sufixo ≥2 chars)
         String(fonteRow[6] || '') + (codigoFixo ? ' [' + codigoFixo + ']' : ''),  // H: DESCRIÇÃO [UUID] — âncora de identidade visível na planilha
         fonteRow[7],       // I: TAMANHO
         fonteRow[8],       // J: ORD. COMPRA
@@ -1475,13 +1486,19 @@ function sincronizarPedidosComFonte(forcarExecucao) {
  * Normaliza CÓD. MARFIM para o cliente Dilly substituindo o sufixo após o último
  * "-" pelo valor numérico extraído do TAMANHO. Operação idempotente: aplicar em
  * um valor já corrigido retorna o mesmo valor.
- * Ex.: ("202480-105", "100CM", "DILLY NORDESTE") → "202480-100"
+ * Guard: só corrige se o sufixo tiver 2+ caracteres — protege códigos no formato
+ * "7490-1" (sufixo "1" = código de versão, não de tamanho).
+ * Ex.: ("196338-120", "110CM", "DILLY NORDESTE") → "196338-110"
+ *      ("7490-1",     "100CM", "DILLY NORDESTE") → "7490-1"  (sufixo curto, não altera)
  */
 function _normalizarMarfimDilly_(marfim, tam, cliente) {
   if (!cliente.toUpperCase().includes('DILLY')) return marfim;
   const dashIdx = marfim.lastIndexOf('-');
-  const numTam  = tam.replace(/[^0-9]/g, '');
-  if (dashIdx !== -1 && numTam) return marfim.substring(0, dashIdx + 1) + numTam;
+  if (dashIdx === -1) return marfim;
+  const sufixo = marfim.substring(dashIdx + 1);
+  if (sufixo.length < 2) return marfim; // "7490-1" style: sufixo curto, não é código de tamanho
+  const numTam = tam.replace(/[^0-9]/g, '');
+  if (numTam) return marfim.substring(0, dashIdx + 1) + numTam;
   return marfim;
 }
 
