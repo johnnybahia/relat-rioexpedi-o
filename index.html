@@ -2415,19 +2415,37 @@ ALL_OCS_ITEMS = itemsObj;
         const row = document.getElementById(`item-linha-${linha}`);
         const qtdAberta = row ? Number(row.dataset.itemQtd || 0) : 0;
         const qtdOriginal = row ? Number(row.dataset.itemQtdOriginal || 0) : 0;
-        const temBaixaParcial = qtdAberta < qtdOriginal;
 
-        if (temBaixaParcial || qtdAberta <= 0) {
+        // Sem quantidade aberta — marca direto, nada a baixar
+        if (qtdAberta <= 0) {
             _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual);
             return;
         }
 
+        // Tem baixa parcial — pergunta se fatura completo ou mantém o parcial
+        if (qtdAberta < qtdOriginal) {
+            const faturarCompleto = confirm(
+                `Baixa parcial registrada — saldo atual: ${fmtInt(qtdAberta)} unidades.\n\nOK → Faturar completo (zera saldo)\nCancelar → Manter saldo parcial`
+            );
+            if (faturarCompleto) {
+                _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual);
+            } else {
+                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual);
+            }
+            return;
+        }
+
+        // Sem baixa — confirma baixa total
         if (!confirm(`Nenhuma baixa registrada para este item.\n\nConfirmar baixa total de ${fmtInt(qtdAberta)} unidades e marcar para faturamento?`)) {
             const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
             if (checkbox) checkbox.checked = false;
             return;
         }
 
+        _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual);
+    }
+
+    function _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual) {
         const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
         if (checkbox) checkbox.disabled = true;
 
