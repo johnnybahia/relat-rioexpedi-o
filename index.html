@@ -231,21 +231,7 @@
     .modal-baixa-qtd-label { color: #6b7280; font-size: 0.75rem; font-weight: 600; }
     .modal-baixa-qtd-value { color: #1f2937; font-size: 1.25rem; font-weight: 700; }
 
-    .historico-section { margin-top: 1.5rem; }
-    .historico-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
-    .historico-header h3 { margin: 0; font-size: 0.875rem; font-weight: 600; color: #374151; }
-    .historico-count { font-size: 0.75rem; color: #6b7280; background-color: #f3f4f6; padding: 0.25rem 0.5rem; border-radius: 0.25rem; }
 
-    .historico-list { max-height: 200px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 0.5rem; background-color: #fff; }
-    .historico-item { padding: 0.75rem 1rem; border-bottom: 1px solid #f3f4f6; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; }
-    .historico-item:last-child { border-bottom: none; }
-    .historico-item.ultima { background-color: #eff6ff; border-left: 3px solid #3b82f6; }
-    .historico-item-info { display: flex; gap: 1rem; align-items: center; }
-    .historico-item-qtd { font-weight: 700; color: #ef4444; font-size: 0.9rem; }
-    .historico-item-data { color: #6b7280; font-size: 0.7rem; }
-    .historico-item-actions { display: flex; gap: 0.5rem; }
-    .btn-editar-baixa { padding: 0.25rem 0.5rem; background-color: #f59e0b; color: white; border: none; border-radius: 0.25rem; cursor: pointer; font-size: 0.7rem; font-weight: 500; transition: background-color 0.2s; }
-    .btn-editar-baixa:hover { background-color: #d97706; }
 
     .nova-baixa-section { margin-top: 1.5rem; padding: 1rem; background-color: #f0fdf4; border: 2px dashed #22c55e; border-radius: 0.5rem; }
     .nova-baixa-section h3 { margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: #166534; }
@@ -256,12 +242,7 @@
     .nova-baixa-hint { margin-top: 0.5rem; font-size: 0.7rem; color: #6b7280; text-align: center; }
     .nova-baixa-hint strong { color: #374151; }
 
-    .editar-baixa-form { padding: 1rem; background-color: #fef3c7; border: 2px solid #f59e0b; border-radius: 0.5rem; margin-top: 1rem; }
-    .editar-baixa-form h4 { margin: 0 0 0.75rem 0; font-size: 0.875rem; font-weight: 600; color: #92400e; }
-    .editar-baixa-info { font-size: 0.75rem; color: #78350f; margin-bottom: 0.75rem; }
-    .editar-baixa-exemplos { font-size: 0.7rem; color: #6b7280; margin-top: 0.5rem; padding: 0.5rem; background-color: #fffbeb; border-radius: 0.25rem; }
-    .editar-baixa-exemplos ul { margin: 0.25rem 0; padding-left: 1.5rem; }
-    .editar-baixa-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+
 
     /* Botão de Relatório de Produção */
     #btn-relatorio-producao:hover { background: #047857; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
@@ -532,39 +513,6 @@
 
         <!-- Descrição do item -->
         <p id="baixa-item-desc" style="font-size: 0.875rem; color: #6b7280; text-align: center; margin-bottom: 1.5rem;"></p>
-
-        <!-- Histórico -->
-        <div id="historico-section" class="historico-section" style="display: none;">
-          <div class="historico-header">
-            <h3>📋 Histórico de Baixas</h3>
-            <span id="historico-count" class="historico-count">0 registros</span>
-          </div>
-          <div id="historico-list" class="historico-list"></div>
-        </div>
-
-        <!-- Formulário de edição (oculto inicialmente) -->
-        <div id="editar-baixa-form" class="editar-baixa-form" style="display: none;">
-          <h4>✏️ Editar Última Baixa</h4>
-          <div class="editar-baixa-info">
-            Baixa atual: <strong id="editar-baixa-atual">-20</strong>
-          </div>
-          <div class="nova-baixa-input-wrapper">
-            <label>Nova quantidade:</label>
-            <input type="text" id="editar-baixa-input" class="nova-baixa-input" placeholder="Ex: 30 ou +10">
-          </div>
-          <div class="editar-baixa-exemplos">
-            <strong>Exemplos:</strong>
-            <ul>
-              <li><code>30</code> → altera para baixa de 30</li>
-              <li><code>+10</code> → reverte 10 unidades (ficará -10)</li>
-              <li><code>5</code> → altera para baixa de 5</li>
-            </ul>
-          </div>
-          <div class="editar-baixa-actions">
-            <button id="salvar-edicao-btn" class="modal-btn modal-btn-confirm">Salvar</button>
-            <button id="cancelar-edicao-btn" class="modal-btn modal-btn-cancel">Cancelar</button>
-          </div>
-        </div>
 
         <!-- Nova baixa -->
         <div id="nova-baixa-section" class="nova-baixa-section">
@@ -1312,15 +1260,7 @@
     const $baixaQtdOriginal = document.getElementById('baixa-qtd-original');
     const $baixaQtdAberta = document.getElementById('baixa-qtd-aberta');
     const $baixaItemDesc = document.getElementById('baixa-item-desc');
-    const $historicoSection = document.getElementById('historico-section');
-    const $historicoCount = document.getElementById('historico-count');
-    const $historicoList = document.getElementById('historico-list');
-    const $editarBaixaForm = document.getElementById('editar-baixa-form');
-    const $editarBaixaAtual = document.getElementById('editar-baixa-atual');
-    const $editarBaixaInput = document.getElementById('editar-baixa-input');
-    const $salvarEdicaoBtn = document.getElementById('salvar-edicao-btn');
-    const $cancelarEdicaoBtn = document.getElementById('cancelar-edicao-btn');
-    const $novaBaixaSection = document.getElementById('nova-baixa-section');
+
     const $novaBaixaInput = document.getElementById('nova-baixa-input');
     const $baixaMaxQtd = document.getElementById('baixa-max-qtd');
     const $baixaConfirmBtn = document.getElementById('baixa-confirm-btn');
@@ -1328,7 +1268,7 @@
 
     // Dados do item atual no modal de baixa
     let currentBaixaItem = null;
-    let _historicoRequestId = 0; // token para descartar respostas stale
+
 
     // Modal de Etiquetas
     const $etiquetaModal = document.getElementById('etiquetaModal');
@@ -2781,14 +2721,7 @@ ALL_OCS_ITEMS = itemsObj;
         $baixaMaxQtd.textContent = fmtInt(qtdAberta);
         $baixaItemDesc.textContent = formatItemInfo(desc, tamanho, qtdAberta);
 
-        // Limpa input e estado anterior do histórico antes de abrir
         $novaBaixaInput.value = '';
-        $editarBaixaForm.style.display = 'none';
-        $historicoCount.textContent = '...';
-        $historicoList.innerHTML = '<div style="padding: 1rem; text-align: center; color: #9ca3af; font-size: 0.875rem;">Carregando...</div>';
-
-        // Carrega histórico
-        carregarHistorico(item.uniqueId);
 
         $baixaModal.classList.remove('hidden');
     }
@@ -2796,201 +2729,6 @@ ALL_OCS_ITEMS = itemsObj;
     function hideBaixaModal() {
         $baixaModal.classList.add('hidden');
         currentBaixaItem = null;
-    }
-
-    function carregarHistorico(uniqueId) {
-        const requestId = ++_historicoRequestId;
-        console.log(`📋 Carregando histórico para ${uniqueId} (req #${requestId})`);
-
-        google.script.run
-            .withSuccessHandler(result => {
-                // Descarta resposta de requisição anterior (stale)
-                if (requestId !== _historicoRequestId) {
-                    console.warn(`⚠️ Descartando resposta stale do histórico (req #${requestId}, atual: #${_historicoRequestId})`);
-                    return;
-                }
-
-                console.log('✅ Histórico recebido (RAW):', result);
-                console.log('   - Tipo:', typeof result);
-                console.log('   - É null?', result === null);
-                console.log('   - É undefined?', result === undefined);
-
-                // Sempre mostra a seção de histórico
-                $historicoSection.style.display = 'block';
-
-                // Proteção contra null/undefined
-                if (!result) {
-                    console.warn('⚠️ Resultado null ou undefined! Exibindo histórico vazio.');
-                    renderizarHistorico([]);
-                    return;
-                }
-
-                console.log('   - Success:', result.success);
-                console.log('   - Histórico length:', result.historico ? result.historico.length : 0);
-                console.log('   - Histórico data:', result.historico);
-
-                if (result.success && result.historico) {
-                    console.log('   → Renderizando histórico...');
-                    renderizarHistorico(result.historico);
-
-                    // Atualiza QTD. ABERTA no modal com valor fresh da planilha
-                    if (result.qtdAbertaAtual !== null && result.qtdAbertaAtual !== undefined && currentBaixaItem) {
-                        const qtdFresh = result.qtdAbertaAtual;
-                        currentBaixaItem['QTD. ABERTA'] = qtdFresh;
-                        $baixaQtdAberta.textContent = fmtInt(qtdFresh);
-                        $baixaMaxQtd.textContent = fmtInt(qtdFresh);
-                        console.log(`✅ QTD. ABERTA atualizada no modal: ${qtdFresh}`);
-                    }
-
-                    console.log('   → Histórico exibido!');
-                } else {
-                    console.log('   → Erro ao carregar histórico ou histórico vazio');
-                    renderizarHistorico([]);
-                }
-            })
-            .withFailureHandler(error => {
-                if (requestId !== _historicoRequestId) return;
-                console.error('❌ Erro ao carregar histórico:', error);
-                // Ainda mostra a seção, mas vazia
-                $historicoSection.style.display = 'block';
-                renderizarHistorico([]);
-            })
-            .obterHistoricoBaixas(uniqueId);
-    }
-
-    function renderizarHistorico(historico) {
-        $historicoCount.textContent = `${historico.length} registro${historico.length !== 1 ? 's' : ''}`;
-
-        if (!historico || historico.length === 0) {
-            $historicoList.innerHTML = '<div style="padding: 1rem; text-align: center; color: #9ca3af; font-size: 0.875rem;">Nenhuma baixa registrada ainda</div>';
-            return;
-        }
-
-        let html = '';
-        historico.forEach((h, index) => {
-            const isUltima = index === historico.length - 1;
-            const className = isUltima ? 'historico-item ultima' : 'historico-item';
-
-            html += `
-                <div class="${className}">
-                    <div class="historico-item-info">
-                        <span class="historico-item-qtd">-${fmtInt(h.qtdBaixada)}</span>
-                        <span class="historico-item-data">${h.dataHoraFormatada || ''}</span>
-                    </div>
-                    ${isUltima ? `<div class="historico-item-actions"><button class="btn-editar-baixa" onclick="window.mostrarEdicaoBaixa(${h.qtdBaixada})">✏️ Editar</button></div>` : ''}
-                </div>
-            `;
-        });
-
-        $historicoList.innerHTML = html;
-    }
-
-    function mostrarEdicaoBaixa(qtdBaixadaAtual) {
-        $editarBaixaAtual.textContent = '-' + fmtInt(qtdBaixadaAtual);
-        $editarBaixaInput.value = '';
-        $editarBaixaForm.style.display = 'block';
-        $novaBaixaSection.style.display = 'none';
-        $editarBaixaInput.focus();
-    }
-
-    // Expõe a função globalmente para uso no onclick
-    window.mostrarEdicaoBaixa = mostrarEdicaoBaixa;
-
-    function esconderEdicaoBaixa() {
-        $editarBaixaForm.style.display = 'none';
-        $novaBaixaSection.style.display = 'block';
-    }
-
-    function salvarEdicaoBaixa() {
-        if (!currentBaixaItem) {
-            showError('Erro: Item não encontrado');
-            return;
-        }
-
-        const input = $editarBaixaInput.value.trim();
-        if (!input) {
-            showError('Digite uma quantidade válida');
-            return;
-        }
-
-        let novaQtdBaixada;
-
-        if (input.startsWith('+')) {
-            // Reverter: +10 significa adicionar 10 à quantidade aberta
-            const reverter = parseInt(input.substring(1), 10);
-            if (isNaN(reverter) || reverter <= 0) {
-                showError('Quantidade inválida para reverter');
-                return;
-            }
-
-            const qtdBaixadaAtual = parseInt($editarBaixaAtual.textContent.replace('-', '').replace(/\./g, ''), 10);
-            novaQtdBaixada = qtdBaixadaAtual - reverter;
-
-            if (novaQtdBaixada < 0) {
-                showError('Não é possível reverter mais do que foi baixado');
-                return;
-            }
-        } else {
-            // Substituir quantidade
-            novaQtdBaixada = parseInt(input, 10);
-            if (isNaN(novaQtdBaixada) || novaQtdBaixada <= 0) {
-                showError('Digite uma quantidade válida');
-                return;
-            }
-        }
-
-        console.log(`✏️ Editando última baixa: ${currentBaixaItem.uniqueId} → ${novaQtdBaixada}`);
-
-        $salvarEdicaoBtn.disabled = true;
-        $salvarEdicaoBtn.textContent = 'Salvando...';
-
-        google.script.run
-            .withSuccessHandler(result => {
-                console.log('✅ Edição salva:', result);
-
-                if (result.success) {
-                    // Atualiza a quantidade aberta no item
-                    currentBaixaItem['QTD. ABERTA'] = result.novaQtdRestante;
-
-                    // Atualiza modal
-                    $baixaQtdAberta.textContent = fmtInt(result.novaQtdRestante);
-                    $baixaMaxQtd.textContent = fmtInt(result.novaQtdRestante);
-
-                    // Atualiza a linha na tabela
-                    const row = document.getElementById(`item-linha-${currentBaixaItem.planilhaLinha}`);
-                    if (row) {
-                        const cells = row.querySelectorAll('td');
-                        const hasCheckbox = cells[0] && cells[0].querySelector('.item-checkbox');
-                        const offset = hasCheckbox ? 1 : 0;
-
-                        // Coluna QTD. ABERTA: Cartela(0), Cód(1), Desc(2), Tam(3), Original(4), Aberta(5)
-                        const qtdAbertaCell = cells[5 + offset];
-                        if (qtdAbertaCell) {
-                            qtdAbertaCell.textContent = fmtInt(result.novaQtdRestante);
-                        }
-                    }
-
-                    // Atualiza totalizadores gerais
-                    updateTotaisGerais();
-
-                    esconderEdicaoBaixa();
-                    hideBaixaModal();
-                    showSuccessModal('Baixa editada com sucesso!', { noReload: true });
-                    setTimeout(() => carregarListaOcs(true, true), 2100);
-                } else {
-                    showError('Erro ao editar baixa: ' + (result.error || 'Erro desconhecido'));
-                }
-
-                $salvarEdicaoBtn.disabled = false;
-                $salvarEdicaoBtn.textContent = 'Salvar';
-            })
-            .withFailureHandler(error => {
-                console.error('❌ Erro ao editar baixa:', error);
-                showError('Falha ao editar baixa: ' + error.message);
-                $salvarEdicaoBtn.disabled = false;
-                $salvarEdicaoBtn.textContent = 'Salvar';
-            })
-            .editarUltimaBaixa(currentBaixaItem.uniqueId, currentBaixaItem.planilhaLinha, novaQtdBaixada, (_getSessaoLocal() || {}).usuario || '');
     }
 
     function aplicarNovaBaixa() {
@@ -3164,8 +2902,7 @@ ALL_OCS_ITEMS = itemsObj;
     // Modal de baixa parcial
     $baixaConfirmBtn.addEventListener('click', aplicarNovaBaixa);
     $baixaCancelBtn.addEventListener('click', hideBaixaModal);
-    $salvarEdicaoBtn.addEventListener('click', salvarEdicaoBaixa);
-    $cancelarEdicaoBtn.addEventListener('click', esconderEdicaoBaixa);
+
 
     // Modal de etiquetas
     $btnAdicionarEtiqueta.addEventListener('click', adicionarEtiqueta);
