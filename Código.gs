@@ -1302,6 +1302,13 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         // 900000+idx como fallback: mantém ordem relativa de DADOS_IMPORTADOS para itens não encontrados
       }
 
+      // Para o cliente Dilly: corrige CÓD. MARFIM (col G) — veja _normalizarMarfimDilly_
+      const _codMarfimFinal_ = _normalizarMarfimDilly_(
+        String(fonteRow[5] || '').trim(),
+        String(fonteRow[7] || '').trim(),
+        String(fonteRow[1] || '').trim()
+      );
+
       // Monta linha completa para PEDIDOS (A até T)
       const novaLinha = [
         idFinal,           // A: ID_UNICO
@@ -1310,7 +1317,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         fonteRow[2],       // D: CÓD. FILIAL
         fonteRow[3],       // E: PEDIDO
         String(fonteRow[4] !== null && fonteRow[4] !== undefined ? fonteRow[4] : ''), // F: CÓD. CLIENTE — string evita "7490-1" virar data
-        fonteRow[5],       // G: CÓD. MARFIM
+        _codMarfimFinal_,  // G: CÓD. MARFIM (Dilly: corrigido com numérico do TAMANHO)
         String(fonteRow[6] || '') + (codigoFixo ? ' [' + codigoFixo + ']' : ''),  // H: DESCRIÇÃO [UUID] — âncora de identidade visível na planilha
         fonteRow[7],       // I: TAMANHO
         fonteRow[8],       // J: ORD. COMPRA
@@ -1389,6 +1396,20 @@ function sincronizarPedidosComFonte(forcarExecucao) {
 }
 
 /**
+ * Normaliza CÓD. MARFIM para o cliente Dilly substituindo o sufixo após o último
+ * "-" pelo valor numérico extraído do TAMANHO. Operação idempotente: aplicar em
+ * um valor já corrigido retorna o mesmo valor.
+ * Ex.: ("202480-105", "100CM", "DILLY NORDESTE") → "202480-100"
+ */
+function _normalizarMarfimDilly_(marfim, tam, cliente) {
+  if (!cliente.toUpperCase().includes('DILLY')) return marfim;
+  const dashIdx = marfim.lastIndexOf('-');
+  const numTam  = tam.replace(/[^0-9]/g, '');
+  if (dashIdx !== -1 && numTam) return marfim.substring(0, dashIdx + 1) + numTam;
+  return marfim;
+}
+
+/**
  * Cria impressão digital de uma row com offset configurável
  * @param {Array} row - Array com dados da linha
  * @param {Number} offset - Offset das colunas (0 para DADOS_IMPORTADOS, 1 para PEDIDOS)
@@ -1404,11 +1425,15 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
 
   const cliente = String(row[1 + offset] || '').trim();
   const pedido  = String(row[3 + offset] || '').trim();
-  const marfim  = String(row[5 + offset] || '').trim();
   const tam     = String(row[7 + offset] || '').trim();  // TAMANHO — diferencia itens do mesmo pedido em tamanhos distintos
   const oc      = String(row[8 + offset] || '').trim();
   const os      = String(row[10 + offset] || '').trim();
   const dataStr = _normalizarData_(row[11 + offset]);    // normalizado para Date e número serial
+
+  // Normaliza CÓD. MARFIM para Dilly: garante fingerprint idêntica tanto ao ler
+  // de DADOS_IMPORTADOS (valor original, ex: "202480-105") quanto de PEDIDOS
+  // (valor já corrigido, ex: "202480-100"). A correção é idempotente.
+  const marfim = _normalizarMarfimDilly_(String(row[5 + offset] || '').trim(), tam, cliente);
 
   return `${cliente}|${pedido}|${marfim}|${tam}|${oc}|${os}|${dataStr}`;
 }
@@ -1936,11 +1961,15 @@ function _criarImpressaoDigital_(row, isDbRow) {
   const osIdx     = isDbRow ? 10 : OS_COL;       // PEDIDOS=11, DB=10
   const dtrecIdx  = isDbRow ? 11 : DTREC_COL;    // PEDIDOS=12, DB=11
 
+  const _cliente_ = String(row[CLIENTE_COL] || '').trim();
+  const _tam_     = String(row[tamIdx]      || '').trim();
+  const _marfim_  = _normalizarMarfimDilly_(String(row[marfimIdx] || '').trim(), _tam_, _cliente_);
+
   const partes = [
-    String(row[CLIENTE_COL] || '').trim(),        // índice 2 em ambos
+    _cliente_,                                     // índice 2 em ambos
     String(row[pedidoIdx]   || '').trim(),
-    String(row[marfimIdx]   || '').trim(),
-    String(row[tamIdx]      || '').trim(),         // TAMANHO — distingue itens do mesmo pedido em tamanhos diferentes
+    _marfim_,                                      // normalizado para Dilly (idempotente)
+    _tam_,                                         // TAMANHO — distingue itens do mesmo pedido em tamanhos diferentes
     String(row[ocIdx]       || '').trim(),
     String(row[osIdx]       || '').trim(),
     _normalizarData_(row[dtrecIdx])                // normalizado para lidar com Date e número serial
