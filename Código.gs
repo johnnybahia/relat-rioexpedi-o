@@ -598,7 +598,35 @@ function onOpen() {
     .addItem('🧹 Confirmar todos os alertas de faturamento (testes)', 'confirmarTodosAlertasMenu')
     .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
+    .addSeparator()
+    .addItem('🔄 Forçar resync agora (aplica correções Dilly)', 'forcarResyncDilly')
     .addToUi();
+}
+
+/**
+ * Força uma sincronização completa ignorando o guard de timestamp.
+ * Use após aplicar atualizações de código que alteram campos calculados
+ * (ex: correção do CÓD. MARFIM Dilly, preenchimento de OS via LOTE DILLY).
+ */
+function forcarResyncDilly() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    Logger.log('⚡ Forçando resync completo (forcarExecucao=true)...');
+    const resultado = sincronizarPedidosComFonte(true);
+    if (resultado.erro) {
+      ui.alert('Erro no resync', resultado.erro, ui.ButtonSet.OK);
+      return;
+    }
+    // Propaga imediatamente para o Relatorio_DB
+    processoAutomaticoCompleto();
+    ui.alert(
+      '✅ Resync concluído',
+      `PEDIDOS sincronizado.\nNovos: ${resultado.novos || 0} | Atualizados: ${resultado.atualizados || 0} | Total: ${resultado.total || 0}`,
+      ui.ButtonSet.OK
+    );
+  } catch (e) {
+    ui.alert('Erro', e.message, ui.ButtonSet.OK);
+  }
 }
 
 /**
