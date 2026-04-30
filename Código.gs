@@ -63,6 +63,7 @@ const PEDIDOS_COLX_COL          = 19; // T (coluna 20) — campo da coluna X da 
 const DB_COLX_COL               = 19; // T (coluna 20) — campo da coluna X propagado do PEDIDOS para o Relatorio_DB
 const PEDIDOS_LOTE_COL          = 20; // U (coluna 21) — número de lote da coluna Y da fonte
 const DB_LOTE_COL               = 20; // U (coluna 21) — número de lote propagado do PEDIDOS para o Relatorio_DB
+const LOTE_DILLY_SHEET_NAME     = 'LOTE DILLY'; // aba com mapeamento OC→Lote para o cliente Dilly
 
 // ====== ABA ORIGINAL (fonte primária para ordenação dos itens dentro de cada OC) ======
 const ORIGINAL_SHEET_NAME = 'original'; // nome exato da aba
@@ -1144,6 +1145,34 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       Logger.log(`⚠️ Erro ao ler aba "${ORIGINAL_SHEET_NAME}": ${e.message} — usando fallback`);
     }
 
+    // PASSO 2.6: Ler aba LOTE DILLY e montar fila FIFO de Lotes por chave OC|Código|Tamanho|Qtd.
+    // Para cada item Dilly sem correspondência exata, o primeiro Lote disponível na fila é
+    // consumido (shift) na ordem em que os itens aparecem em DADOS_IMPORTADOS — garantindo
+    // associação estável mesmo quando OC + Código + Tamanho + Qtd não são únicos.
+    const loteDillyMap = new Map(); // "OC|Código|Tam|Qtd" → [Lote, Lote, ...] (FIFO)
+    try {
+      const loteDillySheet = getSpreadsheet_().getSheetByName(LOTE_DILLY_SHEET_NAME);
+      if (loteDillySheet && loteDillySheet.getLastRow() > 1) {
+        const ldData = loteDillySheet.getRange(2, 1, loteDillySheet.getLastRow() - 1, 7).getValues();
+        ldData.forEach(ldRow => {
+          const ldOc   = String(ldRow[0] || '').trim(); // A: OC
+          const ldLote = String(ldRow[1] || '').trim(); // B: Lote → vai para CÓD. OS
+          const ldCod  = String(ldRow[2] || '').trim(); // C: Código do item
+          const ldTam  = String(ldRow[4] || '').trim().replace(/[^0-9]/g, ''); // E: Tamanho (numérico)
+          const ldQtd  = String(ldRow[6] || '').trim(); // G: Qtd
+          if (!ldOc || !ldLote || !ldCod) return;
+          const ldChave = `${ldOc}|${ldCod}|${ldTam}|${ldQtd}`;
+          if (!loteDillyMap.has(ldChave)) loteDillyMap.set(ldChave, []);
+          loteDillyMap.get(ldChave).push(ldLote);
+        });
+        Logger.log(`📦 LOTE DILLY: ${ldData.length} linhas → ${loteDillyMap.size} chaves indexadas`);
+      } else {
+        Logger.log(`ℹ️ Aba "${LOTE_DILLY_SHEET_NAME}" vazia ou inexistente — sem enriquecimento de OS para Dilly`);
+      }
+    } catch (e) {
+      Logger.log(`⚠️ Erro ao ler "${LOTE_DILLY_SHEET_NAME}": ${e.message}`);
+    }
+
     fonteData.forEach((fonteRow, idx) => {
       const cartela = fonteRow[0]; // Em DADOS_IMPORTADOS, CARTELA é coluna B (índice 0, lido a partir de B)
 
@@ -1309,6 +1338,25 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         String(fonteRow[1] || '').trim()
       );
 
+      // Para o cliente Dilly: determina CÓD. OS via aba LOTE DILLY (sobrescreve DADOS_IMPORTADOS).
+      // Chave: OC | código-base (prefixo antes do último "-") | tamanho numérico | qtd
+      // FIFO: cada item consome o próximo Lote disponível na fila para essa chave.
+      let _osFinal_ = fonteRow[10]; // padrão: CÓD. OS de DADOS_IMPORTADOS (col L)
+      const _ehDilly_ = String(fonteRow[1] || '').trim().toUpperCase().includes('DILLY');
+      if (_ehDilly_ && loteDillyMap.size > 0) {
+        const _codBase_ = _codMarfimFinal_.includes('-')
+          ? _codMarfimFinal_.substring(0, _codMarfimFinal_.lastIndexOf('-'))
+          : _codMarfimFinal_;
+        const _tamNum_  = String(fonteRow[7] || '').trim().replace(/[^0-9]/g, '');
+        const _ocStr_   = String(fonteRow[8] || '').trim();
+        const _qtdStr_  = String(fonteRow[9] || '').trim();
+        const _ldChave_ = `${_ocStr_}|${_codBase_}|${_tamNum_}|${_qtdStr_}`;
+        const _ldFila_  = loteDillyMap.get(_ldChave_);
+        if (_ldFila_ && _ldFila_.length > 0) {
+          _osFinal_ = _ldFila_.shift(); // consome o próximo lote disponível
+        }
+      }
+
       // Monta linha completa para PEDIDOS (A até T)
       const novaLinha = [
         idFinal,           // A: ID_UNICO
@@ -1322,7 +1370,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         fonteRow[7],       // I: TAMANHO
         fonteRow[8],       // J: ORD. COMPRA
         fonteRow[9],       // K: QTD. ABERTA
-        fonteRow[10],      // L: CÓD. OS
+        _osFinal_,         // L: CÓD. OS (Dilly: valor do Lote via LOTE DILLY; demais: DADOS_IMPORTADOS)
         (fonteRow[11] instanceof Date ? fonteRow[11] : (!fonteRow[11] || fonteRow[11] === 0 ? '' : fonteRow[11])), // M: DATA RECEB. — 0 vira '' (evita 30/12/1899)
         fonteRow[12],      // N: DT. ENTREGA
         String(fonteRow[13] !== null && fonteRow[13] !== undefined && fonteRow[13] !== '' ? fonteRow[13] : ''), // O: PRAZO — string evita -1/2 virar data
