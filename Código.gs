@@ -3917,7 +3917,10 @@ function registrarCheckpointsFaturamento(items) {
     items.forEach(item => {
       const uniqueId  = String(item.uniqueId  || '').trim();
       const qtdAberta = Number(item['QTD. ABERTA'] || item.qtdAberta || 0);
-      if (uniqueId && qtdAberta > 0) {
+      const saldo     = Number(item.SALDO || 0);
+      // Só registra checkpoint se há baixas novas a faturar (SALDO > 0).
+      // Evita zerar a base em re-impressões sem novas baixas.
+      if (uniqueId && qtdAberta > 0 && saldo > 0) {
         _registrarCheckpointFaturamento_(uniqueId, qtdAberta);
         registrados++;
       }
