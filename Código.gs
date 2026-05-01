@@ -166,12 +166,17 @@ function _getBaixasSheet_() {
     sheet.setFrozenRows(1);
     Logger.log(`✅ Aba ${BAIXAS_SHEET_NAME} criada com sucesso`);
   } else {
-    // Verifica se a coluna QTD_ORIGINAL existe
+    // Verifica se as colunas QTD_ORIGINAL e TIPO existem
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     if (!headers.includes('QTD_ORIGINAL')) {
       Logger.log(`📝 Adicionando coluna QTD_ORIGINAL...`);
       const nextCol = sheet.getLastColumn() + 1;
       sheet.getRange(1, nextCol).setValue('QTD_ORIGINAL').setFontWeight('bold').setBackground('#f0f2f5');
+    }
+    if (!headers.includes('TIPO')) {
+      Logger.log(`📝 Adicionando coluna TIPO...`);
+      const nextCol = sheet.getLastColumn() + 1;
+      sheet.getRange(1, nextCol).setValue('TIPO').setFontWeight('bold').setBackground('#f0f2f5');
     }
   }
   return sheet;
@@ -202,13 +207,20 @@ function registrarBaixa(uniqueId, qtdBaixada, qtdRestante, usuarioHtml) {
 
     if (lastRow >= 2) {
       const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-      const primeiraEntrada = data.find(row => String(row[0]).trim() === String(uniqueId).trim());
+      const entriesId = data.filter(row => String(row[0]).trim() === String(uniqueId).trim());
 
-      if (primeiraEntrada && colMap['QTD_ORIGINAL'] !== undefined) {
-        const qtdOrigPlanilha = primeiraEntrada[colMap['QTD_ORIGINAL']];
+      // Usa o último checkpoint de faturamento como base; se não houver, usa a primeira entrada
+      const tipoIdx = colMap['TIPO'];
+      const ultimoCheckpoint = tipoIdx !== undefined
+        ? [...entriesId].reverse().find(row => String(row[tipoIdx] || '').trim() === 'CHECKPOINT')
+        : null;
+      const entradaBase = ultimoCheckpoint || entriesId[0] || null;
+
+      if (entradaBase && colMap['QTD_ORIGINAL'] !== undefined) {
+        const qtdOrigPlanilha = entradaBase[colMap['QTD_ORIGINAL']];
         if (qtdOrigPlanilha !== undefined && qtdOrigPlanilha !== '') {
           qtdOriginal = _toNumber_(qtdOrigPlanilha);
-          Logger.log(`   ✓ Histórico existente, QTD_ORIGINAL: ${qtdOriginal}`);
+          Logger.log(`   ✓ Base QTD_ORIGINAL ${ultimoCheckpoint ? '(checkpoint)' : '(primeira entrada)'}: ${qtdOriginal}`);
         }
       }
     }
@@ -235,6 +247,42 @@ function registrarBaixa(uniqueId, qtdBaixada, qtdRestante, usuarioHtml) {
     Logger.log(`❌ Erro ao registrar baixa: ${e.message}`);
     Logger.log(`   Stack: ${e.stack}`);
     return { success: false, error: e.message };
+  }
+}
+
+// Registra um checkpoint no histórico de baixas quando um item é faturado parcialmente.
+// O checkpoint redefine a base de QTD_ORIGINAL para os próximos cálculos de saldo.
+function _registrarCheckpointFaturamento_(uniqueId, qtdAberta) {
+  try {
+    if (!uniqueId || qtdAberta <= 0) return;
+    Logger.log(`🏁 Registrando checkpoint de faturamento para ID: "${uniqueId}" | QTD base: ${qtdAberta}`);
+
+    const sheet = _getBaixasSheet_();
+    const numCols = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap = {};
+    headers.forEach((h, i) => { colMap[String(h).trim()] = i; });
+
+    if (colMap['TIPO'] === undefined) {
+      Logger.log(`⚠️ Coluna TIPO não encontrada no Baixas_Historico, checkpoint não registrado`);
+      return;
+    }
+
+    const novaLinha = new Array(numCols).fill('');
+    novaLinha[colMap['ID_ITEM']]      = uniqueId;
+    novaLinha[colMap['DATA_HORA']]    = new Date();
+    novaLinha[colMap['QTD_BAIXADA']]  = 0;
+    novaLinha[colMap['QTD_RESTANTE']] = qtdAberta;
+    novaLinha[colMap['QTD_ORIGINAL']] = qtdAberta; // nova base para cálculo de saldo
+    novaLinha[colMap['USUARIO']]      = 'FATURAMENTO';
+    novaLinha[colMap['TIPO']]         = 'CHECKPOINT';
+
+    sheet.appendRow(novaLinha);
+    SpreadsheetApp.flush();
+    _qtdOriginalCache_ = null;
+    Logger.log(`✅ Checkpoint registrado para "${uniqueId}": nova base = ${qtdAberta}`);
+  } catch (e) {
+    Logger.log(`❌ _registrarCheckpointFaturamento_: ${e.message}`);
   }
 }
 
@@ -539,16 +587,30 @@ function _buildQtdOriginalCache_() {
 
     const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
     const cache = {};
+    const tipoIdx = colMap['TIPO'];
 
-    // Para cada item, pega a QTD_ORIGINAL da primeira entrada
+    // Primeira passagem: registra o QTD_ORIGINAL da primeira entrada para cada ID
     data.forEach(row => {
-      const id = row[colMap['ID_ITEM']];
+      const id = String(row[colMap['ID_ITEM']] || '').trim();
+      if (!id) return;
       const qtdOriginal = row[colMap['QTD_ORIGINAL']];
-
       if (!cache[id] && qtdOriginal !== undefined && qtdOriginal !== '') {
         cache[id] = _toNumber_(qtdOriginal);
       }
     });
+
+    // Segunda passagem: sobrescreve com o QTD_ORIGINAL do último checkpoint de faturamento
+    if (tipoIdx !== undefined) {
+      data.forEach(row => {
+        const id = String(row[colMap['ID_ITEM']] || '').trim();
+        if (!id) return;
+        if (String(row[tipoIdx] || '').trim() !== 'CHECKPOINT') return;
+        const qtdOriginal = row[colMap['QTD_ORIGINAL']];
+        if (qtdOriginal !== undefined && qtdOriginal !== '') {
+          cache[id] = _toNumber_(qtdOriginal); // sobrescreve: última ocorrência vence
+        }
+      });
+    }
 
     Logger.log(`📦 Cache de quantidades construído: ${Object.keys(cache).length} itens`);
     return cache;
@@ -3552,10 +3614,23 @@ function marcarFaturado(uniqueId, planilhaLinha) {
       throw new Error("Coluna 'Status' não encontrada");
     }
 
+    // Lê QTD.ABERTA antes de faturar para registrar checkpoint se for faturamento parcial
+    const qtdACol = colMap['QTD. ABERTA'];
+    const qtdAbertaAtual = qtdACol !== undefined
+      ? _toNumber_(sheet.getRange(linhaNum, qtdACol + 1).getValue())
+      : 0;
+
     sheet.getRange(linhaNum, statusCol + 1).setValue("Faturado");
     sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
+
+    // Se ainda há saldo aberto (faturamento parcial), registra checkpoint para que o próximo
+    // relatório de faturamento mostre apenas as baixas realizadas após este ponto.
+    if (qtdAbertaAtual > 0 && uniqueId) {
+      _registrarCheckpointFaturamento_(uniqueId, qtdAbertaAtual);
+    }
+
     limparCache();
-    Logger.log(`💰 ${uniqueId || 'sem-id'} → Faturado (linha ${linhaNum})`);
+    Logger.log(`💰 ${uniqueId || 'sem-id'} → Faturado (linha ${linhaNum}) | QTD.ABERTA: ${qtdAbertaAtual}`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
     Logger.log(`❌ marcarFaturado: ${e.message}`);
