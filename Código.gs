@@ -336,6 +336,10 @@ function obterHistoricoBaixas(uniqueId) {
       const idPlanilha = String(row[colMap['ID_ITEM']] || '').trim();
 
       if (idPlanilha === idBusca) {
+        // Ignora entradas internas de checkpoint — não são baixas reais
+        const tipoEntry = colMap['TIPO'] !== undefined ? String(row[colMap['TIPO']] || '').trim() : '';
+        if (tipoEntry === 'CHECKPOINT') continue;
+
         Logger.log(`   ✓ Match linha ${i + 2}`);
 
         // Lê cada coluna pelo nome (não pela posição)
@@ -3957,11 +3961,18 @@ function confirmarTodosAlertas() {
     if (marcar !== 'SIM') return;
 
     const linhaSheet = i + 2; // +1 offset base, +1 cabeçalho
+    const uniqueId   = String(row[ID_COL] || '').trim();
+    const qtdAberta  = _toNumber_(row[DB_QTD_COL]);
+
     sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Faturado');
     sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
     sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue(agora);
     marcados++;
-    Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${row[ID_COL]}")`);
+    Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${uniqueId}") | QTD.ABERTA: ${qtdAberta}`);
+
+    if (qtdAberta > 0 && uniqueId) {
+      _registrarCheckpointFaturamento_(uniqueId, qtdAberta);
+    }
   });
 
   PropertiesService.getScriptProperties().deleteProperty('ALERTAS_FATURAMENTO');
