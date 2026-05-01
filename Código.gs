@@ -3906,6 +3906,30 @@ function obterItensMarcadosParaFaturar() {
   }
 }
 
+// ====== CONFIRMAR IMPRESSÃO: registra checkpoints para todos os itens do relatório ======
+// Chamada pelo HTML no momento em que o usuário confirma a impressão do relatório de faturamento.
+// Para cada item com QTD.ABERTA > 0, grava um CHECKPOINT no Baixas_Historico, redefinindo a
+// base de cálculo do SALDO para os próximos faturamentos parciais.
+function registrarCheckpointsFaturamento(items) {
+  try {
+    if (!Array.isArray(items) || items.length === 0) return { success: true, registrados: 0 };
+    let registrados = 0;
+    items.forEach(item => {
+      const uniqueId  = String(item.uniqueId  || '').trim();
+      const qtdAberta = Number(item['QTD. ABERTA'] || item.qtdAberta || 0);
+      if (uniqueId && qtdAberta > 0) {
+        _registrarCheckpointFaturamento_(uniqueId, qtdAberta);
+        registrados++;
+      }
+    });
+    Logger.log(`✅ registrarCheckpointsFaturamento: ${registrados} checkpoint(s) registrado(s)`);
+    return { success: true, registrados };
+  } catch (e) {
+    Logger.log(`❌ registrarCheckpointsFaturamento: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+}
+
 // ====== UTILITÁRIO: LIMPAR ALERTAS DE FATURAMENTO ======
 /**
  * Remove todos os alertas pendentes de faturamento (faturado_sem_baixa e divergencia_qtd).
