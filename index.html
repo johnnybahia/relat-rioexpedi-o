@@ -1915,6 +1915,26 @@ ALL_OCS_ITEMS = itemsObj;
 
 
 
+    // Para DASS e Dilly: agrupa itens por OS (na ordem de primeira aparição),
+    // mantendo posicaoFonte como desempate dentro de cada grupo.
+    // Para demais clientes: ordena somente por posicaoFonte.
+    function _sortItemsPorOS(items, cliente) {
+        items.sort((a, b) => (a.posicaoFonte ?? 999999) - (b.posicaoFonte ?? 999999));
+        if (!/dass|dilly/i.test(String(cliente || ''))) return items;
+        const osOrdem = new Map();
+        items.forEach(item => {
+            const os = String(item['CÓD. OS'] ?? '');
+            if (!osOrdem.has(os)) osOrdem.set(os, osOrdem.size);
+        });
+        items.sort((a, b) => {
+            const oa = osOrdem.get(String(a['CÓD. OS'] ?? '')) ?? 999999;
+            const ob = osOrdem.get(String(b['CÓD. OS'] ?? '')) ?? 999999;
+            if (oa !== ob) return oa - ob;
+            return (a.posicaoFonte ?? 999999) - (b.posicaoFonte ?? 999999);
+        });
+        return items;
+    }
+
     function renderOcCard(ocInfo, itemResponse) {
         if (!ocInfo || !ocInfo.ordCompra) { 
             console.error("❌ renderOcCard chamado com ocInfo inválido:", ocInfo); 
@@ -1942,8 +1962,7 @@ ALL_OCS_ITEMS = itemsObj;
 
         if (itemResponse && itemResponse.ok === true && itemResponse.items && itemResponse.items.length > 0) {
             items = itemResponse.items.filter(item => item.Status?.toLowerCase() !== 'excluido');
-            // Ordena itens pela sequência original de DADOS_IMPORTADOS
-            items.sort((a, b) => (a.posicaoFonte ?? 999999) - (b.posicaoFonte ?? 999999));
+            _sortItemsPorOS(items, ocInfo.cliente);
             hasFaturadosItems = items.some(item => item.Status?.toLowerCase() === 'faturado');
             console.log(`🔧 Renderizando OC ${ocInfo.ordCompra}: ${items.length} itens visíveis`);
         }
@@ -3862,8 +3881,8 @@ ALL_OCS_ITEMS = itemsObj;
             const hasFaturados = items.some(i => i.Status?.toLowerCase() === 'faturado');
             const prazoMin = calcularPrazoMinimo(items);
             const prazoKey = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
-            // Ordena itens internos pela sequência original de DADOS_IMPORTADOS
-            items.sort((a, b) => (a.posicaoFonte ?? 999999) - (b.posicaoFonte ?? 999999));
+            // Ordena itens internos (DASS/Dilly: agrupa por OS; demais: por posicaoFonte)
+            _sortItemsPorOS(items, ocInfo ? ocInfo.cliente : '');
 
             ocsParaRelatorio.push({
                 ocNum,
