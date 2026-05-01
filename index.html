@@ -1915,6 +1915,20 @@ ALL_OCS_ITEMS = itemsObj;
 
 
 
+    const _OS_PALETTE = [
+        '#fef9c3','#dbeafe','#dcfce7','#fce7f3','#ede9fe',
+        '#ffedd5','#cffafe','#fef2f2','#e0f2fe','#f0fdf4'
+    ];
+    function _buildOsColorMap(items, cliente) {
+        if (!/dass|dilly/i.test(String(cliente || ''))) return null;
+        const map = new Map();
+        items.forEach(item => {
+            const os = String(item['CÓD. OS'] ?? '');
+            if (os && !map.has(os)) map.set(os, _OS_PALETTE[map.size % _OS_PALETTE.length]);
+        });
+        return map.size > 1 ? map : null; // só colorir quando há mais de 1 grupo
+    }
+
     // Para DASS e Dilly: agrupa itens por OS (na ordem de primeira aparição),
     // mantendo posicaoFonte como desempate dentro de cada grupo.
     // Para demais clientes: ordena somente por posicaoFonte.
@@ -2025,6 +2039,7 @@ ALL_OCS_ITEMS = itemsObj;
 
             const _sessaoAtual = _getSessaoLocal();
             const _usuarioAtual = (_sessaoAtual && _sessaoAtual.usuario) ? _sessaoAtual.usuario.trim() : '';
+            const _osColors = _buildOsColorMap(items, ocInfo.cliente);
 
             items.forEach(item => {
                 if (!item) return;
@@ -2039,7 +2054,10 @@ ALL_OCS_ITEMS = itemsObj;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
 
                 const classeMarcado = isMarcadoFaturar ? 'item-marcado-faturar' : '';
-                const inlineStyle = corUsuario ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"` : '';
+                const _osCorBg = (!corUsuario && _osColors) ? (_osColors.get(String(item['CÓD. OS'] ?? '')) || '') : '';
+                const inlineStyle = corUsuario
+                    ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"`
+                    : _osCorBg ? `style="background-color:${_osCorBg};"` : '';
                 bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-qtd-original="${qtdOriginal}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${_escapeHtml(usuarioQueMarkou)}"` : ''}>`;
 
                 bodyHtml += `
@@ -3967,6 +3985,7 @@ ALL_OCS_ITEMS = itemsObj;
                         <tbody>
             `;
 
+            const _osColorsProd = _buildOsColorMap(itens, nomeCliente);
             itens.forEach((item, idx) => {
                 const qtdAberta = item['QTD. ABERTA'] || 0;
                 const dtRecebimento = formatarData(item['DATA RECEB.']);
@@ -3985,8 +4004,9 @@ ALL_OCS_ITEMS = itemsObj;
                     });
                 }
 
+                const _osBgProd = _osColorsProd ? (_osColorsProd.get(String(item['CÓD. OS'] ?? '')) || '') : '';
                 html += `
-                    <tr>
+                    <tr${_osBgProd ? ` style="background:${_osBgProd};"` : ''}>
                         <td>${item.CARTELA || ''}</td>
                         <td>${item['CÓD. CLIENTE'] || ''}</td>
                         <td>${item.DESCRIÇÃO || ''}</td>
