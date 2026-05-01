@@ -1916,8 +1916,16 @@ ALL_OCS_ITEMS = itemsObj;
 
 
     const _OS_PALETTE = [
-        '#fef9c3','#dbeafe','#dcfce7','#fce7f3','#ede9fe',
-        '#ffedd5','#cffafe','#fef2f2','#e0f2fe','#f0fdf4'
+        { bg: '#fef08a', border: '#a16207' },
+        { bg: '#bfdbfe', border: '#1d4ed8' },
+        { bg: '#bbf7d0', border: '#15803d' },
+        { bg: '#fbcfe8', border: '#be185d' },
+        { bg: '#ddd6fe', border: '#6d28d9' },
+        { bg: '#fed7aa', border: '#c2410c' },
+        { bg: '#a5f3fc', border: '#0e7490' },
+        { bg: '#fecaca', border: '#b91c1c' },
+        { bg: '#bae6fd', border: '#0369a1' },
+        { bg: '#d9f99d', border: '#4d7c0f' },
     ];
     function _buildOsColorMap(items, cliente) {
         if (!/dass|dilly/i.test(String(cliente || ''))) return null;
@@ -2054,10 +2062,10 @@ ALL_OCS_ITEMS = itemsObj;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
 
                 const classeMarcado = isMarcadoFaturar ? 'item-marcado-faturar' : '';
-                const _osCorBg = (!corUsuario && _osColors) ? (_osColors.get(String(item['CÓD. OS'] ?? '')) || '') : '';
+                const _osCorPalette = (!corUsuario && _osColors) ? (_osColors.get(String(item['CÓD. OS'] ?? '')) || null) : null;
                 const inlineStyle = corUsuario
                     ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"`
-                    : _osCorBg ? `style="background-color:${_osCorBg};"` : '';
+                    : _osCorPalette ? `style="background-color:${_osCorPalette.bg}; border-left:4px solid ${_osCorPalette.border};"` : '';
                 bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-qtd-original="${qtdOriginal}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${_escapeHtml(usuarioQueMarkou)}"` : ''}>`;
 
                 bodyHtml += `
@@ -4004,9 +4012,9 @@ ALL_OCS_ITEMS = itemsObj;
                     });
                 }
 
-                const _osBgProd = _osColorsProd ? (_osColorsProd.get(String(item['CÓD. OS'] ?? '')) || '') : '';
+                const _osBgProd = _osColorsProd ? (_osColorsProd.get(String(item['CÓD. OS'] ?? '')) || null) : null;
                 html += `
-                    <tr${_osBgProd ? ` style="background:${_osBgProd};"` : ''}>
+                    <tr${_osBgProd ? ` style="background:${_osBgProd.bg}; border-left:4px solid ${_osBgProd.border};"` : ''}>
                         <td>${item.CARTELA || ''}</td>
                         <td>${item['CÓD. CLIENTE'] || ''}</td>
                         <td>${item.DESCRIÇÃO || ''}</td>
