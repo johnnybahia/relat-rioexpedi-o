@@ -175,9 +175,6 @@
     #filtroMarcaFaturModal .modal-content { max-width: 480px; }
     #filtroMarcaFaturModal .modal-header { background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-bottom-color: #93c5fd; }
     #filtroMarcaFaturModal .modal-header h2 { color: #1e3a8a; font-size: 1.1rem; }
-    .filtro-marca-separado-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 0.75rem; background: #fefce8; border: 1px solid #fde047; border-radius: 0.5rem; margin-bottom: 0.75rem; cursor: pointer; }
-    .filtro-marca-separado-row input[type=checkbox] { width: 17px; height: 17px; cursor: pointer; flex-shrink: 0; accent-color: #d97706; }
-    .filtro-marca-separado-label { font-size: 0.88rem; font-weight: 600; color: #78350f; }
     .filtro-fatur-lista li.sem-itens .filtro-fatur-count { background: #d1d5db; color: #6b7280; }
     .filtro-fatur-atalhos { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
     .filtro-fatur-atalhos button { flex: 1; padding: 0.35rem 0; font-size: 0.78rem; font-weight: 600; border: 1px solid #d1d5db; border-radius: 0.375rem; cursor: pointer; background: white; color: #374151; transition: all 0.15s; }
@@ -947,10 +944,6 @@
           <button onclick="_filtroMarcaDesmarcarTodos()">Desmarcar todas</button>
         </div>
         <ul id="filtroMarcaLista" class="filtro-fatur-lista"></ul>
-        <div class="filtro-marca-separado-row" id="filtroMarcaSeparadoRow" onclick="_toggleMarcaSeparado(event)">
-          <input type="checkbox" id="filtroMarcaSeparadoCb">
-          <span class="filtro-marca-separado-label">🖨️ Imprimir cada marca em documento separado</span>
-        </div>
       </div>
       <div class="modal-footer">
         <button class="modal-btn modal-btn-cancel" onclick="_voltarFiltroFatur()">← Voltar</button>
@@ -4238,6 +4231,7 @@ ALL_OCS_ITEMS = itemsObj;
     let _filtroFaturItensSelecionados = [];
     let _filtroFaturUsuariosSelecionados = [];
 
+
     function _confirmarFiltroFatur() {
         const selecionados = new Set();
         document.querySelectorAll('#filtroFaturLista input[type=checkbox]:not([disabled]):checked').forEach(cb => {
@@ -4308,12 +4302,6 @@ ALL_OCS_ITEMS = itemsObj;
         document.getElementById('filtroMarcaFaturModal').classList.remove('hidden');
     }
 
-    function _toggleMarcaSeparado(e) {
-        if (e.target.tagName === 'INPUT') return;
-        const cb = document.getElementById('filtroMarcaSeparadoCb');
-        cb.checked = !cb.checked;
-    }
-
     function _filtroMarcaSelecionarTodos() {
         document.querySelectorAll('#filtroMarcaLista input[type=checkbox]').forEach(cb => {
             cb.checked = true;
@@ -4356,42 +4344,16 @@ ALL_OCS_ITEMS = itemsObj;
 
         document.getElementById('filtroMarcaFaturModal').classList.add('hidden');
 
-        const imprimirSeparado = document.getElementById('filtroMarcaSeparadoCb').checked;
-
         google.script.run.registrarCheckpointsFaturamento(itensFiltrados);
 
-        if (imprimirSeparado && marcasSelecionadas.size > 1) {
-            // Ordena marcas alfabeticamente, (Sem Referência) por último
-            const marcasOrdenadas = [...marcasSelecionadas].sort((a, b) => {
-                if (a === '(Sem Referência)') return 1;
-                if (b === '(Sem Referência)') return -1;
-                return a.localeCompare(b, 'pt-BR');
-            });
-            // Abre todas as janelas imediatamente (dentro do handler de clique)
-            // para evitar bloqueio de popup do navegador
-            const janelas = marcasOrdenadas.map(marca => {
-                const itensMarca = itensFiltrados.filter(item => {
-                    const m = (item.INFO_X || '').trim() || '(Sem Referência)';
-                    return m === marca;
-                });
-                if (itensMarca.length === 0) return null;
-                const win = window.open('', '_blank');
-                return { win, itensMarca, marca };
-            }).filter(Boolean);
-            janelas.forEach(({ win, itensMarca, marca }) => {
-                _imprimirRelatorioFaturamento(itensMarca, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados, marca, win);
-            });
-        } else {
-            _imprimirRelatorioFaturamento(itensFiltrados, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
-        }
+        _imprimirRelatorioFaturamento(itensFiltrados, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
     }
 
-    function _imprimirRelatorioFaturamento(itensMarcados, usuarioLogado, usuariosFiltro, marcaFiltro, printWindow) {
+    function _imprimirRelatorioFaturamento(itensMarcados, usuarioLogado, usuariosFiltro) {
         const usuarioLogadoEsc = _escapeHtml(usuarioLogado);
         const filtroTextoEsc = _escapeHtml(
             usuariosFiltro && usuariosFiltro.length > 0 ? usuariosFiltro.join(', ') : 'Todos'
         );
-        const marcaFiltroEsc = marcaFiltro ? _escapeHtml(marcaFiltro) : null;
 
         // Agrupar por INFO_X → dentro de cada grupo, por OC
         const gruposPorInfoX = {};
@@ -4411,7 +4373,7 @@ ALL_OCS_ITEMS = itemsObj;
             return a.localeCompare(b, 'pt-BR');
         });
 
-        if (!printWindow) printWindow = window.open('', '_blank');
+        const printWindow = window.open('', '_blank');
         const dataHoje = new Date().toLocaleDateString('pt-BR');
         const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         // filtroTexto e usuarioLogado já escapados em _imprimirRelatorioFaturamento()
@@ -4447,16 +4409,16 @@ ALL_OCS_ITEMS = itemsObj;
                     body { margin: 0; padding: 0; }
                     h1, .info { page-break-after: avoid; page-break-inside: avoid; }
                     .oc-section { page-break-inside: avoid; }
+                    .grupo-section + .grupo-section { break-before: page; }
                 }
             </style>
         </head>
         <body>
-            <h1>💰 RELATÓRIO PARA FATURAMENTO${marcaFiltroEsc ? ` — ${marcaFiltroEsc}` : ''}</h1>
+            <h1>💰 RELATÓRIO PARA FATURAMENTO</h1>
             <div class="info">
                 Gerado em: ${dataHoje} às ${horaAgora}
                 ${usuarioLogadoSafe ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogadoSafe}</span>` : ''}
                 <br><span class="info-filtro">Usuários: ${filtroTexto}</span>
-                ${marcaFiltroEsc ? `&nbsp;&nbsp;<span style="font-size:10px;font-weight:700;color:#7c3aed;">Marca: ${marcaFiltroEsc}</span>` : ''}
             </div>
         `;
 
