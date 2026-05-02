@@ -2645,6 +2645,7 @@ function sincronizarDados() {
               itemAindaEmPedidosPorFingerprint = fonteImpressoes.has(fpDB) && fonteImpressoes.get(fpDB).some(i => !i.usado);
               if (itemAindaEmPedidosPorFingerprint) {
                 Logger.log(`   ⚠️ DUPLICATA: Item aguardando NF existe em PEDIDOS com ID diferente — mantido Ativo OC="${dbItem.row[DB_OC_COL]}" QTD=${qtdAberta} ID="${id}"`);
+
               }
             }
 
