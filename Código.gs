@@ -662,6 +662,7 @@ function onOpen() {
     .addItem('▶ Retomar sistema', 'retomarSistema')
     .addSeparator()
     .addItem('🧹 Confirmar todos os alertas de faturamento (testes)', 'confirmarTodosAlertasMenu')
+    .addItem('🔧 Corrigir Faturados com saldo aberto (reverter para Ativo)', 'corrigirFaturadosComSaldoAberto')
     .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
     .addSeparator()
@@ -3983,30 +3984,72 @@ function confirmarTodosAlertas() {
   const dados    = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
   const agora    = new Date();
   let   marcados = 0;
+  let   alertasDismissed = 0;
 
   dados.forEach((row, i) => {
     const marcar = String(row[MARCAR_FATURAR_COL] || '').trim().toUpperCase();
     if (marcar !== 'SIM') return;
 
-    const linhaSheet = i + 2; // +1 offset base, +1 cabeçalho
+    const linhaSheet = i + 2;
     const uniqueId   = String(row[ID_COL] || '').trim();
     const qtdAberta  = _toNumber_(row[DB_QTD_COL]);
 
-    sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Faturado');
-    sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
-    sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue(agora);
-    marcados++;
-    Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${uniqueId}") | QTD.ABERTA: ${qtdAberta}`);
-
-    if (qtdAberta > 0 && uniqueId) {
-      _registrarCheckpointFaturamento_(uniqueId, qtdAberta);
+    if (qtdAberta === 0) {
+      // QTD zerada: baixa foi feita — seguro marcar como Faturado
+      sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Faturado');
+      sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+      sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue(agora);
+      marcados++;
+      Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${uniqueId}") | QTD.ABERTA: 0`);
+    } else {
+      // QTD ainda aberta: apenas descarta o alerta, mantém Ativo
+      sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+      alertasDismissed++;
+      Logger.log(`⚠️ Linha ${linhaSheet} → alerta descartado, mantido Ativo (ID="${uniqueId}") | QTD.ABERTA: ${qtdAberta}`);
     }
   });
 
   PropertiesService.getScriptProperties().deleteProperty('ALERTAS_FATURAMENTO');
   limparCache();
 
-  Logger.log(`✅ confirmarTodosAlertas: ${marcados} item(ns) marcado(s) como Faturado. Alertas limpos.`);
+  Logger.log(`✅ confirmarTodosAlertas: ${marcados} marcado(s) como Faturado, ${alertasDismissed} alerta(s) descartado(s) com QTD aberta.`);
+}
+
+/**
+ * Corrige itens com Status=Faturado mas QTD.ABERTA > 0 (marcados incorretamente).
+ * Reverte o status para Ativo e limpa MARCAR_FATURAR.
+ * Execute manualmente pelo menu do Apps Script quando necessário.
+ */
+function corrigirFaturadosComSaldoAberto() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    ui.alert('DB vazio ou não encontrado.');
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = Math.max(sheet.getLastColumn(), DATA_STATUS_COL + 1);
+  const dados   = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let corrigidos = 0;
+
+  dados.forEach((row, i) => {
+    const status    = String(row[STATUS_COL] || '').trim();
+    const qtdAberta = _toNumber_(row[DB_QTD_COL]);
+    if (status !== 'Faturado' || qtdAberta === 0) return;
+
+    const linhaSheet = i + 2;
+    const uniqueId   = String(row[ID_COL] || '').trim();
+    sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Ativo');
+    sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+    sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue('');
+    corrigidos++;
+    Logger.log(`🔧 Linha ${linhaSheet} → revertido Faturado→Ativo (ID="${uniqueId}") | QTD.ABERTA: ${qtdAberta}`);
+  });
+
+  limparCache();
+  ui.alert('✅ Correção concluída', `${corrigidos} item(ns) revertido(s) de Faturado → Ativo por ter QTD.ABERTA > 0.`, ui.ButtonSet.OK);
+  Logger.log(`✅ corrigirFaturadosComSaldoAberto: ${corrigidos} item(ns) corrigido(s).`);
 }
 
 // ====== SISTEMA DE LOGIN COM NÍVEIS DE ACESSO ======
