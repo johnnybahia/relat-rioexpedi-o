@@ -4269,7 +4269,6 @@ ALL_OCS_ITEMS = itemsObj;
 
         // Se só tem uma marca, não precisa do modal — imprime direto
         if (marcas.size <= 1) {
-            google.script.run.registrarCheckpointsFaturamento(itens);
             _imprimirRelatorioFaturamento(itens, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
             return;
         }
@@ -4278,7 +4277,6 @@ ALL_OCS_ITEMS = itemsObj;
         const $lista = document.getElementById('filtroMarcaLista');
         if (!$modal || !$lista) {
             // Fallback: modal não encontrado no DOM, imprime tudo direto
-            google.script.run.registrarCheckpointsFaturamento(itens);
             _imprimirRelatorioFaturamento(itens, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
             return;
         }
@@ -4354,8 +4352,6 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         document.getElementById('filtroMarcaFaturModal').classList.add('hidden');
-
-        google.script.run.registrarCheckpointsFaturamento(itensFiltrados);
 
         _imprimirRelatorioFaturamento(itensFiltrados, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
     }
