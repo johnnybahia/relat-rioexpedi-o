@@ -169,6 +169,12 @@
     .filtro-fatur-nome { font-weight: 600; font-size: 0.9rem; color: #1f2937; flex: 1; }
     .filtro-fatur-lista li.sem-itens .filtro-fatur-nome { color: #9ca3af; }
     .filtro-fatur-count { font-size: 0.72rem; font-weight: 700; padding: 2px 7px; border-radius: 9999px; background: #16a34a; color: white; white-space: nowrap; }
+
+    /* === MODAL FILTRO DE MARCAS PARA FATURAMENTO === */
+    #filtroMarcaFaturModal { z-index: 3100; }
+    #filtroMarcaFaturModal .modal-content { max-width: 480px; }
+    #filtroMarcaFaturModal .modal-header { background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-bottom-color: #93c5fd; }
+    #filtroMarcaFaturModal .modal-header h2 { color: #1e3a8a; font-size: 1.1rem; }
     .filtro-fatur-lista li.sem-itens .filtro-fatur-count { background: #d1d5db; color: #6b7280; }
     .filtro-fatur-atalhos { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
     .filtro-fatur-atalhos button { flex: 1; padding: 0.35rem 0; font-size: 0.78rem; font-weight: 600; border: 1px solid #d1d5db; border-radius: 0.375rem; cursor: pointer; background: white; color: #374151; transition: all 0.15s; }
@@ -921,7 +927,27 @@
       </div>
       <div class="modal-footer">
         <button class="modal-btn modal-btn-cancel" onclick="_fecharFiltroFatur()">Cancelar</button>
-        <button class="modal-btn modal-btn-confirm" onclick="_confirmarFiltroFatur()">Imprimir selecionados</button>
+        <button class="modal-btn modal-btn-confirm" onclick="_confirmarFiltroFatur()">Próximo →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: filtro de marcas para relatório de faturamento -->
+  <div id="filtroMarcaFaturModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>🏷️ Filtrar Marcas — Relatório de Faturamento</h2>
+      </div>
+      <div class="modal-body">
+        <div class="filtro-fatur-atalhos">
+          <button onclick="_filtroMarcaSelecionarTodos()">Marcar todas</button>
+          <button onclick="_filtroMarcaDesmarcarTodos()">Desmarcar todas</button>
+        </div>
+        <ul id="filtroMarcaLista" class="filtro-fatur-lista"></ul>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-cancel" onclick="_voltarFiltroFatur()">← Voltar</button>
+        <button class="modal-btn modal-btn-confirm" onclick="_confirmarFiltroMarca()">Imprimir</button>
       </div>
     </div>
   </div>
@@ -4202,6 +4228,10 @@ ALL_OCS_ITEMS = itemsObj;
         document.getElementById('filtroUsuarioFaturModal').classList.add('hidden');
     }
 
+    let _filtroFaturItensSelecionados = [];
+    let _filtroFaturUsuariosSelecionados = [];
+
+
     function _confirmarFiltroFatur() {
         const selecionados = new Set();
         document.querySelectorAll('#filtroFaturLista input[type=checkbox]:not([disabled]):checked').forEach(cb => {
@@ -4213,11 +4243,8 @@ ALL_OCS_ITEMS = itemsObj;
             return;
         }
 
-        _fecharFiltroFatur();
-
         const itensFiltrados = _filtroFaturItens.filter(item => {
             const u = String(item.MARCAR_FATURAR_USUARIO || '').trim().toLowerCase();
-            // Itens sem usuário são tratados separadamente com a chave '(sem usuário)'
             return u ? selecionados.has(u) : selecionados.has('(sem usuário)');
         });
 
@@ -4226,10 +4253,100 @@ ALL_OCS_ITEMS = itemsObj;
             return;
         }
 
-        // Registra checkpoints para redefinir a base de saldo dos itens parciais
+        _filtroFaturItensSelecionados = itensFiltrados;
+        _filtroFaturUsuariosSelecionados = [...selecionados];
+
+        _fecharFiltroFatur();
+        _mostrarFiltroMarca(itensFiltrados);
+    }
+
+    function _mostrarFiltroMarca(itens) {
+        const marcas = new Map();
+        itens.forEach(item => {
+            const m = (item.INFO_X || '').trim() || '(Sem Referência)';
+            marcas.set(m, (marcas.get(m) || 0) + 1);
+        });
+
+        const $lista = document.getElementById('filtroMarcaLista');
+        $lista.innerHTML = '';
+        [...marcas.entries()]
+            .sort((a, b) => {
+                if (a[0] === '(Sem Referência)') return 1;
+                if (b[0] === '(Sem Referência)') return -1;
+                return a[0].localeCompare(b[0], 'pt-BR');
+            })
+            .forEach(([nome, count]) => {
+                const li = document.createElement('li');
+                const nomeEsc = _escapeHtml(nome);
+                li.innerHTML = `
+                    <input type="checkbox" checked data-marca="${nomeEsc}">
+                    <span class="filtro-fatur-nome">${nomeEsc}</span>
+                    <span class="filtro-fatur-count">${count} ${count === 1 ? 'item' : 'itens'}</span>`;
+                li.querySelector('input').addEventListener('change', function() {
+                    li.style.opacity = this.checked ? '1' : '0.5';
+                });
+                li.addEventListener('click', function(e) {
+                    if (e.target.tagName !== 'INPUT') {
+                        const cb = li.querySelector('input');
+                        cb.checked = !cb.checked;
+                        cb.dispatchEvent(new Event('change'));
+                    }
+                });
+                $lista.appendChild(li);
+            });
+
+        // Pré-marcar separado apenas se houver mais de uma marca
+        const $cbSep = document.getElementById('filtroMarcaSeparadoCb');
+        $cbSep.checked = marcas.size > 1;
+
+        document.getElementById('filtroMarcaFaturModal').classList.remove('hidden');
+    }
+
+    function _filtroMarcaSelecionarTodos() {
+        document.querySelectorAll('#filtroMarcaLista input[type=checkbox]').forEach(cb => {
+            cb.checked = true;
+            cb.closest('li').style.opacity = '1';
+        });
+    }
+
+    function _filtroMarcaDesmarcarTodos() {
+        document.querySelectorAll('#filtroMarcaLista input[type=checkbox]').forEach(cb => {
+            cb.checked = false;
+            cb.closest('li').style.opacity = '0.5';
+        });
+    }
+
+    function _voltarFiltroFatur() {
+        document.getElementById('filtroMarcaFaturModal').classList.add('hidden');
+        document.getElementById('filtroUsuarioFaturModal').classList.remove('hidden');
+    }
+
+    function _confirmarFiltroMarca() {
+        const marcasSelecionadas = new Set();
+        document.querySelectorAll('#filtroMarcaLista input[type=checkbox]:checked').forEach(cb => {
+            marcasSelecionadas.add(cb.dataset.marca);
+        });
+
+        if (marcasSelecionadas.size === 0) {
+            showError('Selecione ao menos uma marca para imprimir.');
+            return;
+        }
+
+        const itensFiltrados = _filtroFaturItensSelecionados.filter(item => {
+            const m = (item.INFO_X || '').trim() || '(Sem Referência)';
+            return marcasSelecionadas.has(m);
+        });
+
+        if (itensFiltrados.length === 0) {
+            showError('Nenhum item encontrado para as marcas selecionadas.');
+            return;
+        }
+
+        document.getElementById('filtroMarcaFaturModal').classList.add('hidden');
+
         google.script.run.registrarCheckpointsFaturamento(itensFiltrados);
 
-        _imprimirRelatorioFaturamento(itensFiltrados, _filtroFaturUsuarioLogado, [...selecionados]);
+        _imprimirRelatorioFaturamento(itensFiltrados, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
     }
 
     function _imprimirRelatorioFaturamento(itensMarcados, usuarioLogado, usuariosFiltro) {
@@ -4292,6 +4409,7 @@ ALL_OCS_ITEMS = itemsObj;
                     body { margin: 0; padding: 0; }
                     h1, .info { page-break-after: avoid; page-break-inside: avoid; }
                     .oc-section { page-break-inside: avoid; }
+                    .grupo-section + .grupo-section { break-before: page; }
                 }
             </style>
         </head>
