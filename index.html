@@ -4367,22 +4367,26 @@ ALL_OCS_ITEMS = itemsObj;
                 if (b === '(Sem Referência)') return -1;
                 return a.localeCompare(b, 'pt-BR');
             });
-            marcasOrdenadas.forEach((marca, idx) => {
+            // Abre todas as janelas imediatamente (dentro do handler de clique)
+            // para evitar bloqueio de popup do navegador
+            const janelas = marcasOrdenadas.map(marca => {
                 const itensMarca = itensFiltrados.filter(item => {
                     const m = (item.INFO_X || '').trim() || '(Sem Referência)';
                     return m === marca;
                 });
-                if (itensMarca.length === 0) return;
-                setTimeout(() => {
-                    _imprimirRelatorioFaturamento(itensMarca, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados, marca);
-                }, idx * 400);
+                if (itensMarca.length === 0) return null;
+                const win = window.open('', '_blank');
+                return { win, itensMarca, marca };
+            }).filter(Boolean);
+            janelas.forEach(({ win, itensMarca, marca }) => {
+                _imprimirRelatorioFaturamento(itensMarca, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados, marca, win);
             });
         } else {
             _imprimirRelatorioFaturamento(itensFiltrados, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
         }
     }
 
-    function _imprimirRelatorioFaturamento(itensMarcados, usuarioLogado, usuariosFiltro, marcaFiltro) {
+    function _imprimirRelatorioFaturamento(itensMarcados, usuarioLogado, usuariosFiltro, marcaFiltro, printWindow) {
         const usuarioLogadoEsc = _escapeHtml(usuarioLogado);
         const filtroTextoEsc = _escapeHtml(
             usuariosFiltro && usuariosFiltro.length > 0 ? usuariosFiltro.join(', ') : 'Todos'
@@ -4407,7 +4411,7 @@ ALL_OCS_ITEMS = itemsObj;
             return a.localeCompare(b, 'pt-BR');
         });
 
-        const printWindow = window.open('', '_blank');
+        if (!printWindow) printWindow = window.open('', '_blank');
         const dataHoje = new Date().toLocaleDateString('pt-BR');
         const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         // filtroTexto e usuarioLogado já escapados em _imprimirRelatorioFaturamento()
