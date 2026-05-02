@@ -495,6 +495,22 @@
     </div>
   </div>
 
+  <!-- Modal de Confirmação Pós-Baixa (TOTAL / PARCIAL) -->
+  <div id="baixaConfirmacaoModal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>📦 Baixa Registrada</h2>
+      </div>
+      <div class="modal-body">
+        <p id="baixa-confirmacao-msg" class="modal-message" style="text-align:center;"></p>
+      </div>
+      <div class="modal-footer">
+        <button id="baixa-confirmacao-parcial-btn" class="modal-btn modal-btn-cancel">PARCIAL</button>
+        <button id="baixa-confirmacao-total-btn" class="modal-btn modal-btn-confirm">TOTAL</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal de Baixa Parcial -->
   <div id="baixaModal" class="modal-overlay hidden">
     <div class="modal-content">
@@ -1280,6 +1296,36 @@
     const $errorOkBtn = document.getElementById('error-ok-btn');
 
     const $keyboardHint = document.getElementById('keyboard-hint');
+
+    // Modal de Confirmação Pós-Baixa (TOTAL / PARCIAL)
+    const $baixaConfirmacaoModal = document.getElementById('baixaConfirmacaoModal');
+    const $baixaConfirmacaoMsg = document.getElementById('baixa-confirmacao-msg');
+    const $baixaConfirmacaoTotalBtn = document.getElementById('baixa-confirmacao-total-btn');
+    const $baixaConfirmacaoParcialBtn = document.getElementById('baixa-confirmacao-parcial-btn');
+    let _baixaConfirmacaoCallbacks = null;
+
+    function showBaixaConfirmacaoModal(msg, onTotal, onParcial) {
+        $baixaConfirmacaoMsg.textContent = msg;
+        _baixaConfirmacaoCallbacks = { onTotal, onParcial };
+        $baixaConfirmacaoModal.classList.remove('hidden');
+    }
+
+    function hideBaixaConfirmacaoModal() {
+        $baixaConfirmacaoModal.classList.add('hidden');
+        _baixaConfirmacaoCallbacks = null;
+    }
+
+    $baixaConfirmacaoTotalBtn.addEventListener('click', () => {
+        const cb = _baixaConfirmacaoCallbacks;
+        hideBaixaConfirmacaoModal();
+        if (cb && cb.onTotal) cb.onTotal();
+    });
+
+    $baixaConfirmacaoParcialBtn.addEventListener('click', () => {
+        const cb = _baixaConfirmacaoCallbacks;
+        hideBaixaConfirmacaoModal();
+        if (cb && cb.onParcial) cb.onParcial();
+    });
 
     // Modal de Baixa Parcial
     const $baixaModal = document.getElementById('baixaModal');
@@ -2694,29 +2740,50 @@ ALL_OCS_ITEMS = itemsObj;
                         showSuccessModal('Baixa aplicada! Quantidade zerada.', { noReload: true });
                         setTimeout(() => carregarListaOcs(true, true), 2100);
                     } else {
-                        hideBaixaModal();
-                        showSuccessModal('Baixa aplicada com sucesso!', { noReload: true });
-                        setTimeout(() => carregarListaOcs(true, true), 2100);
+                        const saldoRestante = result.novaQtd;
+                        const itemParaBaixa = { ...currentBaixaItem };
 
-                        // Atualiza a linha na tabela
+                        // Atualiza a linha na tabela imediatamente
                         const row = document.getElementById(`item-linha-${planilhaLinha}`);
                         if (row) {
-                            row.dataset.itemQtd = String(result.novaQtd);
-
-                            // Atualiza QTD. ABERTA
+                            row.dataset.itemQtd = String(saldoRestante);
                             const cells = row.querySelectorAll('td');
                             const hasCheckbox = cells[0] && cells[0].querySelector('.item-checkbox');
                             const offset = hasCheckbox ? 1 : 0;
-
-                            // Coluna QTD. ABERTA: Cartela(0), Cód(1), Desc(2), Tam(3), Original(4), Aberta(5)
                             const qtdAbertaCell = cells[5 + offset];
                             if (qtdAbertaCell) {
-                                qtdAbertaCell.textContent = fmtInt(result.novaQtd);
+                                qtdAbertaCell.textContent = fmtInt(saldoRestante);
                             }
                         }
-
-                        // Atualiza totalizadores gerais
                         updateTotaisGerais();
+
+                        hideBaixaModal();
+
+                        const usuario = (_getSessaoLocal() || {}).usuario || '';
+                        showBaixaConfirmacaoModal(
+                            `Baixa parcial registrada — saldo atual: ${fmtInt(saldoRestante)} unidades.\n\nTOTAL → Faturar completo (zera saldo)\nPARCIAL → Manter saldo parcial`,
+                            () => {
+                                // TOTAL: aplica baixa do saldo restante para zerar
+                                google.script.run
+                                    .withSuccessHandler(r => {
+                                        if (r && r.success) {
+                                            showSuccessModal('Saldo zerado! Baixa total aplicada.', { noReload: true });
+                                        } else {
+                                            showError('Erro ao zerar saldo: ' + ((r && r.error) || 'Erro desconhecido'));
+                                        }
+                                        setTimeout(() => carregarListaOcs(true, true), 2100);
+                                    })
+                                    .withFailureHandler(err => {
+                                        showError('Falha ao zerar saldo: ' + err.message);
+                                    })
+                                    .aplicarBaixa(itemParaBaixa.uniqueId, itemParaBaixa.planilhaLinha, saldoRestante, usuario);
+                            },
+                            () => {
+                                // PARCIAL: mantém saldo, apenas recarrega
+                                showSuccessModal('Baixa parcial registrada!', { noReload: true });
+                                setTimeout(() => carregarListaOcs(true, true), 2100);
+                            }
+                        );
                     }
                 } else {
                     showError('Erro ao aplicar baixa: ' + (result.error || 'Erro desconhecido'));
