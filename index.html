@@ -4267,7 +4267,22 @@ ALL_OCS_ITEMS = itemsObj;
             marcas.set(m, (marcas.get(m) || 0) + 1);
         });
 
+        // Se só tem uma marca, não precisa do modal — imprime direto
+        if (marcas.size <= 1) {
+            google.script.run.registrarCheckpointsFaturamento(itens);
+            _imprimirRelatorioFaturamento(itens, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
+            return;
+        }
+
+        const $modal = document.getElementById('filtroMarcaFaturModal');
         const $lista = document.getElementById('filtroMarcaLista');
+        if (!$modal || !$lista) {
+            // Fallback: modal não encontrado no DOM, imprime tudo direto
+            google.script.run.registrarCheckpointsFaturamento(itens);
+            _imprimirRelatorioFaturamento(itens, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
+            return;
+        }
+
         $lista.innerHTML = '';
         [...marcas.entries()]
             .sort((a, b) => {
@@ -4295,11 +4310,7 @@ ALL_OCS_ITEMS = itemsObj;
                 $lista.appendChild(li);
             });
 
-        // Pré-marcar separado apenas se houver mais de uma marca
-        const $cbSep = document.getElementById('filtroMarcaSeparadoCb');
-        $cbSep.checked = marcas.size > 1;
-
-        document.getElementById('filtroMarcaFaturModal').classList.remove('hidden');
+        $modal.classList.remove('hidden');
     }
 
     function _filtroMarcaSelecionarTodos() {
