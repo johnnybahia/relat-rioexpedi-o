@@ -662,6 +662,7 @@ function onOpen() {
     .addItem('▶ Retomar sistema', 'retomarSistema')
     .addSeparator()
     .addItem('🧹 Confirmar todos os alertas de faturamento (testes)', 'confirmarTodosAlertasMenu')
+    .addItem('🔧 Corrigir Faturados com saldo aberto (reverter para Ativo)', 'corrigirFaturadosComSaldoAberto')
     .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
     .addSeparator()
@@ -2373,6 +2374,17 @@ function sincronizarDados() {
     }
     Logger.log(`   ${idsBaixados.size} IDs com histórico de baixas`);
 
+    // IDs com alerta ativo = MARCAR_FATURAR=SIM foi setado pelo SYNC (saída inesperada).
+    // IDs sem alerta ativo = MARCAR_FATURAR=SIM foi setado pelo USUÁRIO (fluxo correto).
+    const idsComAlertaAtivo = new Set();
+    try {
+      const alertas = JSON.parse(PropertiesService.getScriptProperties().getProperty(ALERTAS_PROP_KEY) || '[]');
+      alertas.forEach(a => { if (a.itemId) idsComAlertaAtivo.add(String(a.itemId).trim()); });
+    } catch (e) {
+      Logger.log(`   ⚠️ Não foi possível carregar alertas ativos: ${e.message}`);
+    }
+    Logger.log(`   ${idsComAlertaAtivo.size} IDs com alerta de faturamento ativo`);
+
     for (let [id, dbItem] of dbMap.entries()) {
       const statusAtual = dbItem.row[STATUS_COL];  // Coluna O (índice 14)
 
@@ -2649,14 +2661,19 @@ function sincronizarDados() {
               }
             }
 
-            // STATUS=Faturado é determinado EXCLUSIVAMENTE pela análise PEDIDOS vs DB.
-            // MARCAR_FATURAR=SIM não influencia esta decisão em nenhuma circunstância.
             if (!itemAindaEmPedidosPorFingerprint && statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
-              if (qtdAberta === 0) {
-                // QTD=0: baixas completas → faturado independente da proteção
+              if (aguardandoNF && !idsComAlertaAtivo.has(id)) {
+                // MARCAR_FATURAR=SIM posto pelo USUÁRIO (sem alerta ativo) → saída esperada → Faturado direto
+                Logger.log(`   ✋→✅ Marcado pelo usuário + saiu do PEDIDOS → Faturado direto (QTD=${qtdAberta}, ID="${id}")`);
+                itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0, marcadoParaNF: true });
+              } else if (aguardandoNF && idsComAlertaAtivo.has(id)) {
+                // MARCAR_FATURAR=SIM posto pelo SYNC (alerta ativo) → mantém Ativo, aguarda confirmação do usuário
+                Logger.log(`   ✋ Alerta ativo pendente de confirmação — mantido Ativo (QTD=${qtdAberta}, ID="${id}")`);
+              } else if (qtdAberta === 0) {
+                // QTD=0 sem marcação: baixas zeraram o item → faturado silencioso
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
               } else if (!protecaoAtiva || temBaixas) {
-                // QTD>0: gera alerta SE proteção inativa OU SE usuário já fez baixas (item sendo trabalhado)
+                // QTD>0 sem marcação: saída inesperada → gera alerta
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: qtdAberta });
               } else {
                 // QTD>0 + proteção ativa + sem baixas → aguarda reconsolidação de ID
@@ -2680,19 +2697,19 @@ function sincronizarDados() {
       Logger.log(`\n🔄 Processando ${itensFaturarPendentes.length} item(ns) que saíram do PEDIDOS (ordenado por QTD.ABERTA):`);
     }
 
-    itensFaturarPendentes.forEach(({ id, linha, row, statusAtual, qtdAberta }) => {
+    itensFaturarPendentes.forEach(({ id, linha, row, statusAtual, qtdAberta, marcadoParaNF }) => {
       const linhaAtualizar = [...row];
 
-      if (qtdAberta === 0) {
-        // QTD=0: baixa foi completamente registrada no HTML — seguro faturar automaticamente
-        linhaAtualizar[STATUS_COL] = "Faturado";
-        linhaAtualizar[DATA_STATUS_COL] = new Date();
+      if (qtdAberta === 0 || marcadoParaNF) {
+        // QTD=0: baixa zerou o item  |  marcadoParaNF: usuário marcou + saiu do PEDIDOS → Faturado direto
+        linhaAtualizar[STATUS_COL]       = "Faturado";
+        linhaAtualizar[DATA_STATUS_COL]  = new Date();
+        linhaAtualizar[MARCAR_FATURAR_COL] = "";
         updates.push({ linha: linha, dados: linhaAtualizar, de: statusAtual, para: "Faturado", id: id });
         autoExcluidos++;
-        Logger.log(`   ✅ QTD.ABERTA=0 → Faturado silencioso (ID="${id}")`);
+        Logger.log(`   ✅ ${marcadoParaNF ? 'Marcado p/ NF + saiu' : 'QTD.ABERTA=0'} → Faturado (ID="${id}")`);
       } else {
-        // QTD>0: não auto-fatura — sinaliza MARCAR_FATURAR=SIM e aguarda confirmação manual no HTML.
-        // Na próxima sync o item já terá MARCAR_FATURAR=SIM e será mantido Ativo pelo bloco aguardandoNF.
+        // QTD>0 sem marcação: saída inesperada → sinaliza e gera alerta
         linhaAtualizar[MARCAR_FATURAR_COL] = "SIM";
         updates.push({ linha: linha, dados: linhaAtualizar, de: statusAtual, para: statusAtual, id: id });
         Logger.log(`   ⚠️ QTD.ABERTA=${qtdAberta} → MARCAR_FATURAR=SIM + ALERTA, mantido ${statusAtual} (ID="${id}")`);
@@ -3983,30 +4000,72 @@ function confirmarTodosAlertas() {
   const dados    = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
   const agora    = new Date();
   let   marcados = 0;
+  let   alertasDismissed = 0;
 
   dados.forEach((row, i) => {
     const marcar = String(row[MARCAR_FATURAR_COL] || '').trim().toUpperCase();
     if (marcar !== 'SIM') return;
 
-    const linhaSheet = i + 2; // +1 offset base, +1 cabeçalho
+    const linhaSheet = i + 2;
     const uniqueId   = String(row[ID_COL] || '').trim();
     const qtdAberta  = _toNumber_(row[DB_QTD_COL]);
 
-    sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Faturado');
-    sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
-    sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue(agora);
-    marcados++;
-    Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${uniqueId}") | QTD.ABERTA: ${qtdAberta}`);
-
-    if (qtdAberta > 0 && uniqueId) {
-      _registrarCheckpointFaturamento_(uniqueId, qtdAberta);
+    if (qtdAberta === 0) {
+      // QTD zerada: baixa foi feita — seguro marcar como Faturado
+      sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Faturado');
+      sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+      sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue(agora);
+      marcados++;
+      Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${uniqueId}") | QTD.ABERTA: 0`);
+    } else {
+      // QTD ainda aberta: apenas descarta o alerta, mantém Ativo
+      sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+      alertasDismissed++;
+      Logger.log(`⚠️ Linha ${linhaSheet} → alerta descartado, mantido Ativo (ID="${uniqueId}") | QTD.ABERTA: ${qtdAberta}`);
     }
   });
 
   PropertiesService.getScriptProperties().deleteProperty('ALERTAS_FATURAMENTO');
   limparCache();
 
-  Logger.log(`✅ confirmarTodosAlertas: ${marcados} item(ns) marcado(s) como Faturado. Alertas limpos.`);
+  Logger.log(`✅ confirmarTodosAlertas: ${marcados} marcado(s) como Faturado, ${alertasDismissed} alerta(s) descartado(s) com QTD aberta.`);
+}
+
+/**
+ * Corrige itens com Status=Faturado mas QTD.ABERTA > 0 (marcados incorretamente).
+ * Reverte o status para Ativo e limpa MARCAR_FATURAR.
+ * Execute manualmente pelo menu do Apps Script quando necessário.
+ */
+function corrigirFaturadosComSaldoAberto() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    ui.alert('DB vazio ou não encontrado.');
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = Math.max(sheet.getLastColumn(), DATA_STATUS_COL + 1);
+  const dados   = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let corrigidos = 0;
+
+  dados.forEach((row, i) => {
+    const status    = String(row[STATUS_COL] || '').trim();
+    const qtdAberta = _toNumber_(row[DB_QTD_COL]);
+    if (status !== 'Faturado' || qtdAberta === 0) return;
+
+    const linhaSheet = i + 2;
+    const uniqueId   = String(row[ID_COL] || '').trim();
+    sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Ativo');
+    sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+    sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue('');
+    corrigidos++;
+    Logger.log(`🔧 Linha ${linhaSheet} → revertido Faturado→Ativo (ID="${uniqueId}") | QTD.ABERTA: ${qtdAberta}`);
+  });
+
+  limparCache();
+  ui.alert('✅ Correção concluída', `${corrigidos} item(ns) revertido(s) de Faturado → Ativo por ter QTD.ABERTA > 0.`, ui.ButtonSet.OK);
+  Logger.log(`✅ corrigirFaturadosComSaldoAberto: ${corrigidos} item(ns) corrigido(s).`);
 }
 
 // ====== SISTEMA DE LOGIN COM NÍVEIS DE ACESSO ======
