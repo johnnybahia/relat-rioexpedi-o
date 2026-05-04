@@ -2374,6 +2374,17 @@ function sincronizarDados() {
     }
     Logger.log(`   ${idsBaixados.size} IDs com histórico de baixas`);
 
+    // IDs com alerta ativo = MARCAR_FATURAR=SIM foi setado pelo SYNC (saída inesperada).
+    // IDs sem alerta ativo = MARCAR_FATURAR=SIM foi setado pelo USUÁRIO (fluxo correto).
+    const idsComAlertaAtivo = new Set();
+    try {
+      const alertas = JSON.parse(PropertiesService.getScriptProperties().getProperty(ALERTAS_PROP_KEY) || '[]');
+      alertas.forEach(a => { if (a.itemId) idsComAlertaAtivo.add(String(a.itemId).trim()); });
+    } catch (e) {
+      Logger.log(`   ⚠️ Não foi possível carregar alertas ativos: ${e.message}`);
+    }
+    Logger.log(`   ${idsComAlertaAtivo.size} IDs com alerta de faturamento ativo`);
+
     for (let [id, dbItem] of dbMap.entries()) {
       const statusAtual = dbItem.row[STATUS_COL];  // Coluna O (índice 14)
 
@@ -2651,10 +2662,13 @@ function sincronizarDados() {
             }
 
             if (!itemAindaEmPedidosPorFingerprint && statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
-              if (aguardandoNF) {
-                // Usuário marcou explicitamente para faturar → saída do PEDIDOS é esperada → Faturado direto
-                Logger.log(`   ✋→✅ Marcado para NF + saiu do PEDIDOS → Faturado direto (QTD=${qtdAberta}, ID="${id}")`);
+              if (aguardandoNF && !idsComAlertaAtivo.has(id)) {
+                // MARCAR_FATURAR=SIM posto pelo USUÁRIO (sem alerta ativo) → saída esperada → Faturado direto
+                Logger.log(`   ✋→✅ Marcado pelo usuário + saiu do PEDIDOS → Faturado direto (QTD=${qtdAberta}, ID="${id}")`);
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0, marcadoParaNF: true });
+              } else if (aguardandoNF && idsComAlertaAtivo.has(id)) {
+                // MARCAR_FATURAR=SIM posto pelo SYNC (alerta ativo) → mantém Ativo, aguarda confirmação do usuário
+                Logger.log(`   ✋ Alerta ativo pendente de confirmação — mantido Ativo (QTD=${qtdAberta}, ID="${id}")`);
               } else if (qtdAberta === 0) {
                 // QTD=0 sem marcação: baixas zeraram o item → faturado silencioso
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
