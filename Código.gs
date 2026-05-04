@@ -2650,14 +2650,16 @@ function sincronizarDados() {
               }
             }
 
-            // STATUS=Faturado é determinado EXCLUSIVAMENTE pela análise PEDIDOS vs DB.
-            // MARCAR_FATURAR=SIM não influencia esta decisão em nenhuma circunstância.
             if (!itemAindaEmPedidosPorFingerprint && statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
-              if (qtdAberta === 0) {
-                // QTD=0: baixas completas → faturado independente da proteção
+              if (aguardandoNF) {
+                // Usuário marcou explicitamente para faturar → saída do PEDIDOS é esperada → Faturado direto
+                Logger.log(`   ✋→✅ Marcado para NF + saiu do PEDIDOS → Faturado direto (QTD=${qtdAberta}, ID="${id}")`);
+                itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0, marcadoParaNF: true });
+              } else if (qtdAberta === 0) {
+                // QTD=0 sem marcação: baixas zeraram o item → faturado silencioso
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
               } else if (!protecaoAtiva || temBaixas) {
-                // QTD>0: gera alerta SE proteção inativa OU SE usuário já fez baixas (item sendo trabalhado)
+                // QTD>0 sem marcação: saída inesperada → gera alerta
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: qtdAberta });
               } else {
                 // QTD>0 + proteção ativa + sem baixas → aguarda reconsolidação de ID
@@ -2681,19 +2683,19 @@ function sincronizarDados() {
       Logger.log(`\n🔄 Processando ${itensFaturarPendentes.length} item(ns) que saíram do PEDIDOS (ordenado por QTD.ABERTA):`);
     }
 
-    itensFaturarPendentes.forEach(({ id, linha, row, statusAtual, qtdAberta }) => {
+    itensFaturarPendentes.forEach(({ id, linha, row, statusAtual, qtdAberta, marcadoParaNF }) => {
       const linhaAtualizar = [...row];
 
-      if (qtdAberta === 0) {
-        // QTD=0: baixa foi completamente registrada no HTML — seguro faturar automaticamente
-        linhaAtualizar[STATUS_COL] = "Faturado";
-        linhaAtualizar[DATA_STATUS_COL] = new Date();
+      if (qtdAberta === 0 || marcadoParaNF) {
+        // QTD=0: baixa zerou o item  |  marcadoParaNF: usuário marcou + saiu do PEDIDOS → Faturado direto
+        linhaAtualizar[STATUS_COL]       = "Faturado";
+        linhaAtualizar[DATA_STATUS_COL]  = new Date();
+        linhaAtualizar[MARCAR_FATURAR_COL] = "";
         updates.push({ linha: linha, dados: linhaAtualizar, de: statusAtual, para: "Faturado", id: id });
         autoExcluidos++;
-        Logger.log(`   ✅ QTD.ABERTA=0 → Faturado silencioso (ID="${id}")`);
+        Logger.log(`   ✅ ${marcadoParaNF ? 'Marcado p/ NF + saiu' : 'QTD.ABERTA=0'} → Faturado (ID="${id}")`);
       } else {
-        // QTD>0: não auto-fatura — sinaliza MARCAR_FATURAR=SIM e aguarda confirmação manual no HTML.
-        // Na próxima sync o item já terá MARCAR_FATURAR=SIM e será mantido Ativo pelo bloco aguardandoNF.
+        // QTD>0 sem marcação: saída inesperada → sinaliza e gera alerta
         linhaAtualizar[MARCAR_FATURAR_COL] = "SIM";
         updates.push({ linha: linha, dados: linhaAtualizar, de: statusAtual, para: statusAtual, id: id });
         Logger.log(`   ⚠️ QTD.ABERTA=${qtdAberta} → MARCAR_FATURAR=SIM + ALERTA, mantido ${statusAtual} (ID="${id}")`);
