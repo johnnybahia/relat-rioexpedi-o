@@ -201,38 +201,14 @@ function registrarBaixa(uniqueId, qtdBaixada, qtdRestante, usuarioHtml) {
       colMap[String(h).trim()] = i;
     });
 
-    // Verifica se já existe histórico para calcular QTD_ORIGINAL
-    const lastRow = sheet.getLastRow();
-    let qtdOriginal = qtdRestante + qtdBaixada; // Padrão: primeira baixa
-
-    if (lastRow >= 2) {
-      const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
-      const entriesId = data.filter(row => String(row[0]).trim() === String(uniqueId).trim());
-
-      // Usa o último checkpoint de faturamento como base; se não houver, usa a primeira entrada
-      const tipoIdx = colMap['TIPO'];
-      const ultimoCheckpoint = tipoIdx !== undefined
-        ? [...entriesId].reverse().find(row => String(row[tipoIdx] || '').trim() === 'CHECKPOINT')
-        : null;
-      const entradaBase = ultimoCheckpoint || entriesId[0] || null;
-
-      if (entradaBase && colMap['QTD_ORIGINAL'] !== undefined) {
-        const qtdOrigPlanilha = entradaBase[colMap['QTD_ORIGINAL']];
-        if (qtdOrigPlanilha !== undefined && qtdOrigPlanilha !== '') {
-          qtdOriginal = _toNumber_(qtdOrigPlanilha);
-          Logger.log(`   ✓ Base QTD_ORIGINAL ${ultimoCheckpoint ? '(checkpoint)' : '(primeira entrada)'}: ${qtdOriginal}`);
-        }
-      }
-    }
-
     // Cria array na ORDEM DO CABEÇALHO
     const novaLinha = new Array(numCols).fill('');
-    novaLinha[colMap['ID_ITEM']] = uniqueId;
-    novaLinha[colMap['DATA_HORA']] = now;
-    novaLinha[colMap['QTD_BAIXADA']] = qtdBaixada;
+    novaLinha[colMap['ID_ITEM']]      = uniqueId;
+    novaLinha[colMap['DATA_HORA']]    = now;
+    novaLinha[colMap['QTD_BAIXADA']]  = qtdBaixada;
     novaLinha[colMap['QTD_RESTANTE']] = qtdRestante;
-    novaLinha[colMap['QTD_ORIGINAL']] = qtdOriginal;
-    novaLinha[colMap['USUARIO']] = usuario;
+    novaLinha[colMap['QTD_ORIGINAL']] = qtdRestante + qtdBaixada; // qty antes desta baixa
+    novaLinha[colMap['USUARIO']]      = usuario;
 
     Logger.log(`   Salvando: [${novaLinha.join(', ')}]`);
 
