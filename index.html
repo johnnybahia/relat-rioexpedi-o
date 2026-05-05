@@ -522,7 +522,7 @@
         <div class="modal-baixa-info">
           <div class="modal-baixa-qtds">
             <div class="modal-baixa-qtd-item">
-              <span class="modal-baixa-qtd-label">QTD. ORIGINAL</span>
+              <span class="modal-baixa-qtd-label">SALDO ABERTO</span>
               <span id="baixa-qtd-original" class="modal-baixa-qtd-value">200</span>
             </div>
             <div style="font-size: 1.5rem; color: #d1d5db;">→</div>
@@ -565,7 +565,7 @@
         <div style="background: #f3f4f6; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
           <div style="font-weight: 600; margin-bottom: 0.5rem; font-size: 0.95rem;" id="etiqueta-item-info">Item: -</div>
           <div style="color: #6b7280; font-size: 0.875rem;">
-            <span>Quantidade Original: <strong id="etiqueta-qtd-original">0</strong></span>
+            <span>Saldo Aberto: <strong id="etiqueta-qtd-original">0</strong></span>
           </div>
         </div>
 
@@ -2112,7 +2112,7 @@ ALL_OCS_ITEMS = itemsObj;
             const _acoesHeader = _isParcial ? '' : '<th title="Selecionar para lote de etiquetas" style="font-size:0.75em;line-height:1.2;">📦 Etiquetas<br>em lote</th><th>Ações</th>';
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
                             <th>Cartela</th><th>Cód. Cliente</th><th class="description-col">Descrição</th>
-                            <th>Tamanho</th><th>Qtd. Original</th><th class="qtd-aberta">Qtd. Aberta</th><th>OS</th>
+                            <th>Tamanho</th><th>Saldo Aberto</th><th class="qtd-aberta">Qtd. Aberta</th><th>OS</th>
                             <th>Dt. Recebimento</th><th>Dt. Entrega</th><th class="status-prazo">Prazo</th>
                             <th>Lote</th>
                             ${_acoesHeader}</tr></thead><tbody>`;
@@ -3143,7 +3143,7 @@ ALL_OCS_ITEMS = itemsObj;
                     ${item.DESCRIÇÃO || 'N/A'} — ${item.TAMANHO || 'N/A'}
                 </div>
                 <div style="color:#6b7280; font-size:0.8rem; margin-bottom:0.75rem;">
-                    OS: ${item['CÓD. OS'] || 'N/A'} &nbsp;|&nbsp; OC: ${entry.oc} &nbsp;|&nbsp; Qtd. Original: ${fmtInt(qtdOriginal)} ${unidade}
+                    OS: ${item['CÓD. OS'] || 'N/A'} &nbsp;|&nbsp; OC: ${entry.oc} &nbsp;|&nbsp; Saldo Aberto: ${fmtInt(qtdOriginal)} ${unidade}
                 </div>
                 <div style="background:#fef3c7; border:2px solid #f59e0b; padding:0.4rem 0.75rem; border-radius:6px; margin-bottom:0.75rem; font-size:0.85rem; color:#92400e; font-weight:600;">
                     Alocado: <span style="color:${corAlocado}">${fmtInt(totalAlocado)}</span> / ${fmtInt(qtdOriginal)} ${unidade}
