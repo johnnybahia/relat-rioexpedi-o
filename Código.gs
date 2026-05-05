@@ -241,6 +241,7 @@ function registrarBaixa(uniqueId, qtdBaixada, qtdRestante, usuarioHtml) {
     Logger.log(`✅ Baixa registrada na linha ${sheet.getLastRow()}`);
 
     _qtdOriginalCache_ = null;
+    _saldoEfetivoCache_ = null;
 
     return { success: true, timestamp: now.toISOString() };
   } catch (e) {
@@ -280,35 +281,34 @@ function _registrarCheckpointFaturamento_(uniqueId, qtdAberta) {
     sheet.appendRow(novaLinha);
     SpreadsheetApp.flush();
     _qtdOriginalCache_ = null;
+    _saldoEfetivoCache_ = null;
     Logger.log(`✅ Checkpoint registrado para "${uniqueId}": nova base = ${qtdAberta}`);
   } catch (e) {
     Logger.log(`❌ _registrarCheckpointFaturamento_: ${e.message}`);
   }
 }
 
-// Lê BAIXAS_HISTORICO uma única vez e retorna um mapa {uniqueId → saldo efetivo},
-// onde saldo = soma de QTD_BAIXADA desde o último CHECKPOINT de cada item.
-// Isso garante que o SALDO do relatório reflita apenas baixas feitas pelo usuário,
-// ignorando reduções externas vindas do DADOS_IMPORTADOS.
-function _buildSaldoEfetivoCache_() {
+// Constrói (ou retorna do cache) um mapa {uniqueId → soma de QTD_BAIXADA desde o último CHECKPOINT}.
+// Usado por calcularQtdOriginal para derivar o valor "original do ciclo atual" a partir do DB real.
+function _getSaldoEfetivoCache_() {
+  if (_saldoEfetivoCache_) return _saldoEfetivoCache_;
   try {
     const sheet = _getBaixasSheet_();
     const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return {};
+    if (lastRow < 2) { _saldoEfetivoCache_ = {}; return {}; }
 
     const numCols = sheet.getLastColumn();
     const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
     const colMap = {};
     headers.forEach((h, i) => { colMap[String(h).trim()] = i; });
 
-    const idIdx        = colMap['ID_ITEM'];
+    const idIdx         = colMap['ID_ITEM'];
     const qtdBaixadaIdx = colMap['QTD_BAIXADA'];
-    const tipoIdx      = colMap['TIPO'];
-    if (idIdx === undefined || qtdBaixadaIdx === undefined) return {};
+    const tipoIdx       = colMap['TIPO'];
+    if (idIdx === undefined || qtdBaixadaIdx === undefined) { _saldoEfetivoCache_ = {}; return {}; }
 
     const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
 
-    // Agrupa entradas por ID preservando a ordem original
     const byId = {};
     data.forEach(row => {
       const id = String(row[idIdx] || '').trim();
@@ -320,7 +320,6 @@ function _buildSaldoEfetivoCache_() {
     const cache = {};
     Object.keys(byId).forEach(id => {
       const entries = byId[id];
-      // Acha a posição do último CHECKPOINT
       let checkpointPos = -1;
       if (tipoIdx !== undefined) {
         for (let i = entries.length - 1; i >= 0; i--) {
@@ -330,7 +329,6 @@ function _buildSaldoEfetivoCache_() {
           }
         }
       }
-      // Soma QTD_BAIXADA após o checkpoint (entradas normais de baixa)
       let soma = 0;
       for (let i = checkpointPos + 1; i < entries.length; i++) {
         const tipo = tipoIdx !== undefined ? String(entries[i][tipoIdx] || '').trim() : '';
@@ -340,9 +338,11 @@ function _buildSaldoEfetivoCache_() {
       cache[id] = soma;
     });
 
+    _saldoEfetivoCache_ = cache;
     return cache;
   } catch (e) {
-    Logger.log(`⚠️ _buildSaldoEfetivoCache_: ${e.message}`);
+    Logger.log(`⚠️ _getSaldoEfetivoCache_: ${e.message}`);
+    _saldoEfetivoCache_ = {};
     return {};
   }
 }
@@ -551,6 +551,7 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada, usuarioHtml)
 
     SpreadsheetApp.flush();
     _qtdOriginalCache_ = null;
+    _saldoEfetivoCache_ = null;
     limparCache();
 
     Logger.log(`✅ Edição concluída: ${uniqueId} | Qtd: ${novaQtdBaixada} | Restante: ${novaQtdRestante}`);
@@ -631,6 +632,7 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa, usuarioHtml) {
 
 // Cache para quantidades originais (evita leituras múltiplas)
 let _qtdOriginalCache_ = null;
+let _saldoEfetivoCache_ = null;
 
 function _buildQtdOriginalCache_() {
   try {
@@ -685,20 +687,15 @@ function _buildQtdOriginalCache_() {
   }
 }
 
+// Retorna a quantidade "original" do ciclo atual de faturamento:
+// QTD_ABERTA_atual + soma das baixas manuais desde o último checkpoint.
+// Isso reflete o valor real do DB antes das baixas do ciclo, independente
+// de alterações externas vindas do DADOS_IMPORTADOS.
 function calcularQtdOriginal(uniqueId, qtdAbertaAtual) {
   try {
-    // Usa cache se disponível
-    if (!_qtdOriginalCache_) {
-      _qtdOriginalCache_ = _buildQtdOriginalCache_();
-    }
-
-    // Se existe no histórico, usa o valor armazenado
-    if (_qtdOriginalCache_[uniqueId]) {
-      return _qtdOriginalCache_[uniqueId];
-    }
-
-    // Se não tem histórico, a quantidade atual É a original
-    return qtdAbertaAtual;
+    const saldoCache = _getSaldoEfetivoCache_();
+    const baixasNoCiclo = saldoCache[uniqueId] || 0;
+    return qtdAbertaAtual + baixasNoCiclo;
   } catch (e) {
     Logger.log(`❌ Erro ao calcular qtd original: ${e.message}`);
     return qtdAbertaAtual;
@@ -3924,9 +3921,6 @@ function obterItensMarcadosParaFaturar() {
     const values = range.getValues();
     const displayValues = range.getDisplayValues();
 
-    // Constrói o cache de saldos efetivos uma única vez (evita múltiplas leituras da sheet)
-    const saldoEfetivoCache = _buildSaldoEfetivoCache_();
-
     const itensMarcados = [];
 
     values.forEach((row, idx) => {
@@ -3937,9 +3931,11 @@ function obterItensMarcadosParaFaturar() {
         const item = _rowToItem_(row, displayRow, colMap, idx);
 
         if (item) {
-          // Saldo = soma das baixas efetivas desde o último checkpoint,
-          // ignorando reduções externas vindas do DADOS_IMPORTADOS.
-          const saldo = saldoEfetivoCache[item.uniqueId] || 0;
+          // QTD. ORIGINAL já reflete o valor real do DB antes das baixas do ciclo
+          // (calculado em calcularQtdOriginal como QTD_ABERTA + baixas desde checkpoint).
+          const qtdOriginal = item['QTD. ORIGINAL'] || 0;
+          const qtdAberta   = item['QTD. ABERTA']   || 0;
+          const saldo = qtdOriginal - qtdAberta;
 
           // Serializa o item para JSON (converte Date objects para strings)
           const itemSerializado = {
