@@ -286,6 +286,67 @@ function _registrarCheckpointFaturamento_(uniqueId, qtdAberta) {
   }
 }
 
+// Lê BAIXAS_HISTORICO uma única vez e retorna um mapa {uniqueId → saldo efetivo},
+// onde saldo = soma de QTD_BAIXADA desde o último CHECKPOINT de cada item.
+// Isso garante que o SALDO do relatório reflita apenas baixas feitas pelo usuário,
+// ignorando reduções externas vindas do DADOS_IMPORTADOS.
+function _buildSaldoEfetivoCache_() {
+  try {
+    const sheet = _getBaixasSheet_();
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return {};
+
+    const numCols = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap = {};
+    headers.forEach((h, i) => { colMap[String(h).trim()] = i; });
+
+    const idIdx        = colMap['ID_ITEM'];
+    const qtdBaixadaIdx = colMap['QTD_BAIXADA'];
+    const tipoIdx      = colMap['TIPO'];
+    if (idIdx === undefined || qtdBaixadaIdx === undefined) return {};
+
+    const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+
+    // Agrupa entradas por ID preservando a ordem original
+    const byId = {};
+    data.forEach(row => {
+      const id = String(row[idIdx] || '').trim();
+      if (!id) return;
+      if (!byId[id]) byId[id] = [];
+      byId[id].push(row);
+    });
+
+    const cache = {};
+    Object.keys(byId).forEach(id => {
+      const entries = byId[id];
+      // Acha a posição do último CHECKPOINT
+      let checkpointPos = -1;
+      if (tipoIdx !== undefined) {
+        for (let i = entries.length - 1; i >= 0; i--) {
+          if (String(entries[i][tipoIdx] || '').trim() === 'CHECKPOINT') {
+            checkpointPos = i;
+            break;
+          }
+        }
+      }
+      // Soma QTD_BAIXADA após o checkpoint (entradas normais de baixa)
+      let soma = 0;
+      for (let i = checkpointPos + 1; i < entries.length; i++) {
+        const tipo = tipoIdx !== undefined ? String(entries[i][tipoIdx] || '').trim() : '';
+        if (tipo === 'CHECKPOINT') continue;
+        soma += _toNumber_(entries[i][qtdBaixadaIdx]);
+      }
+      cache[id] = soma;
+    });
+
+    return cache;
+  } catch (e) {
+    Logger.log(`⚠️ _buildSaldoEfetivoCache_: ${e.message}`);
+    return {};
+  }
+}
+
 function obterHistoricoBaixas(uniqueId) {
   // VERSÃO ULTRA-DEFENSIVA - Lê cabeçalho dinamicamente
   Logger.log(`📋 [INICIO] obterHistoricoBaixas("${uniqueId}")`);
@@ -3863,6 +3924,9 @@ function obterItensMarcadosParaFaturar() {
     const values = range.getValues();
     const displayValues = range.getDisplayValues();
 
+    // Constrói o cache de saldos efetivos uma única vez (evita múltiplas leituras da sheet)
+    const saldoEfetivoCache = _buildSaldoEfetivoCache_();
+
     const itensMarcados = [];
 
     values.forEach((row, idx) => {
@@ -3873,10 +3937,9 @@ function obterItensMarcadosParaFaturar() {
         const item = _rowToItem_(row, displayRow, colMap, idx);
 
         if (item) {
-          // Calcula o saldo (soma das baixas)
-          const qtdOriginal = item['QTD. ORIGINAL'] || 0;
-          const qtdAberta = item['QTD. ABERTA'] || 0;
-          const saldo = qtdOriginal - qtdAberta; // Total baixado
+          // Saldo = soma das baixas efetivas desde o último checkpoint,
+          // ignorando reduções externas vindas do DADOS_IMPORTADOS.
+          const saldo = saldoEfetivoCache[item.uniqueId] || 0;
 
           // Serializa o item para JSON (converte Date objects para strings)
           const itemSerializado = {
