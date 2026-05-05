@@ -218,6 +218,7 @@ function registrarBaixa(uniqueId, qtdBaixada, qtdRestante, usuarioHtml) {
 
     _qtdOriginalCache_ = null;
     _saldoEfetivoCache_ = null;
+    _ultimaQtdOriginalCache_ = null;
 
     return { success: true, timestamp: now.toISOString() };
   } catch (e) {
@@ -258,6 +259,7 @@ function _registrarCheckpointFaturamento_(uniqueId, qtdAberta) {
     SpreadsheetApp.flush();
     _qtdOriginalCache_ = null;
     _saldoEfetivoCache_ = null;
+    _ultimaQtdOriginalCache_ = null;
     Logger.log(`✅ Checkpoint registrado para "${uniqueId}": nova base = ${qtdAberta}`);
   } catch (e) {
     Logger.log(`❌ _registrarCheckpointFaturamento_: ${e.message}`);
@@ -319,6 +321,73 @@ function _getSaldoEfetivoCache_() {
   } catch (e) {
     Logger.log(`⚠️ _getSaldoEfetivoCache_: ${e.message}`);
     _saldoEfetivoCache_ = {};
+    return {};
+  }
+}
+
+// Constrói (ou retorna do cache) um mapa {uniqueId → QTD_ORIGINAL da entrada mais recente
+// não-CHECKPOINT após o último CHECKPOINT}. Representa o saldo real antes da última baixa
+// do ciclo atual — imune a entradas antigas de testes, pois usa apenas a entrada mais recente.
+function _getUltimaQtdOriginalCache_() {
+  if (_ultimaQtdOriginalCache_) return _ultimaQtdOriginalCache_;
+  try {
+    const sheet = _getBaixasSheet_();
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) { _ultimaQtdOriginalCache_ = {}; return {}; }
+
+    const numCols = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap = {};
+    headers.forEach((h, i) => { colMap[String(h).trim()] = i; });
+
+    const idIdx          = colMap['ID_ITEM'];
+    const qtdOriginalIdx = colMap['QTD_ORIGINAL'];
+    const tipoIdx        = colMap['TIPO'];
+    if (idIdx === undefined || qtdOriginalIdx === undefined) {
+      _ultimaQtdOriginalCache_ = {}; return {};
+    }
+
+    const data = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+
+    // Agrupa por ID mantendo a ordem de chegada
+    const byId = {};
+    data.forEach(row => {
+      const id = String(row[idIdx] || '').trim();
+      if (!id) return;
+      if (!byId[id]) byId[id] = [];
+      byId[id].push(row);
+    });
+
+    const cache = {};
+    Object.keys(byId).forEach(id => {
+      const entries = byId[id];
+      // Encontra a posição do último CHECKPOINT
+      let checkpointPos = -1;
+      if (tipoIdx !== undefined) {
+        for (let i = entries.length - 1; i >= 0; i--) {
+          if (String(entries[i][tipoIdx] || '').trim() === 'CHECKPOINT') {
+            checkpointPos = i;
+            break;
+          }
+        }
+      }
+      // Busca a entrada mais recente não-CHECKPOINT após o último CHECKPOINT
+      for (let i = entries.length - 1; i > checkpointPos; i--) {
+        const tipo = tipoIdx !== undefined ? String(entries[i][tipoIdx] || '').trim() : '';
+        if (tipo === 'CHECKPOINT') continue;
+        const val = entries[i][qtdOriginalIdx];
+        if (val !== undefined && val !== '') {
+          cache[id] = _toNumber_(val);
+          break;
+        }
+      }
+    });
+
+    _ultimaQtdOriginalCache_ = cache;
+    return cache;
+  } catch (e) {
+    Logger.log(`⚠️ _getUltimaQtdOriginalCache_: ${e.message}`);
+    _ultimaQtdOriginalCache_ = {};
     return {};
   }
 }
@@ -528,6 +597,7 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada, usuarioHtml)
     SpreadsheetApp.flush();
     _qtdOriginalCache_ = null;
     _saldoEfetivoCache_ = null;
+    _ultimaQtdOriginalCache_ = null;
     limparCache();
 
     Logger.log(`✅ Edição concluída: ${uniqueId} | Qtd: ${novaQtdBaixada} | Restante: ${novaQtdRestante}`);
@@ -609,6 +679,7 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa, usuarioHtml) {
 // Cache para quantidades originais (evita leituras múltiplas)
 let _qtdOriginalCache_ = null;
 let _saldoEfetivoCache_ = null;
+let _ultimaQtdOriginalCache_ = null;
 
 function _buildQtdOriginalCache_() {
   try {
@@ -663,15 +734,14 @@ function _buildQtdOriginalCache_() {
   }
 }
 
-// Retorna a quantidade "original" do ciclo atual de faturamento:
-// QTD_ABERTA_atual + soma das baixas manuais desde o último checkpoint.
-// Isso reflete o valor real do DB antes das baixas do ciclo, independente
-// de alterações externas vindas do DADOS_IMPORTADOS.
+// Retorna o "Saldo Aberto" do ciclo atual: QTD_ORIGINAL da entrada mais recente
+// não-CHECKPOINT após o último CHECKPOINT. Reflete o valor do DB imediatamente
+// antes da última baixa manual, imune a entradas antigas de testes que não têm
+// CHECKPOINT separando-as.
 function calcularQtdOriginal(uniqueId, qtdAbertaAtual) {
   try {
-    const saldoCache = _getSaldoEfetivoCache_();
-    const baixasNoCiclo = saldoCache[uniqueId] || 0;
-    return qtdAbertaAtual + baixasNoCiclo;
+    const cache = _getUltimaQtdOriginalCache_();
+    return cache[uniqueId] !== undefined ? cache[uniqueId] : qtdAbertaAtual;
   } catch (e) {
     Logger.log(`❌ Erro ao calcular qtd original: ${e.message}`);
     return qtdAbertaAtual;
