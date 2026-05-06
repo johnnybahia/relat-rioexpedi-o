@@ -4267,6 +4267,7 @@ ALL_OCS_ITEMS = itemsObj;
                 .oc-section { page-break-inside: avoid; margin-bottom: 20px; }
                 .oc-header { background: #fef3c7; padding: 8px 12px; border: 2px solid #b45309; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
                 .oc-header.faturado-pending { background: #fef2f2; border-color: #dc2626; }
+                .oc-numero { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; background: #1e3a5f; color: white; font-size: 13px; font-weight: 800; border-radius: 50%; flex-shrink: 0; }
                 .oc-title { font-size: 14px; font-weight: bold; color: #1f2937; }
                 .marca-badge { display: inline-block; background: #b45309; color: white; font-size: 12px; padding: 2px 10px; border-radius: 10px; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap; }
                 .oc-avisos { color: #dc2626; font-weight: bold; font-size: 11px; width: 100%; }
@@ -4311,13 +4312,40 @@ ALL_OCS_ITEMS = itemsObj;
             return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
         });
 
-        ocsParaPonteiras.forEach(({ ocNum, ocData, ocInfo, nomeCliente, items: allItems }) => {
+        // Numeração sequencial por grupo de cliente (cada cliente começa do 1)
+        const _contadorCliente = new Map();
+        ocsParaPonteiras.forEach(oc => {
+            const cli = oc.nomeCliente || 'SEM CLIENTE';
+            _contadorCliente.set(cli, (_contadorCliente.get(cli) || 0) + 1);
+            oc.numeroCliente = _contadorCliente.get(cli);
+        });
+
+        // Ordena itens dentro de cada OC: 1º DT. ENTREGA, 2º valor numérico do TAMANHO
+        function _parseDateMs(v) {
+            if (!v) return Infinity;
+            const d = (v instanceof Date) ? v : new Date(String(v));
+            return isNaN(d.getTime()) ? Infinity : d.getTime();
+        }
+        function _parseTamanhoNum(tam) {
+            const m = String(tam || '').match(/(\d+(?:[.,]\d+)?)/);
+            return m ? parseFloat(m[1].replace(',', '.')) : Infinity;
+        }
+        function _sortItensPonteiras(itens) {
+            return [...itens].sort((a, b) => {
+                const dA = _parseDateMs(a['DT. ENTREGA']);
+                const dB = _parseDateMs(b['DT. ENTREGA']);
+                if (dA !== dB) return dA - dB;
+                return _parseTamanhoNum(a.TAMANHO) - _parseTamanhoNum(b.TAMANHO);
+            });
+        }
+
+        ocsParaPonteiras.forEach(({ ocNum, ocData, ocInfo, nomeCliente, items: allItems, numeroCliente }) => {
             let itens = allItems;
             if (marfimFilter === 'cm') itens = itens.filter(i => i.TAMANHO && i.TAMANHO.toUpperCase().includes('CM'));
             else if (marfimFilter === 'mm') itens = itens.filter(i => i.TAMANHO && i.TAMANHO.toUpperCase().includes('MM'));
             if (itens.length === 0) return;
 
-            _sortItemsPorOS(itens, nomeCliente);
+            itens = _sortItensPonteiras(itens);
 
             const temFaturados = ocData.items.some(i => i.Status?.toLowerCase() === 'faturado');
             const temInativos  = ocData.items.some(i => i.Status?.toLowerCase() === 'inativo');
@@ -4333,6 +4361,7 @@ ALL_OCS_ITEMS = itemsObj;
             html += `
                 <div class="oc-section">
                     <div class="oc-header ${temFaturados ? 'faturado-pending' : ''}">
+                        <span class="oc-numero">${numeroCliente}</span>
                         <span class="oc-title">OC: ${ocNum} — ${nomeCliente}</span>
                         ${marcaBadgeHtml}
                         ${avisos.length > 0 ? `<div class="oc-avisos">${avisos.join(' | ')}</div>` : ''}
