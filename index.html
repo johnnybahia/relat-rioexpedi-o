@@ -182,7 +182,7 @@
     .filtro-fatur-aviso { font-size: 0.8rem; color: #6b7280; text-align: center; margin-top: 0.5rem; }
 
     /* === MODAL ALERTA FATURAMENTO === */
-    #alertaFaturamentoModal { z-index: 9999; background-color: rgba(0,0,0,0.75); }
+    #alertaFaturamentoModal { display: none !important; }
     #alertaFaturamentoModal .modal-content { border-top: 5px solid #dc2626; max-width: 520px; }
     #alertaFaturamentoModal .modal-header { background-color: #fef2f2; border-bottom-color: #fca5a5; }
     #alertaFaturamentoModal .modal-header h2 { color: #991b1b; font-size: 1.1rem; }
@@ -1299,7 +1299,6 @@
       _appStarted = true;
       carregarListaOcs();
       initAutoRefresh();
-      verificarAlertasFaturamento();
     }
 
     function _initLogin() {
@@ -1874,11 +1873,6 @@ ALL_OCS_ITEMS = itemsObj;
                     // Aplicar filtros e renderizar
                     aplicarFiltros();
 
-                    // Verifica alertas de faturamento a cada carregamento (inicial e auto-refresh).
-                    // Só dispara se não houver modal de alerta já aberto (não interrompe digitação de senha).
-                    if (!_alertaAtual) {
-                        verificarAlertasFaturamento();
-                    }
 
                 } else {
                     console.error("❌ Resposta inválida:", response);
