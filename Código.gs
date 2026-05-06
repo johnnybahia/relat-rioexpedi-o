@@ -3244,38 +3244,8 @@ function _getSenha_() {
  * Evita duplicata por itemId + tipo.
  */
 function _registrarAlertaFaturamento_(dados) {
-  try {
-    const tipo = dados.tipo || 'faturado_sem_baixa';
-    const sp = PropertiesService.getScriptProperties();
-    const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
-    // Evita duplicata: não registra se já existe alerta do mesmo tipo para o mesmo ID
-    if (!lista.some(a => a.itemId === dados.id && (a.tipo || 'faturado_sem_baixa') === tipo)) {
-      const entrada = {
-        alertaId:   `ALT-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-        tipo:       tipo,
-        itemId:     dados.id,
-        cartela:    dados.cartela,
-        cliente:    dados.cliente,
-        pedido:     dados.pedido,
-        oc:         dados.oc,
-        desc:       dados.desc,
-        tam:        dados.tam,
-        dataEvento: dados.dataEvento
-      };
-      if (tipo === 'faturado_sem_baixa') {
-        entrada.qtdAberta = dados.qtdAberta;
-        Logger.log(`🔔 Alerta faturado_sem_baixa: ID="${dados.id}", QTD.ABERTA=${dados.qtdAberta}`);
-      } else if (tipo === 'divergencia_qtd') {
-        entrada.pedidosQtd = dados.pedidosQtd;
-        entrada.dbQtd      = dados.dbQtd;
-        Logger.log(`🔔 Alerta divergencia_qtd: ID="${dados.id}", PEDIDOS=${dados.pedidosQtd} < DB=${dados.dbQtd}`);
-      }
-      lista.push(entrada);
-      sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(lista));
-    }
-  } catch (e) {
-    Logger.log('⚠️ _registrarAlertaFaturamento_: ' + e.message);
-  }
+  // Alertas de faturamento desativados — confirmação automática.
+  Logger.log(`ℹ️ Alerta suprimido (${dados.tipo || 'faturado_sem_baixa'}): ID="${dados.id}"`);
 }
 
 /**
@@ -3286,63 +3256,11 @@ function _registrarAlertaFaturamento_(dados) {
  *                        ou DB QTD já caiu para <= pedidosQtd do alerta (baixa feita)
  */
 function obterAlertasPendentes() {
+  // Alertas desativados — limpa qualquer resíduo e retorna lista vazia.
   try {
-    const sp = PropertiesService.getScriptProperties();
-    const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
-    if (lista.length === 0) return [];
-
-    // Lê Relatorio_DB: status e QTD atual por ID
-    const faturadosNoDb = new Set();
-    const dbQtdAtual    = new Map(); // itemId → QTD atual no DB
-    try {
-      const dbSheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
-      if (dbSheet && dbSheet.getLastRow() > 1) {
-        const dados = dbSheet.getRange(2, 1, dbSheet.getLastRow() - 1, STATUS_COL + 1).getValues();
-        dados.forEach(row => {
-          const itemId = String(row[ID_COL] || '').trim();
-          if (!itemId) return;
-          const status = String(row[STATUS_COL] || '').trim();
-          if (status === 'Faturado') faturadosNoDb.add(itemId);
-          dbQtdAtual.set(itemId, Number(row[DB_QTD_COL] || 0));
-        });
-      }
-    } catch (eDb) {
-      Logger.log('⚠️ obterAlertasPendentes: erro ao ler DB - ' + eDb.message);
-      return lista; // se não conseguiu ler o DB, retorna sem filtrar
-    }
-
-    const validos = lista.filter(a => {
-      const itemId = String(a.itemId || '').trim();
-      const tipo   = a.tipo || 'faturado_sem_baixa';
-      if (tipo === 'faturado_sem_baixa') {
-        // Mantém enquanto o item AINDA NÃO foi confirmado (status != Faturado)
-        // Remove quando: já virou Faturado (confirmação feita) ou saiu do DB completamente
-        if (!dbQtdAtual.has(itemId)) return false;   // não existe mais no DB → remove
-        if (faturadosNoDb.has(itemId)) return false;  // já confirmado como Faturado → remove
-        return true; // ainda pendente de confirmação → mantém o alerta
-      }
-      if (tipo === 'divergencia_qtd') {
-        // Limpa se: saiu do DB, virou Faturado, ou DB QTD já foi reduzido (baixa feita)
-        if (!dbQtdAtual.has(itemId)) return false;           // não existe mais no DB
-        if (faturadosNoDb.has(itemId)) return false;          // virou Faturado
-        const qtdDbAgora     = dbQtdAtual.get(itemId);
-        const qtdPedidosAlerta = Number(a.pedidosQtd || 0);
-        if (qtdDbAgora <= qtdPedidosAlerta) return false;     // baixa foi feita, divergência resolvida
-        return true; // divergência ainda existe
-      }
-      return false; // tipo desconhecido → limpa
-    });
-
-    const removidos = lista.length - validos.length;
-    if (removidos > 0) {
-      sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(validos));
-      Logger.log(`🧹 obterAlertasPendentes: ${removidos} alerta(s) obsoleto(s) removido(s) automaticamente`);
-    }
-    return validos;
-  } catch (e) {
-    Logger.log('⚠️ obterAlertasPendentes: ' + e.message);
-    return [];
-  }
+    PropertiesService.getScriptProperties().deleteProperty(ALERTAS_PROP_KEY);
+  } catch (_) {}
+  return [];
 }
 
 /**
