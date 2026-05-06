@@ -229,6 +229,21 @@
     .btn-baixa { padding: 4px 10px; background-color: #3b82f6; color: white; border: none; border-radius: 0.375rem; cursor: pointer; font-size: 0.7rem; font-weight: 500; transition: background-color 0.2s; margin-right: 4px; }
     .btn-baixa:hover { background-color: #2563eb; }
     .btn-baixa:disabled { background-color: #9ca3af; cursor: not-allowed; opacity: 0.6; }
+    /* Histórico de baixas da sessão */
+    .historico-baixas-section { margin-bottom: 1.25rem; }
+    .historico-baixas-header { font-size: 0.75rem; font-weight: 700; color: #6b7280; margin: 0 0 0.375rem 0; text-transform: uppercase; letter-spacing: 0.06em; }
+    .historico-baixas-lista { border: 1px solid #e5e7eb; border-radius: 0.375rem; overflow: hidden; max-height: 180px; overflow-y: auto; }
+    .historico-baixas-loading, .historico-baixas-empty { padding: 0.6rem 0.75rem; text-align: center; color: #9ca3af; font-size: 0.78rem; font-style: italic; }
+    .historico-baixa-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.75rem; border-bottom: 1px solid #f3f4f6; font-size: 0.78rem; background: white; }
+    .historico-baixa-item:last-child { border-bottom: none; }
+    .historico-baixa-item:nth-child(even) { background: #fafafa; }
+    .historico-baixa-qtd { font-weight: 700; color: #dc2626; min-width: 3rem; }
+    .historico-baixa-meta { flex: 1; color: #6b7280; line-height: 1.3; }
+    .historico-baixa-meta span { display: block; }
+    .btn-estornar { padding: 0.2rem 0.55rem; background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 0.25rem; font-size: 0.7rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: background 0.15s; }
+    .btn-estornar:hover { background: #fecaca; }
+    .btn-estornar.confirming { background: #dc2626; color: white; border-color: #dc2626; }
+    .btn-estornar:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* Modal de Baixa Parcial */
     .modal-baixa-info { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background-color: #f9fafb; border-radius: 0.5rem; margin-bottom: 1rem; }
@@ -534,7 +549,15 @@
         </div>
 
         <!-- Descrição do item -->
-        <p id="baixa-item-desc" style="font-size: 0.875rem; color: #6b7280; text-align: center; margin-bottom: 1.5rem;"></p>
+        <p id="baixa-item-desc" style="font-size: 0.875rem; color: #6b7280; text-align: center; margin-bottom: 1rem;"></p>
+
+        <!-- Histórico de baixas da sessão atual -->
+        <div class="historico-baixas-section">
+          <h4 class="historico-baixas-header">📋 Histórico da Sessão</h4>
+          <div id="historico-baixas-lista" class="historico-baixas-lista">
+            <div class="historico-baixas-loading">Carregando...</div>
+          </div>
+        </div>
 
         <!-- Nova baixa -->
         <div id="nova-baixa-section" class="nova-baixa-section">
@@ -1332,6 +1355,7 @@
     const $baixaQtdOriginal = document.getElementById('baixa-qtd-original');
     const $baixaQtdAberta = document.getElementById('baixa-qtd-aberta');
     const $baixaItemDesc = document.getElementById('baixa-item-desc');
+    const $historicoBaixasLista = document.getElementById('historico-baixas-lista');
 
     const $novaBaixaInput = document.getElementById('nova-baixa-input');
     const $baixaMaxQtd = document.getElementById('baixa-max-qtd');
@@ -2663,12 +2687,130 @@ ALL_OCS_ITEMS = itemsObj;
 
         $novaBaixaInput.value = '';
 
+        // Limpa imediatamente para evitar dados fantasma do item anterior
+        $historicoBaixasLista.innerHTML = '<div class="historico-baixas-loading">Carregando...</div>';
+
         $baixaModal.classList.remove('hidden');
+
+        // Carrega histórico da sessão de forma assíncrona
+        _carregarHistoricoBaixas(item.uniqueId, item.planilhaLinha);
     }
 
     function hideBaixaModal() {
         $baixaModal.classList.add('hidden');
         currentBaixaItem = null;
+        $historicoBaixasLista.innerHTML = '';
+    }
+
+    // ==== HISTÓRICO DE BAIXAS DA SESSÃO ====
+
+    function _carregarHistoricoBaixas(uniqueId, planilhaLinha) {
+        const idSnapshot = uniqueId;
+        google.script.run
+            .withSuccessHandler(result => {
+                // Anti-ghost: descarta se o modal já mudou para outro item
+                if (!currentBaixaItem || currentBaixaItem.uniqueId !== idSnapshot) return;
+                if (result && result.success) {
+                    _renderHistoricoBaixas(result.historico || [], planilhaLinha);
+                } else {
+                    $historicoBaixasLista.innerHTML = '<div class="historico-baixas-empty">Erro ao carregar histórico.</div>';
+                }
+            })
+            .withFailureHandler(() => {
+                if (!currentBaixaItem || currentBaixaItem.uniqueId !== idSnapshot) return;
+                $historicoBaixasLista.innerHTML = '<div class="historico-baixas-empty">Erro ao carregar histórico.</div>';
+            })
+            .obterHistoricoSessaoBaixas(uniqueId);
+    }
+
+    function _renderHistoricoBaixas(historico, planilhaLinha) {
+        if (!historico || historico.length === 0) {
+            $historicoBaixasLista.innerHTML = '<div class="historico-baixas-empty">Nenhuma baixa nesta sessão.</div>';
+            return;
+        }
+        let html = '';
+        historico.forEach(h => {
+            const qtd = fmtInt(h.qtdBaixada);
+            const usuario = _escapeHtml(h.usuario || 'Sistema');
+            const dataHora = _escapeHtml(h.dataHora || '');
+            html += `<div class="historico-baixa-item" data-linha-hist="${h.linhaHistorico}">
+                <span class="historico-baixa-qtd">-${qtd}</span>
+                <span class="historico-baixa-meta">
+                    <span>${usuario}</span>
+                    <span>${dataHora}</span>
+                </span>
+                <button class="btn-estornar" onclick="_confirmarEstorno(this,${h.linhaHistorico},${h.qtdBaixada},${planilhaLinha})">Estornar</button>
+            </div>`;
+        });
+        $historicoBaixasLista.innerHTML = html;
+    }
+
+    // Confirmação inline em duas etapas: primeiro clique mostra "Confirmar?", segundo executa.
+    function _confirmarEstorno(btn, linhaHistorico, qtdEstornada, planilhaLinha) {
+        if (btn.classList.contains('confirming')) {
+            btn.disabled = true;
+            btn.textContent = '...';
+            _executarEstorno(linhaHistorico, qtdEstornada, planilhaLinha, btn.closest('.historico-baixa-item'));
+        } else {
+            btn.classList.add('confirming');
+            btn.textContent = 'Confirmar?';
+            setTimeout(() => {
+                if (btn.classList.contains('confirming')) {
+                    btn.classList.remove('confirming');
+                    btn.textContent = 'Estornar';
+                }
+            }, 3000);
+        }
+    }
+
+    function _executarEstorno(linhaHistorico, qtdEstornada, planilhaLinha, rowEl) {
+        if (!currentBaixaItem) return;
+        const idSnapshot = currentBaixaItem.uniqueId;
+        const plLinha = planilhaLinha;
+
+        google.script.run
+            .withSuccessHandler(result => {
+                if (!result || !result.success) {
+                    showError('Erro ao estornar baixa: ' + ((result && result.error) || 'Erro desconhecido'));
+                    if (rowEl) {
+                        const btn = rowEl.querySelector('.btn-estornar');
+                        if (btn) { btn.disabled = false; btn.textContent = 'Estornar'; btn.classList.remove('confirming'); }
+                    }
+                    return;
+                }
+                // Remove a linha do histórico visualmente
+                if (rowEl) rowEl.remove();
+
+                // Atualiza QTD no modal e na linha da tabela principal
+                if (currentBaixaItem && currentBaixaItem.uniqueId === idSnapshot) {
+                    const novaQtd = result.novaQtd;
+                    currentBaixaItem['QTD. ABERTA'] = novaQtd;
+                    $baixaQtdAberta.textContent = fmtInt(novaQtd);
+                    $baixaMaxQtd.textContent = fmtInt(novaQtd);
+
+                    const row = document.getElementById(`item-linha-${plLinha}`);
+                    if (row) {
+                        row.dataset.itemQtd = String(novaQtd);
+                        const cells = row.querySelectorAll('td');
+                        const offset = (cells[0] && cells[0].querySelector('.item-checkbox')) ? 1 : 0;
+                        const qtdCell = cells[5 + offset];
+                        if (qtdCell) qtdCell.textContent = fmtInt(novaQtd);
+                    }
+                    updateTotaisGerais();
+
+                    if ($historicoBaixasLista.querySelectorAll('.historico-baixa-item').length === 0) {
+                        $historicoBaixasLista.innerHTML = '<div class="historico-baixas-empty">Nenhuma baixa nesta sessão.</div>';
+                    }
+                }
+            })
+            .withFailureHandler(err => {
+                showError('Falha ao estornar: ' + ((err && err.message) || 'Erro desconhecido'));
+                if (rowEl) {
+                    const btn = rowEl.querySelector('.btn-estornar');
+                    if (btn) { btn.disabled = false; btn.textContent = 'Estornar'; btn.classList.remove('confirming'); }
+                }
+            })
+            .estornarBaixa(idSnapshot, plLinha, linhaHistorico, qtdEstornada);
     }
 
     function aplicarNovaBaixa() {

@@ -613,6 +613,119 @@ function editarUltimaBaixa(uniqueId, planilhaLinha, novaQtdBaixada, usuarioHtml)
   }
 }
 
+// Retorna apenas as baixas da sessão atual (após o último CHECKPOINT) para exibição no modal.
+// Inclui linhaHistorico (linha real na planilha) para permitir estorno preciso por linha.
+function obterHistoricoSessaoBaixas(uniqueId) {
+  try {
+    if (!uniqueId) return { success: true, historico: [] };
+
+    const sheet = _getBaixasSheet_();
+    if (!sheet || sheet.getLastRow() < 2) return { success: true, historico: [] };
+
+    const numCols = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap = {};
+    headers.forEach((h, i) => { colMap[String(h).trim()] = i; });
+
+    const idBusca = String(uniqueId).trim();
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
+
+    // Coleta todas as entradas deste item com o número real da linha na planilha
+    const entradasItem = [];
+    for (let i = 0; i < data.length; i++) {
+      if (String(data[i][colMap['ID_ITEM']] || '').trim() !== idBusca) continue;
+      entradasItem.push({ rowNum: i + 2, row: data[i] });
+    }
+
+    // Encontra a posição do último CHECKPOINT dentro das entradas do item
+    let lastCpIdx = -1;
+    for (let i = entradasItem.length - 1; i >= 0; i--) {
+      const tipo = colMap['TIPO'] !== undefined ? String(entradasItem[i].row[colMap['TIPO']] || '').trim() : '';
+      if (tipo === 'CHECKPOINT') { lastCpIdx = i; break; }
+    }
+
+    // Sessão atual = entradas após o último CHECKPOINT, excluindo CHECKPOINTs
+    const historico = entradasItem
+      .slice(lastCpIdx + 1)
+      .filter(e => {
+        const tipo = colMap['TIPO'] !== undefined ? String(e.row[colMap['TIPO']] || '').trim() : '';
+        return tipo !== 'CHECKPOINT';
+      })
+      .map(e => {
+        const row = e.row;
+        const dataHora = row[colMap['DATA_HORA']];
+        return {
+          linhaHistorico: e.rowNum,
+          dataHora: dataHora ? _fmtBRDateTime_(dataHora) : '',
+          qtdBaixada: _toNumber_(row[colMap['QTD_BAIXADA']]),
+          qtdRestante: _toNumber_(row[colMap['QTD_RESTANTE']]),
+          usuario: colMap['USUARIO'] !== undefined ? String(row[colMap['USUARIO']] || 'Sistema') : 'Sistema'
+        };
+      });
+
+    return { success: true, historico };
+  } catch (e) {
+    Logger.log(`❌ obterHistoricoSessaoBaixas: ${e.message}`);
+    return { success: false, error: String(e.message), historico: [] };
+  }
+}
+
+// Remove uma baixa específica do Baixas_Historico e restaura a QTD ao Relatorio_DB.
+// linhaHistorico: linha real na planilha (1-based). qtdEstornada: quantidade a restaurar.
+function estornarBaixa(uniqueId, planilhaLinha, linhaHistorico, qtdEstornada) {
+  try {
+    Logger.log(`↩️ estornarBaixa: ID="${uniqueId}" hist_linha=${linhaHistorico} qtd=${qtdEstornada} db_linha=${planilhaLinha}`);
+
+    const sheet = _getBaixasSheet_();
+    const numCols = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap = {};
+    headers.forEach((h, i) => { colMap[String(h).trim()] = i; });
+
+    // Valida que a linha pertence ao item correto antes de apagar
+    if (linhaHistorico < 2 || linhaHistorico > sheet.getLastRow()) {
+      throw new Error(`Linha ${linhaHistorico} fora do intervalo válido`);
+    }
+    const rowData = sheet.getRange(linhaHistorico, 1, 1, numCols).getValues()[0];
+    const idLinha = String(rowData[colMap['ID_ITEM']] || '').trim();
+    if (idLinha !== String(uniqueId).trim()) {
+      throw new Error(`Linha ${linhaHistorico} pertence a "${idLinha}", não a "${uniqueId}"`);
+    }
+
+    // Remove a linha do histórico
+    sheet.deleteRow(linhaHistorico);
+    Logger.log(`   ✅ Linha ${linhaHistorico} removida do Baixas_Historico`);
+
+    // Restaura QTD no Relatorio_DB lendo fresh para evitar cache
+    const ssLive = SpreadsheetApp.openById(getSpreadsheet_().getId());
+    const dbSheet = ssLive.getSheetByName(DB_SHEET_NAME);
+    if (!dbSheet) throw new Error('Aba Relatorio_DB não encontrada');
+
+    const dbHeaders = dbSheet.getRange(1, 1, 1, dbSheet.getLastColumn()).getValues()[0];
+    const dbColMap = _getColumnIndexes_(dbHeaders);
+    const qtdCol = dbColMap['QTD. ABERTA'];
+    if (qtdCol === undefined) throw new Error('Coluna QTD. ABERTA não encontrada no DB');
+
+    const linhaNum = Number(planilhaLinha);
+    const qtdAtual = Number(dbSheet.getRange(linhaNum, qtdCol + 1).getValue() || 0);
+    const novaQtd  = qtdAtual + Number(qtdEstornada);
+    dbSheet.getRange(linhaNum, qtdCol + 1).setValue(novaQtd);
+
+    SpreadsheetApp.flush();
+    _qtdOriginalCache_ = null;
+    _saldoEfetivoCache_ = null;
+    _ultimaQtdOriginalCache_ = null;
+    limparCache();
+
+    Logger.log(`   ✅ QTD restaurada: ${qtdAtual} → ${novaQtd} (DB linha ${linhaNum})`);
+    return { success: true, novaQtd, qtdAnterior: qtdAtual };
+
+  } catch (e) {
+    Logger.log(`❌ estornarBaixa: ${e.message}`);
+    return { success: false, error: e.message };
+  }
+}
+
 function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa, usuarioHtml) {
   try {
     // Abre fresh para evitar leitura em cache de container do Apps Script
