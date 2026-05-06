@@ -2544,7 +2544,8 @@ function sincronizarDados() {
         const temBaixasId     = idsBaixados.has(id);
         const baselineCicloId = qtdBaselineCicloMap[id];
         const resetCiclo = temBaixasId && pedidosQtd > 0
-          && baselineCicloId !== undefined && pedidosQtd !== baselineCicloId;
+          && baselineCicloId !== undefined && pedidosQtd !== baselineCicloId
+          && statusAtual !== "Faturado" && statusAtual !== "Finalizado";
         const qtdParaDB = (temBaixasId && !resetCiclo) ? dbQtd : pedidosQtd;
         if (resetCiclo) {
           marcarFaturarAtual = '';
@@ -2646,7 +2647,8 @@ function sincronizarDados() {
           const temBaixasCf     = idsBaixados.has(id);
           const baselineCicloCf = qtdBaselineCicloMap[id];
           const resetCicloCf    = temBaixasCf && pedidosQtdCf > 0
-            && baselineCicloCf !== undefined && pedidosQtdCf !== baselineCicloCf;
+            && baselineCicloCf !== undefined && pedidosQtdCf !== baselineCicloCf
+            && statusAtual !== "Faturado" && statusAtual !== "Finalizado";
           const qtdParaDBCf     = (temBaixasCf && !resetCicloCf) ? dbQtdCf : pedidosQtdCf;
           if (resetCicloCf) {
             marcarFaturarAtual = '';
@@ -2705,7 +2707,8 @@ function sincronizarDados() {
             const temBaixasFp     = idsBaixados.has(id);
             const baselineCicloFp = qtdBaselineCicloMap[id];
             const resetCicloFp    = temBaixasFp && pedidosQtdFp > 0
-              && baselineCicloFp !== undefined && pedidosQtdFp !== baselineCicloFp;
+              && baselineCicloFp !== undefined && pedidosQtdFp !== baselineCicloFp
+              && statusAtual !== "Faturado" && statusAtual !== "Finalizado";
             const qtdParaDBFp     = (temBaixasFp && !resetCicloFp) ? dbQtdFp : pedidosQtdFp;
             if (resetCicloFp) {
               marcarFaturarAtual = '';
