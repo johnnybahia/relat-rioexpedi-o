@@ -2478,6 +2478,15 @@ function sincronizarDados() {
     }
     Logger.log(`   ${idsBaixados.size} IDs com histórico de baixas`);
 
+    // Baseline de QTD por ID: valor da fonte quando o ciclo de baixas começou (ou após último CHECKPOINT).
+    // Usado para detectar quando a fonte atualizou QTD → reset do ciclo de faturamento.
+    const qtdBaselineCicloMap = _buildQtdOriginalCache_();
+    Logger.log(`   ${Object.keys(qtdBaselineCicloMap).length} baselines de ciclo carregados`);
+
+    // Itens que sofreram reset nesta sync — precisam ter MARCAR_FATURAR_USUARIO (col V) limpo separadamente,
+    // pois novaLinha só cobre 21 colunas (A-U) e não alcança a col V.
+    const idsParaLimparUsuario = [];
+
     // IDs com alerta ativo = MARCAR_FATURAR=SIM foi setado pelo SYNC (saída inesperada).
     // IDs sem alerta ativo = MARCAR_FATURAR=SIM foi setado pelo USUÁRIO (fluxo correto).
     const idsComAlertaAtivo = new Set();
@@ -2523,18 +2532,27 @@ function sincronizarDados() {
         // Array de 16 elementos (índices 0-15)
         // Posição 14 é Status na coluna O
         // Posição 15 é MARCAR_FATURAR na coluna P
-        const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
+        let marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
         const cfMatch = dbItem.row[DB_CODIGO_FIXO_COL] || fonteRow[PEDIDOS_CODIGO_FIXO_COL] || '';
 
         // Determina QTD antes de montar novaLinha para que o loop "mudou" detecte a diferença.
-        // • Sem baixas registradas → fonte é autoritativa: sincroniza QTD.ABERTA com PEDIDOS.
-        //   Cobre reduções parciais de pedido (ex: 1050→800) e aumentos que o DB não refletiu.
-        // • Com baixas → usuário está gerenciando QTD manualmente; preserva valor do DB.
-        const pedidosQtd = Number(fonteRow[QTD_COL] || 0);
-        const dbQtd      = Number(dbItem.row[DB_QTD_COL] || 0);
-        const temBaixasId = idsBaixados.has(id);
-        const qtdParaDB  = temBaixasId ? dbQtd : pedidosQtd;
-        if (!temBaixasId && pedidosQtd !== dbQtd) {
+        // • Sem baixas → fonte é autoritativa.
+        // • Com baixas e QTD fonte inalterada → preserva DB.
+        // • Com baixas e QTD fonte mudou (qualquer direção, ≠ 0) → reset ciclo faturamento.
+        const pedidosQtd      = Number(fonteRow[QTD_COL] || 0);
+        const dbQtd           = Number(dbItem.row[DB_QTD_COL] || 0);
+        const temBaixasId     = idsBaixados.has(id);
+        const baselineCicloId = qtdBaselineCicloMap[id];
+        const resetCiclo = temBaixasId && pedidosQtd > 0
+          && baselineCicloId !== undefined && pedidosQtd !== baselineCicloId;
+        const qtdParaDB = (temBaixasId && !resetCiclo) ? dbQtd : pedidosQtd;
+        if (resetCiclo) {
+          marcarFaturarAtual = '';
+          _registrarCheckpointFaturamento_(id, pedidosQtd);
+          _removerAlertasDoItem_(id);
+          idsParaLimparUsuario.push({ id: id, linha: dbItem.linha });
+          Logger.log(`   🔁 RESET ciclo faturamento: ID="${id}" baseline=${baselineCicloId} → fonte=${pedidosQtd}`);
+        } else if (!temBaixasId && pedidosQtd !== dbQtd) {
           Logger.log(`   🔄 QTD sincronizada com fonte: ${dbQtd} → ${pedidosQtd} (sem baixas registradas, ID="${id}")`);
         }
 
@@ -2567,7 +2585,7 @@ function sincronizarDados() {
           if (dbLote !== novLote) mudou = true;
         }
 
-        if (mudou || statusAtual === "Inativo") {
+        if (mudou || resetCiclo || statusAtual === "Inativo") {
           // FIX: preserva "Faturado" e "Finalizado" - não regride para "Ativo" se o item
           // voltou ao DADOS_IMPORTADOS após já ter sido processado pelo usuário do HTML.
           const novoStatus = (statusAtual === "Faturado" || statusAtual === "Finalizado") ? statusAtual : "Ativo";
@@ -2577,9 +2595,10 @@ function sincronizarDados() {
 
         // Detecta divergência de QTD quando o usuário tem baixas (sem-baixas é auto-corrigido acima).
         // Alerta apenas quando: item tem baixas E fonte reduziu abaixo do DB E fingerprint é única.
+        // Não alerta quando resetCiclo — a mudança já foi tratada como início de novo ciclo.
         const fpFonte      = _criarImpressaoDigital_(fonteRow);
         const fpDuplicados = (fonteImpressoesCount.get(fpFonte) || 1) > 1;
-        if (temBaixasId && pedidosQtd < dbQtd && statusAtual !== "Faturado" && statusAtual !== "Finalizado") {
+        if (temBaixasId && !resetCiclo && pedidosQtd < dbQtd && statusAtual !== "Faturado" && statusAtual !== "Finalizado") {
           if (fpDuplicados) {
             Logger.log(`   ⚠️ QTD difere mas fingerprint tem ${fonteImpressoesCount.get(fpFonte)} itens em PEDIDOS: ID="${id}" PEDIDOS=${pedidosQtd} DB=${dbQtd} — desalinhamento esperado entre itens duplicados, ignorado`);
           } else {
@@ -2620,13 +2639,22 @@ function sincronizarDados() {
           Logger.log(`   🔑 ID atualizado por UUID: "${id}" → "${novoId}" (Linha ${dbItem.linha})`);
 
           const fonteRow = fonteItemByCf.row;
-          const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
+          let marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
 
-          const pedidosQtdCf = Number(fonteRow[QTD_COL] || 0);
-          const dbQtdCf      = Number(dbItem.row[DB_QTD_COL] || 0);
-          const temBaixasCf  = idsBaixados.has(id);
-          const qtdParaDBCf  = temBaixasCf ? dbQtdCf : pedidosQtdCf;
-          if (!temBaixasCf && pedidosQtdCf !== dbQtdCf) {
+          const pedidosQtdCf    = Number(fonteRow[QTD_COL] || 0);
+          const dbQtdCf         = Number(dbItem.row[DB_QTD_COL] || 0);
+          const temBaixasCf     = idsBaixados.has(id);
+          const baselineCicloCf = qtdBaselineCicloMap[id];
+          const resetCicloCf    = temBaixasCf && pedidosQtdCf > 0
+            && baselineCicloCf !== undefined && pedidosQtdCf !== baselineCicloCf;
+          const qtdParaDBCf     = (temBaixasCf && !resetCicloCf) ? dbQtdCf : pedidosQtdCf;
+          if (resetCicloCf) {
+            marcarFaturarAtual = '';
+            _registrarCheckpointFaturamento_(id, pedidosQtdCf);
+            _removerAlertasDoItem_(id);
+            idsParaLimparUsuario.push({ id: id, linha: dbItem.linha });
+            Logger.log(`   🔁 RESET ciclo faturamento (UUID): ID="${id}" baseline=${baselineCicloCf} → fonte=${pedidosQtdCf}`);
+          } else if (!temBaixasCf && pedidosQtdCf !== dbQtdCf) {
             Logger.log(`   🔄 QTD sincronizada com fonte (UUID): ${dbQtdCf} → ${pedidosQtdCf} (sem baixas registradas, ID="${id}")`);
           }
 
@@ -2670,13 +2698,22 @@ function sincronizarDados() {
             Logger.log(`   🔄 ID atualizado por fingerprint: "${id}" → "${novoId}" (Linha ${dbItem.linha})`);
 
             const fonteRow = fonteItem.row;
-            const marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
+            let marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
 
-            const pedidosQtdFp = Number(fonteRow[QTD_COL] || 0);
-            const dbQtdFp      = Number(dbItem.row[DB_QTD_COL] || 0);
-            const temBaixasFp  = idsBaixados.has(id);
-            const qtdParaDBFp  = temBaixasFp ? dbQtdFp : pedidosQtdFp;
-            if (!temBaixasFp && pedidosQtdFp !== dbQtdFp) {
+            const pedidosQtdFp    = Number(fonteRow[QTD_COL] || 0);
+            const dbQtdFp         = Number(dbItem.row[DB_QTD_COL] || 0);
+            const temBaixasFp     = idsBaixados.has(id);
+            const baselineCicloFp = qtdBaselineCicloMap[id];
+            const resetCicloFp    = temBaixasFp && pedidosQtdFp > 0
+              && baselineCicloFp !== undefined && pedidosQtdFp !== baselineCicloFp;
+            const qtdParaDBFp     = (temBaixasFp && !resetCicloFp) ? dbQtdFp : pedidosQtdFp;
+            if (resetCicloFp) {
+              marcarFaturarAtual = '';
+              _registrarCheckpointFaturamento_(id, pedidosQtdFp);
+              _removerAlertasDoItem_(id);
+              idsParaLimparUsuario.push({ id: id, linha: dbItem.linha });
+              Logger.log(`   🔁 RESET ciclo faturamento (fp): ID="${id}" baseline=${baselineCicloFp} → fonte=${pedidosQtdFp}`);
+            } else if (!temBaixasFp && pedidosQtdFp !== dbQtdFp) {
               Logger.log(`   🔄 QTD sincronizada com fonte (fingerprint): ${dbQtdFp} → ${pedidosQtdFp} (sem baixas registradas, ID="${id}")`);
             }
 
@@ -3012,6 +3049,15 @@ function sincronizarDados() {
       }
     }
 
+    // Limpa MARCAR_FATURAR_USUARIO (col V, índice 21) para itens com reset de ciclo.
+    // novaLinha cobre só 21 colunas (A–U) e não alcança col V — passo separado necessário.
+    if (idsParaLimparUsuario.length > 0) {
+      idsParaLimparUsuario.forEach(({ linha }) => {
+        dbSheet.getRange(linha, MARCAR_FATURAR_USUARIO_COL + 1).setValue('');
+      });
+      Logger.log(`   🧹 MARCAR_FATURAR_USUARIO limpo para ${idsParaLimparUsuario.length} item(ns) com reset de ciclo`);
+    }
+
     SpreadsheetApp.flush();
     if (novosValidados.length > 0 || updates.length > 0) {
       limparCache();
@@ -3206,6 +3252,24 @@ function confirmarAlerta(alertaId, senhaDigitada) {
   } catch (e) {
     Logger.log('⚠️ confirmarAlerta: ' + e.message);
     return { success: false, erro: e.message };
+  }
+}
+
+/**
+ * Remove todos os alertas de faturamento associados a um item específico.
+ * Chamado quando a fonte muda QTD e o ciclo de faturamento é reiniciado.
+ */
+function _removerAlertasDoItem_(id) {
+  try {
+    const sp = PropertiesService.getScriptProperties();
+    const lista = JSON.parse(sp.getProperty(ALERTAS_PROP_KEY) || '[]');
+    const nova = lista.filter(a => String(a.id || '').trim() !== String(id || '').trim());
+    if (nova.length !== lista.length) {
+      sp.setProperty(ALERTAS_PROP_KEY, JSON.stringify(nova));
+      Logger.log(`   🗑️ ${lista.length - nova.length} alerta(s) removido(s) para ID="${id}"`);
+    }
+  } catch (e) {
+    Logger.log(`⚠️ _removerAlertasDoItem_: ${e.message}`);
   }
 }
 
