@@ -4252,6 +4252,29 @@ ALL_OCS_ITEMS = itemsObj;
     function gerarRelatorioPonteiras() {
         const marfimFilter = document.querySelector('input[name="marfim-filter-ponteiras"]:checked').value;
 
+        // Fecha modal e mostra loader enquanto busca qtd da aba PEDIDOS
+        $relatorioPonteirasModal.classList.add('hidden');
+        show($loader, true);
+        $loadingText.textContent = 'Buscando quantidades da aba PEDIDOS...';
+
+        google.script.run
+            .withSuccessHandler(function(result) {
+                show($loader, false);
+                if (!result.success) {
+                    showError('Erro ao buscar quantidades do PEDIDOS: ' + (result.error || 'Erro desconhecido'));
+                    return;
+                }
+                _imprimirRelatorioPonteiras(marfimFilter, result.map);
+            })
+            .withFailureHandler(function(err) {
+                show($loader, false);
+                showError('Falha ao buscar quantidades do PEDIDOS: ' + err.message);
+            })
+            .obterQtdPedidos();
+    }
+
+    // Monta e imprime o relatório com o mapa {uniqueId → qtdPedidos} já resolvido
+    function _imprimirRelatorioPonteiras(marfimFilter, qtdPedidosMap) {
         const printWindow = window.open('', '_blank');
 
         let html = `
@@ -4346,7 +4369,7 @@ ALL_OCS_ITEMS = itemsObj;
                                 <th>Descrição</th>
                                 <th>Tamanho</th>
                                 <th>Ordem de Compra</th>
-                                <th>Qtd. Aberta</th>
+                                <th>Qtd. (PEDIDOS)</th>
                                 <th>OS</th>
                                 <th>Dt. Recebimento</th>
                                 <th>Dt. Entrega</th>
@@ -4356,13 +4379,16 @@ ALL_OCS_ITEMS = itemsObj;
                         <tbody>`;
 
             itens.forEach(item => {
-                const desc = _ajustarDescricaoPonteiras(item.DESCRIÇÃO || '');
+                const desc    = _ajustarDescricaoPonteiras(item.DESCRIÇÃO || '');
                 const descEsc = desc.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
                 const codCli  = (item['CÓD. CLIENTE'] || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
                 const codMarf = (item['CÓD. MARFIM']  || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
                 const oc      = (item['ORD. COMPRA']  || ocNum).toString();
                 const tam     = (item.TAMANHO || '').toString();
-                const qtd     = item['QTD. ABERTA'] || 0;
+                // Quantidade vinda direto da aba PEDIDOS coluna K — não sofre baixas
+                const qtd     = (qtdPedidosMap && item.uniqueId && qtdPedidosMap[item.uniqueId] != null)
+                                    ? qtdPedidosMap[item.uniqueId]
+                                    : (item['QTD. ABERTA'] ?? 0);
                 const os      = (item['CÓD. OS'] ?? 'N/A').toString();
                 const dtRec   = formatarData(item['DATA RECEB.']);
                 const dtEnt   = formatarData(item['DT. ENTREGA']);
@@ -4397,8 +4423,6 @@ ALL_OCS_ITEMS = itemsObj;
         let printed = false;
         printWindow.onload = () => { if (!printed) { printed = true; printWindow.print(); } };
         setTimeout(() => { if (!printed) { printed = true; printWindow.print(); } }, 1500);
-
-        $relatorioPonteirasModal.classList.add('hidden');
     }
 
     function gerarRelatorioProducao() {

@@ -4136,6 +4136,36 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario) {
   }
 }
 
+// Retorna mapa {uniqueId → qtd} lendo direto a aba PEDIDOS coluna K (K4:K).
+// Usado pelo Relatório Ponteiras para exibir a quantidade da fonte, não a quantidade
+// reduzida por baixas parciais que fica no Relatorio_DB.
+function obterQtdPedidos() {
+  try {
+    const sheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
+    if (!sheet) return { success: false, error: 'Aba PEDIDOS não encontrada', map: {} };
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < FONTE_DATA_START_ROW) return { success: true, map: {} };
+
+    // Lê apenas colunas A (ID) e K (QTD) para evitar ler planilha inteira
+    const numRows = lastRow - FONTE_DATA_START_ROW + 1;
+    const colsAK = sheet.getRange(FONTE_DATA_START_ROW, 1, numRows, QTD_COL + 1).getValues();
+
+    const map = {};
+    colsAK.forEach(row => {
+      const id = String(row[ID_COL] || '').trim();
+      if (!id) return;
+      map[id] = _toNumber_(row[QTD_COL]);
+    });
+
+    Logger.log(`📊 obterQtdPedidos: ${Object.keys(map).length} IDs mapeados`);
+    return { success: true, map };
+  } catch (e) {
+    Logger.log(`❌ obterQtdPedidos: ${e.message}`);
+    return { success: false, error: e.message, map: {} };
+  }
+}
+
 function obterItensMarcadosParaFaturar() {
   Logger.log("🔍 INÍCIO obterItensMarcadosParaFaturar");
 
