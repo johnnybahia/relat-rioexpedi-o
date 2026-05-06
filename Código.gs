@@ -99,7 +99,7 @@ function _toISOStringSafe_(date) {
 // ====== FUNÇÃO WEB APP ======
 function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('index')
-    .setTitle('Relatório de Pedidos v15.5')
+    .setTitle('Relatório de Pedidos v15.6')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -3980,7 +3980,7 @@ function marcarFaturado(uniqueId, planilhaLinha) {
   }
 }
 
-function excluirItem(uniqueId, planilhaLinha) {
+function excluirItem(uniqueId, planilhaLinha, _skipCache) {
   try {
     const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
@@ -4000,7 +4000,7 @@ function excluirItem(uniqueId, planilhaLinha) {
 
     sheet.getRange(linhaNum, statusCol + 1).setValue("Excluido");
     sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
-    limparCache();
+    if (!_skipCache) limparCache();
     Logger.log(`🗑️ ${uniqueId || 'sem-id'} → Excluido (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
@@ -4009,7 +4009,7 @@ function excluirItem(uniqueId, planilhaLinha) {
   }
 }
 
-function finalizarItem(uniqueId, planilhaLinha) {
+function finalizarItem(uniqueId, planilhaLinha, _skipCache) {
   try {
     const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
@@ -4029,7 +4029,7 @@ function finalizarItem(uniqueId, planilhaLinha) {
 
     sheet.getRange(linhaNum, statusCol + 1).setValue("Finalizado");
     sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
-    limparCache();
+    if (!_skipCache) limparCache();
     Logger.log(`✅ ${uniqueId || 'sem-id'} → Finalizado (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
@@ -4044,10 +4044,11 @@ function excluirMultiplosItens(items) {
   (items || []).forEach(it => {
     const linha = (it && it.planilhaLinha != null) ? it.planilhaLinha : (it ? it.linha : null);
     const id = (it && (it.uniqueId || it.id)) || null;
-    const r = excluirItem(id, linha);
+    const r = excluirItem(id, linha, true); // _skipCache=true: limpa uma só vez ao final
     results.push(r);
     r.success ? ok++ : fail++;
   });
+  if (ok > 0) limparCache();
   return { success: fail === 0, processados: ok, falhas: fail, results };
 }
 
@@ -4057,10 +4058,11 @@ function finalizarMultiplosItens(items) {
   (items || []).forEach(it => {
     const linha = (it && it.planilhaLinha != null) ? it.planilhaLinha : (it ? it.linha : null);
     const id = (it && (it.uniqueId || it.id)) || null;
-    const r = finalizarItem(id, linha);
+    const r = finalizarItem(id, linha, true); // _skipCache=true: limpa uma só vez ao final
     results.push(r);
     r.success ? ok++ : fail++;
   });
+  if (ok > 0) limparCache();
   return { success: fail === 0, processados: ok, falhas: fail, results };
 }
 

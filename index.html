@@ -4840,6 +4840,12 @@ ALL_OCS_ITEMS = itemsObj;
     function gerarEtiquetasNF(numeroNF, volumes, cliente) {
         console.log('🖨️ Gerando', volumes * 2, 'etiquetas para NF:', numeroNF, 'Cliente:', cliente);
 
+        function escapeHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+        const safeNF = escapeHtml(numeroNF);
+        const safeCliente = escapeHtml(cliente);
+
         const printWindow = window.open('', '_blank');
 
         let html = `
@@ -4847,7 +4853,7 @@ ALL_OCS_ITEMS = itemsObj;
         <html>
         <head>
             <meta charset="UTF-8">
-            <title>Etiquetas NF ${numeroNF} - ${cliente}</title>
+            <title>Etiquetas NF ${safeNF} - ${safeCliente}</title>
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 @page {
@@ -4937,7 +4943,7 @@ ALL_OCS_ITEMS = itemsObj;
             <div class="etiqueta">
                 <div class="conteudo">
                     <div class="nf-titulo">Nota Fiscal</div>
-                    <div class="nf-numero">${numeroNF}</div>
+                    <div class="nf-numero">${safeNF}</div>
                     <div class="volume-info">Volume ${i}/${volumes}</div>
                 </div>
                 <div class="footer">
@@ -4954,7 +4960,7 @@ ALL_OCS_ITEMS = itemsObj;
             <div class="etiqueta">
                 <div class="conteudo">
                     <div class="nf-titulo">Cliente</div>
-                    <div class="cliente-nome">${cliente}</div>
+                    <div class="cliente-nome">${safeCliente}</div>
                     <div class="volume-info">Volume ${i}/${volumes}</div>
                 </div>
                 <div class="footer">
@@ -4977,10 +4983,14 @@ ALL_OCS_ITEMS = itemsObj;
         printWindow.document.write(html);
         printWindow.document.close();
 
-        // Aguardar carregamento e imprimir
+        // Imprime após todos os recursos (imagens) carregarem, com fallback de 2s
+        let printed = false;
+        printWindow.onload = () => {
+            if (!printed) { printed = true; printWindow.print(); }
+        };
         setTimeout(() => {
-            printWindow.print();
-        }, 500);
+            if (!printed) { printed = true; printWindow.print(); }
+        }, 2000);
 
         // Fechar modal
         $nfModal.classList.add('hidden');
