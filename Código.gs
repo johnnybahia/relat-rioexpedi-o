@@ -2976,6 +2976,42 @@ function sincronizarDados() {
       Logger.log(`   ⚠️ ${avisos.length} aviso(s) de itens com baixa gravados`);
     }
 
+    // Atualiza IDs no Baixas_Historico quando IDs mudam (UUID ou fingerprint match).
+    // Necessário para preservar QTD.ABERTA=0 de itens com baixa cujo ID foi trocado.
+    // Caso específico: itens Dilly têm CÓD.OS substituído pelo Lote no PEDIDOS, causando
+    // mismatch de fingerprint a cada sync e geração de novo ID (sufixo incremental).
+    // Sem este fix, na 2ª sync após a baixa, temBaixasId=false e QTD volta ao valor da fonte.
+    if (idsAtualizados.length > 0) {
+      try {
+        const baixasSheetRef = getSpreadsheet_().getSheetByName(BAIXAS_SHEET_NAME);
+        if (baixasSheetRef && baixasSheetRef.getLastRow() > 1) {
+          const bNumCols = baixasSheetRef.getLastColumn();
+          const bHeaders = baixasSheetRef.getRange(1, 1, 1, bNumCols).getValues()[0];
+          const bIdCol = bHeaders.findIndex(h => String(h).trim() === 'ID_ITEM');
+          if (bIdCol >= 0) {
+            const bNumRows = baixasSheetRef.getLastRow() - 1;
+            const bColValues = baixasSheetRef.getRange(2, bIdCol + 1, bNumRows, 1).getValues();
+            const aliasMap = {};
+            idsAtualizados.forEach(({ de, para }) => { aliasMap[String(de).trim()] = para; });
+            let bChanged = false;
+            bColValues.forEach((row, i) => {
+              const oldId = String(row[0] || '').trim();
+              if (aliasMap[oldId]) {
+                bColValues[i][0] = aliasMap[oldId];
+                bChanged = true;
+              }
+            });
+            if (bChanged) {
+              baixasSheetRef.getRange(2, bIdCol + 1, bNumRows, 1).setValues(bColValues);
+              Logger.log(`   🔄 IDs atualizados no Baixas_Historico: ${idsAtualizados.map(a => `"${a.de}"→"${a.para}"`).join(', ')}`);
+            }
+          }
+        }
+      } catch (eBaixas) {
+        Logger.log(`   ⚠️ Erro ao atualizar IDs no Baixas_Historico: ${eBaixas.message}`);
+      }
+    }
+
     SpreadsheetApp.flush();
     if (novosValidados.length > 0 || updates.length > 0) {
       limparCache();
