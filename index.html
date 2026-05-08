@@ -4702,8 +4702,13 @@ ALL_OCS_ITEMS = itemsObj;
                 console.log(`✓ ${itensMarcados.length} itens marcados para faturamento`);
 
                 const sessao = _getSessaoLocal();
+                // Fallback para o nome exibido no cabeçalho, caso a sessão em cache
+                // seja de uma versão anterior que não gravava o campo "usuario"
+                const nomeHeader = (document.getElementById('headerUsuario')?.textContent || '').trim();
                 _filtroFaturItens = itensMarcados;
-                _filtroFaturUsuarioLogado = (sessao && sessao.usuario) ? sessao.usuario : '';
+                _filtroFaturUsuarioLogado = (sessao && sessao.usuario)
+                    ? sessao.usuario
+                    : nomeHeader;
 
                 // Busca lista de todos os usuários cadastrados
                 show($loader, true);
