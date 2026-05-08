@@ -4171,9 +4171,9 @@ function obterItensMarcadosParaFaturar() {
       return { success: true, items: [] };
     }
 
-    // Força leitura de pelo menos 22 colunas (A-V) para incluir MARCAR_FATURAR_USUARIO
-    const lastCol = Math.max(sheet.getLastColumn(), 22);
-    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 22)`);
+    // Força leitura de pelo menos 23 colunas (A-W) para incluir LOTE_EMISSAO
+    const lastCol = Math.max(sheet.getLastColumn(), 23);
+    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 23)`);
 
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     Logger.log(`📋 Headers lidos: ${headers.length} colunas`);
