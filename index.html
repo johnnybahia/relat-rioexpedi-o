@@ -4847,10 +4847,18 @@ ALL_OCS_ITEMS = itemsObj;
         _mostrarFiltroMarca(itensFiltrados);
     }
 
+    // Para clientes Dakota, cada nome de cliente é tratado como uma "marca" separada
+    function _chaveAgrupamentoFatur(item) {
+        if ((item.CLIENTE || '').toUpperCase().includes('DAKOTA')) {
+            return (item.CLIENTE || '').trim() || '(Dakota s/ nome)';
+        }
+        return (item.INFO_X || '').trim() || '(Sem Referência)';
+    }
+
     function _mostrarFiltroMarca(itens) {
         const marcas = new Map();
         itens.forEach(item => {
-            const m = (item.INFO_X || '').trim() || '(Sem Referência)';
+            const m = _chaveAgrupamentoFatur(item);
             marcas.set(m, (marcas.get(m) || 0) + 1);
         });
 
@@ -4929,7 +4937,7 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         const itensFiltrados = _filtroFaturItensSelecionados.filter(item => {
-            const m = (item.INFO_X || '').trim() || '(Sem Referência)';
+            const m = _chaveAgrupamentoFatur(item);
             return marcasSelecionadas.has(m);
         });
 
@@ -4949,10 +4957,12 @@ ALL_OCS_ITEMS = itemsObj;
             usuariosFiltro && usuariosFiltro.length > 0 ? usuariosFiltro.join(', ') : 'Todos'
         );
 
-        // Agrupar por INFO_X → dentro de cada grupo, por OC
+        // Agrupar por marca/cliente → dentro de cada grupo, por OC
+        // Clientes Dakota: agrupados pelo nome do cliente (cada filial = grupo separado)
+        // Demais clientes: agrupados pela marca (INFO_X)
         const gruposPorInfoX = {};
         itensMarcados.forEach(item => {
-            const infoX = (item.INFO_X || '').trim() || '(Sem Referência)';
+            const infoX = _chaveAgrupamentoFatur(item);
             const oc    = item['ORD. COMPRA'] || 'SEM OC';
             if (!gruposPorInfoX[infoX]) gruposPorInfoX[infoX] = {};
             if (!gruposPorInfoX[infoX][oc]) {
