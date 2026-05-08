@@ -55,6 +55,7 @@ const STATUS_COL = 14;   // O (coluna 15 ao contar a partir de 1)
 const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova coluna para marcar itens para faturamento
 const DATA_STATUS_COL = 16;    // Q (coluna 17) - Data em que o status foi alterado para Faturado/Finalizado/Excluido
 const MARCAR_FATURAR_USUARIO_COL = 21; // V (coluna 22) - Usuário que marcou o item para faturamento
+const LOTE_EMISSAO_COL           = 22; // W (coluna 23) - Lote de emissão do relatório de faturamento (FAT-001…)
 const PEDIDOS_CODIGO_FIXO_COL = 18; // S (coluna 19) — UUID fixo por item, gerado uma vez e preservado para sempre
 const DB_CODIGO_FIXO_COL      = 18; // S (coluna 19) — mesmo UUID propagado do PEDIDOS para o Relatorio_DB
 const PEDIDOS_POSICAO_FONTE_COL = 16; // Q (coluna 17) — índice do item em DADOS_IMPORTADOS (para manter ordem original)
@@ -3165,13 +3166,14 @@ function sincronizarDados() {
       }
     }
 
-    // Limpa MARCAR_FATURAR_USUARIO (col V, índice 21) para itens com reset de ciclo.
-    // novaLinha cobre só 21 colunas (A–U) e não alcança col V — passo separado necessário.
+    // Limpa MARCAR_FATURAR_USUARIO (col V) e LOTE_EMISSAO (col W) para itens com reset de ciclo.
+    // novaLinha cobre só 21 colunas (A–U) e não alcança col V/W — passo separado necessário.
     if (idsParaLimparUsuario.length > 0) {
       idsParaLimparUsuario.forEach(({ linha }) => {
         dbSheet.getRange(linha, MARCAR_FATURAR_USUARIO_COL + 1).setValue('');
+        dbSheet.getRange(linha, LOTE_EMISSAO_COL + 1).setValue('');
       });
-      Logger.log(`   🧹 MARCAR_FATURAR_USUARIO limpo para ${idsParaLimparUsuario.length} item(ns) com reset de ciclo`);
+      Logger.log(`   🧹 MARCAR_FATURAR_USUARIO e LOTE_EMISSAO limpos para ${idsParaLimparUsuario.length} item(ns) com reset de ciclo`);
     }
 
     SpreadsheetApp.flush();
@@ -3535,7 +3537,8 @@ const RELATORIO_DB_HEADERS = [
   'CODIGO_FIXO',            // S - UUID imutável por item
   'INFO_X',                 // T - campo da coluna X da fonte (informação adicional da OC)
   'LOTE',                   // U - número de lote da coluna Y da fonte
-  'MARCAR_FATURAR_USUARIO'  // V - usuário que marcou o item para faturamento
+  'MARCAR_FATURAR_USUARIO', // V - usuário que marcou o item para faturamento
+  'LOTE_EMISSAO'            // W - lote de emissão do relatório de faturamento (FAT-001, FAT-002…)
 ];
 
 /**
@@ -3672,7 +3675,8 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     MARCAR_FATURAR: getDisp('MARCAR_FATURAR', ''),
     MARCAR_FATURAR_USUARIO: getDisp('MARCAR_FATURAR_USUARIO', ''),
     INFO_X: getDisp('INFO_X', ''),
-    LOTE:   getDisp('LOTE',   ''),
+    LOTE:         getDisp('LOTE',         ''),
+    LOTE_EMISSAO: getDisp('LOTE_EMISSAO', ''),
     // Posição original em DADOS_IMPORTADOS — lida por índice fixo (col R = índice 17 no DB)
     posicaoFonte: (typeof row[DB_POSICAO_FONTE_COL] === 'number' && !isNaN(row[DB_POSICAO_FONTE_COL]))
       ? row[DB_POSICAO_FONTE_COL]
@@ -4042,6 +4046,13 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario) {
     const usuarioValor = marcar ? String(usuario || '').trim() : "";
     sheet.getRange(linhaNum, marcarCol + 1).setValue(valor);
     sheet.getRange(linhaNum, usuarioCol + 1).setValue(usuarioValor);
+    // Ao desmarcar, limpa o lote de emissão para que o item apareça como "novo" em futuras emissões
+    if (!marcar) {
+      const loteEmCol = colMap['LOTE_EMISSAO'];
+      if (loteEmCol !== undefined) {
+        sheet.getRange(linhaNum, loteEmCol + 1).setValue('');
+      }
+    }
 
     SpreadsheetApp.flush();
     limparCache();
@@ -4051,6 +4062,64 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario) {
   } catch (e) {
     Logger.log(`❌ marcarParaFaturar: ${e.message}`);
     return { success: false, error: e.message, id: uniqueId || null, linha: planilhaLinha };
+  }
+}
+
+// ====== LOTE DE EMISSÃO DO RELATÓRIO DE FATURAMENTO ======
+
+/**
+ * Gera um número sequencial de lote de emissão (FAT-001, FAT-002…).
+ * O contador é armazenado em ScriptProperties para persistir entre execuções.
+ */
+function gerarNumeroLoteEmissao() {
+  const props   = PropertiesService.getScriptProperties();
+  const atual   = parseInt(props.getProperty('ULTIMO_LOTE_EMISSAO_NUM') || '0', 10);
+  const proximo = atual + 1;
+  props.setProperty('ULTIMO_LOTE_EMISSAO_NUM', String(proximo));
+  const loteId  = 'FAT-' + String(proximo).padStart(3, '0');
+  Logger.log(`📋 Lote de emissão gerado: ${loteId}`);
+  return loteId;
+}
+
+/**
+ * Grava o loteId na coluna LOTE_EMISSAO de cada item informado.
+ * itensData: [{planilhaLinha, loteId}, …]
+ */
+function registrarLoteEmissao(itensData) {
+  try {
+    if (!Array.isArray(itensData) || itensData.length === 0) {
+      return { success: true, total: 0 };
+    }
+
+    const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
+    if (!sheet) return { success: false, error: 'DB não encontrado' };
+
+    const headers     = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const colMap      = _getColumnIndexes_(headers);
+    const loteEmCol   = colMap['LOTE_EMISSAO'];
+
+    if (loteEmCol === undefined) {
+      Logger.log('⚠️ registrarLoteEmissao: coluna LOTE_EMISSAO não encontrada — executando _garantirHeadersRelatorio_DB_');
+      _garantirHeadersRelatorio_DB_();
+      return { success: false, error: 'Coluna LOTE_EMISSAO ainda não existe; tente novamente após sincronização.' };
+    }
+
+    const lastRow = sheet.getLastRow();
+    let gravados  = 0;
+    itensData.forEach(({ planilhaLinha, loteId }) => {
+      const linhaNum = Number(planilhaLinha);
+      if (!isFinite(linhaNum) || linhaNum < 2 || linhaNum > lastRow) return;
+      sheet.getRange(linhaNum, loteEmCol + 1).setValue(loteId || '');
+      gravados++;
+    });
+
+    SpreadsheetApp.flush();
+    limparCache();
+    Logger.log(`✅ registrarLoteEmissao: ${gravados} item(ns) marcados com lote ${itensData[0]?.loteId}`);
+    return { success: true, total: gravados };
+  } catch (e) {
+    Logger.log(`❌ registrarLoteEmissao: ${e.message}`);
+    return { success: false, error: e.message };
   }
 }
 
@@ -4102,9 +4171,9 @@ function obterItensMarcadosParaFaturar() {
       return { success: true, items: [] };
     }
 
-    // Força leitura de pelo menos 22 colunas (A-V) para incluir MARCAR_FATURAR_USUARIO
-    const lastCol = Math.max(sheet.getLastColumn(), 22);
-    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 22)`);
+    // Força leitura de pelo menos 23 colunas (A-W) para incluir LOTE_EMISSAO
+    const lastCol = Math.max(sheet.getLastColumn(), 23);
+    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 23)`);
 
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     Logger.log(`📋 Headers lidos: ${headers.length} colunas`);
@@ -4285,12 +4354,14 @@ function confirmarTodosAlertas() {
       // QTD zerada: baixa foi feita — seguro marcar como Faturado
       sheet.getRange(linhaSheet, STATUS_COL + 1).setValue('Faturado');
       sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+      sheet.getRange(linhaSheet, LOTE_EMISSAO_COL + 1).setValue('');
       sheet.getRange(linhaSheet, DATA_STATUS_COL + 1).setValue(agora);
       marcados++;
       Logger.log(`💰 Linha ${linhaSheet} → Faturado (ID="${uniqueId}") | QTD.ABERTA: 0`);
     } else {
       // QTD ainda aberta: apenas descarta o alerta, mantém Ativo
       sheet.getRange(linhaSheet, MARCAR_FATURAR_COL + 1).setValue('');
+      sheet.getRange(linhaSheet, LOTE_EMISSAO_COL + 1).setValue('');
       alertasDismissed++;
       Logger.log(`⚠️ Linha ${linhaSheet} → alerta descartado, mantido Ativo (ID="${uniqueId}") | QTD.ABERTA: ${qtdAberta}`);
     }

@@ -180,6 +180,9 @@
     .filtro-fatur-atalhos button { flex: 1; padding: 0.35rem 0; font-size: 0.78rem; font-weight: 600; border: 1px solid #d1d5db; border-radius: 0.375rem; cursor: pointer; background: white; color: #374151; transition: all 0.15s; }
     .filtro-fatur-atalhos button:hover { background: #f3f4f6; border-color: #9ca3af; }
     .filtro-fatur-aviso { font-size: 0.8rem; color: #6b7280; text-align: center; margin-top: 0.5rem; }
+    .filtro-fatur-lote { font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 9999px; background: #f59e0b; color: #1c1917; white-space: nowrap; flex-shrink: 0; }
+    .filtro-fatur-section-header { font-size: 0.72rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.55rem 0.5rem 0.2rem; background: none !important; border: none !important; cursor: default !important; pointer-events: none; margin-top: 0.25rem; }
+    .filtro-fatur-section-header.emitido { color: #b45309; }
 
     /* === MODAL ALERTA FATURAMENTO === */
     #alertaFaturamentoModal { display: none !important; }
@@ -4847,15 +4850,63 @@ ALL_OCS_ITEMS = itemsObj;
         _mostrarFiltroMarca(itensFiltrados);
     }
 
+    // Para clientes Dakota, cada nome de cliente é tratado como uma "marca" separada
+    function _chaveAgrupamentoFatur(item) {
+        if ((item.CLIENTE || '').toUpperCase().includes('DAKOTA')) {
+            return (item.CLIENTE || '').trim() || '(Dakota s/ nome)';
+        }
+        return (item.INFO_X || '').trim() || '(Sem Referência)';
+    }
+
+    // Cria um <li> para o filtro de marcas.
+    // loteId vazio = item novo (checked); loteId preenchido = já emitido (unchecked por padrão).
+    function _criarItemFiltroMarca(nome, loteId, count, checked) {
+        const li      = document.createElement('li');
+        const nomeEsc = _escapeHtml(nome);
+        const loteEsc = _escapeHtml(loteId);
+        const loteBadge = loteId
+            ? `<span class="filtro-fatur-lote">${loteEsc}</span>`
+            : '';
+        li.style.opacity = checked ? '1' : '0.55';
+        li.innerHTML = `
+            <input type="checkbox" ${checked ? 'checked' : ''} data-marca="${nomeEsc}" data-lote="${loteEsc}">
+            <span class="filtro-fatur-nome">${nomeEsc}</span>
+            ${loteBadge}
+            <span class="filtro-fatur-count">${count} ${count === 1 ? 'item' : 'itens'}</span>`;
+        li.querySelector('input').addEventListener('change', function() {
+            li.style.opacity = this.checked ? '1' : '0.5';
+        });
+        li.addEventListener('click', function(e) {
+            if (e.target.tagName !== 'INPUT') {
+                const cb = li.querySelector('input');
+                cb.checked = !cb.checked;
+                cb.dispatchEvent(new Event('change'));
+            }
+        });
+        return li;
+    }
+
     function _mostrarFiltroMarca(itens) {
-        const marcas = new Map();
+        // Agrupa por {marca, loteEmissao}:
+        // grupos: Map<marca, { novos: number, emitidos: Map<loteId, number> }>
+        const grupos = new Map();
         itens.forEach(item => {
-            const m = (item.INFO_X || '').trim() || '(Sem Referência)';
-            marcas.set(m, (marcas.get(m) || 0) + 1);
+            const m    = _chaveAgrupamentoFatur(item);
+            const lote = (item.LOTE_EMISSAO || '').trim();
+            if (!grupos.has(m)) grupos.set(m, { novos: 0, emitidos: new Map() });
+            const g = grupos.get(m);
+            if (lote) {
+                g.emitidos.set(lote, (g.emitidos.get(lote) || 0) + 1);
+            } else {
+                g.novos++;
+            }
         });
 
-        // Se só tem uma marca, não precisa do modal — imprime direto
-        if (marcas.size <= 1) {
+        const temEmitidos  = [...grupos.values()].some(g => g.emitidos.size > 0);
+        const totalMarcas  = grupos.size;
+
+        // Se só tem uma marca e nenhum item foi emitido antes, imprime direto sem modal
+        if (!temEmitidos && totalMarcas <= 1) {
             _imprimirRelatorioFaturamento(itens, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
             return;
         }
@@ -4863,37 +4914,43 @@ ALL_OCS_ITEMS = itemsObj;
         const $modal = document.getElementById('filtroMarcaFaturModal');
         const $lista = document.getElementById('filtroMarcaLista');
         if (!$modal || !$lista) {
-            // Fallback: modal não encontrado no DOM, imprime tudo direto
             _imprimirRelatorioFaturamento(itens, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
             return;
         }
 
         $lista.innerHTML = '';
-        [...marcas.entries()]
-            .sort((a, b) => {
-                if (a[0] === '(Sem Referência)') return 1;
-                if (b[0] === '(Sem Referência)') return -1;
-                return a[0].localeCompare(b[0], 'pt-BR');
-            })
-            .forEach(([nome, count]) => {
-                const li = document.createElement('li');
-                const nomeEsc = _escapeHtml(nome);
-                li.innerHTML = `
-                    <input type="checkbox" checked data-marca="${nomeEsc}">
-                    <span class="filtro-fatur-nome">${nomeEsc}</span>
-                    <span class="filtro-fatur-count">${count} ${count === 1 ? 'item' : 'itens'}</span>`;
-                li.querySelector('input').addEventListener('change', function() {
-                    li.style.opacity = this.checked ? '1' : '0.5';
-                });
-                li.addEventListener('click', function(e) {
-                    if (e.target.tagName !== 'INPUT') {
-                        const cb = li.querySelector('input');
-                        cb.checked = !cb.checked;
-                        cb.dispatchEvent(new Event('change'));
-                    }
-                });
-                $lista.appendChild(li);
+
+        const marcasOrdenadas = [...grupos.keys()].sort((a, b) => {
+            if (a === '(Sem Referência)') return 1;
+            if (b === '(Sem Referência)') return -1;
+            return a.localeCompare(b, 'pt-BR');
+        });
+
+        // Seção: Novos (nunca emitidos)
+        const comNovos = marcasOrdenadas.filter(m => grupos.get(m).novos > 0);
+        if (comNovos.length > 0) {
+            const hdr = document.createElement('li');
+            hdr.className = 'filtro-fatur-section-header';
+            hdr.textContent = 'Novos — nunca emitidos';
+            $lista.appendChild(hdr);
+            comNovos.forEach(nome => {
+                $lista.appendChild(_criarItemFiltroMarca(nome, '', grupos.get(nome).novos, true));
             });
+        }
+
+        // Seção: Já emitidos (desmarcados por padrão)
+        if (temEmitidos) {
+            const hdr2 = document.createElement('li');
+            hdr2.className = 'filtro-fatur-section-header emitido';
+            hdr2.textContent = 'Já emitidos — desmarcados por padrão';
+            $lista.appendChild(hdr2);
+            marcasOrdenadas.forEach(nome => {
+                const g = grupos.get(nome);
+                g.emitidos.forEach((count, loteId) => {
+                    $lista.appendChild(_criarItemFiltroMarca(nome, loteId, count, false));
+                });
+            });
+        }
 
         $modal.classList.remove('hidden');
     }
@@ -4918,19 +4975,21 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     function _confirmarFiltroMarca() {
-        const marcasSelecionadas = new Set();
+        // Chave composta "marca||lote" para distinguir novos de já-emitidos
+        const selecionadas = new Set();
         document.querySelectorAll('#filtroMarcaLista input[type=checkbox]:checked').forEach(cb => {
-            marcasSelecionadas.add(cb.dataset.marca);
+            selecionadas.add(`${cb.dataset.marca}||${cb.dataset.lote || ''}`);
         });
 
-        if (marcasSelecionadas.size === 0) {
+        if (selecionadas.size === 0) {
             showError('Selecione ao menos uma marca para imprimir.');
             return;
         }
 
         const itensFiltrados = _filtroFaturItensSelecionados.filter(item => {
-            const m = (item.INFO_X || '').trim() || '(Sem Referência)';
-            return marcasSelecionadas.has(m);
+            const marca = _chaveAgrupamentoFatur(item);
+            const lote  = (item.LOTE_EMISSAO || '').trim();
+            return selecionadas.has(`${marca}||${lote}`);
         });
 
         if (itensFiltrados.length === 0) {
@@ -4939,20 +4998,50 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         document.getElementById('filtroMarcaFaturModal').classList.add('hidden');
-
         _imprimirRelatorioFaturamento(itensFiltrados, _filtroFaturUsuarioLogado, _filtroFaturUsuariosSelecionados);
     }
 
+    // Passo 1: obtém número de lote do servidor, depois gera o PDF
     function _imprimirRelatorioFaturamento(itensMarcados, usuarioLogado, usuariosFiltro) {
+        $loader.classList.remove('hidden');
+        $loadingText.textContent = 'Gerando lote de emissão…';
+
+        google.script.run
+            .withSuccessHandler(function(loteId) {
+                $loader.classList.add('hidden');
+                const idLote = loteId || 'FAT-???';
+                _gerarRelatorioFaturamentoPDF(itensMarcados, usuarioLogado, usuariosFiltro, idLote);
+                // Registra o lote na planilha de forma assíncrona (fire-and-forget)
+                const itensData = itensMarcados.map(item => ({
+                    planilhaLinha: item.planilhaLinha,
+                    loteId: idLote
+                }));
+                google.script.run
+                    .withFailureHandler(err => console.warn('⚠️ registrarLoteEmissao falhou:', err))
+                    .registrarLoteEmissao(itensData);
+            })
+            .withFailureHandler(function(err) {
+                $loader.classList.add('hidden');
+                console.warn('⚠️ gerarNumeroLoteEmissao falhou, imprimindo sem lote:', err);
+                _gerarRelatorioFaturamentoPDF(itensMarcados, usuarioLogado, usuariosFiltro, '');
+            })
+            .gerarNumeroLoteEmissao();
+    }
+
+    // Passo 2: monta e abre a janela de impressão
+    function _gerarRelatorioFaturamentoPDF(itensMarcados, usuarioLogado, usuariosFiltro, loteId) {
         const usuarioLogadoEsc = _escapeHtml(usuarioLogado);
-        const filtroTextoEsc = _escapeHtml(
+        const filtroTextoEsc   = _escapeHtml(
             usuariosFiltro && usuariosFiltro.length > 0 ? usuariosFiltro.join(', ') : 'Todos'
         );
+        const loteIdEsc = _escapeHtml(loteId || '');
 
-        // Agrupar por INFO_X → dentro de cada grupo, por OC
+        // Agrupar por marca/cliente → dentro de cada grupo, por OC
+        // Clientes Dakota: agrupados pelo nome do cliente (cada filial = grupo separado)
+        // Demais clientes: agrupados pela marca (INFO_X)
         const gruposPorInfoX = {};
         itensMarcados.forEach(item => {
-            const infoX = (item.INFO_X || '').trim() || '(Sem Referência)';
+            const infoX = _chaveAgrupamentoFatur(item);
             const oc    = item['ORD. COMPRA'] || 'SEM OC';
             if (!gruposPorInfoX[infoX]) gruposPorInfoX[infoX] = {};
             if (!gruposPorInfoX[infoX][oc]) {
@@ -4967,19 +5056,16 @@ ALL_OCS_ITEMS = itemsObj;
             return a.localeCompare(b, 'pt-BR');
         });
 
-        const printWindow = window.open('', '_blank');
-        const dataHoje = new Date().toLocaleDateString('pt-BR');
-        const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-        // filtroTexto e usuarioLogado já escapados em _imprimirRelatorioFaturamento()
-        const filtroTexto = filtroTextoEsc;
-        const usuarioLogadoSafe = usuarioLogadoEsc;
+        const printWindow    = window.open('', '_blank');
+        const dataHoje       = new Date().toLocaleDateString('pt-BR');
+        const horaAgora      = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
         let html = `
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
-            <title>Relatório para Faturamento</title>
+            <title>Relatório para Faturamento${loteIdEsc ? ' — ' + loteIdEsc : ''}</title>
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: Arial, sans-serif; font-size: 14px; orphans: 3; widows: 3; }
@@ -4987,6 +5073,7 @@ ALL_OCS_ITEMS = itemsObj;
                 .info { text-align: center; margin: 0 0 10px 0; color: #666; font-size: 11px; line-height: 1.3; }
                 .info-usuario { font-weight: bold; color: #166534; }
                 .info-filtro { display: inline-block; margin-top: 3px; font-size: 10px; color: #1e40af; font-weight: 600; }
+                .info-lote { display: inline-block; margin-top: 4px; font-size: 13px; font-weight: 800; color: #b45309; background: #fef3c7; border: 2px solid #f59e0b; border-radius: 6px; padding: 2px 12px; letter-spacing: 0.04em; }
                 .grupo-section { margin-bottom: 28px; }
                 .grupo-header { background: #1e40af; color: white; padding: 9px 12px; border-radius: 6px 6px 0 0; font-size: 15px; font-weight: bold; letter-spacing: 0.3px; }
                 .grupo-body { border: 2px solid #1e40af; border-top: none; border-radius: 0 0 6px 6px; padding: 10px; background: #f0f7ff; }
@@ -4998,6 +5085,9 @@ ALL_OCS_ITEMS = itemsObj;
                 td { padding: 6px 4px; border: 1px solid #dcfce7; font-size: 11px; background: white; }
                 tr:nth-child(even) td { background: #f0fdf4; }
                 .highlight { background: #90EE90 !important; font-weight: 600; }
+                .reemissao { background: #fef9c3 !important; }
+                .reemissao td { color: #78350f; }
+                .badge-reemissao { font-size: 9px; font-weight: 700; background: #f59e0b; color: #1c1917; border-radius: 4px; padding: 1px 5px; margin-left: 4px; vertical-align: middle; }
                 @media print {
                     @page { size: A4 landscape; margin: 0.8cm; }
                     body { margin: 0; padding: 0; }
@@ -5010,14 +5100,15 @@ ALL_OCS_ITEMS = itemsObj;
         <body>
             <h1>💰 RELATÓRIO PARA FATURAMENTO</h1>
             <div class="info">
+                ${loteIdEsc ? `<span class="info-lote">📋 ${loteIdEsc}</span><br>` : ''}
                 Gerado em: ${dataHoje} às ${horaAgora}
-                ${usuarioLogadoSafe ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogadoSafe}</span>` : ''}
-                <br><span class="info-filtro">Usuários: ${filtroTexto}</span>
+                ${usuarioLogadoEsc ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogadoEsc}</span>` : ''}
+                <br><span class="info-filtro">Usuários: ${filtroTextoEsc}</span>
             </div>
         `;
 
         gruposOrdenados.forEach(infoX => {
-            const ocsPorGrupo = gruposPorInfoX[infoX];
+            const ocsPorGrupo  = gruposPorInfoX[infoX];
             const ocsOrdenadas = Object.keys(ocsPorGrupo).sort();
 
             html += `<div class="grupo-section">
@@ -5051,22 +5142,29 @@ ALL_OCS_ITEMS = itemsObj;
                         <tbody>`;
 
                 itens.forEach(item => {
-                    const saldo = item.SALDO || 0;
-                    const dtRecebimento = formatarData(item['DATA RECEB.']);
-                    const dtEntrega = formatarData(item['DT. ENTREGA']);
-                    const prazo = formatarPrazoDias(item.PRAZO);
-                    const codOS = item['CÓD. OS'] ?? 'N/A';
-                    const marcadoPor = _escapeHtml(item.MARCAR_FATURAR_USUARIO || '');
+                    const saldo       = item.SALDO || 0;
+                    const dtReceb     = formatarData(item['DATA RECEB.']);
+                    const dtEntrega   = formatarData(item['DT. ENTREGA']);
+                    const prazo       = formatarPrazoDias(item.PRAZO);
+                    const codOS       = item['CÓD. OS'] ?? 'N/A';
+                    const marcadoPor  = _escapeHtml(item.MARCAR_FATURAR_USUARIO || '');
+                    const loteAnt     = (item.LOTE_EMISSAO || '').trim();
+                    // Item reemitido: estava em lote anterior e o usuário optou por incluí-lo novamente
+                    const isReemissao = loteAnt && loteAnt !== loteId;
+                    const rowClass    = isReemissao ? 'reemissao' : 'highlight';
+                    const badgeReemit = isReemissao
+                        ? `<span class="badge-reemissao">já em ${_escapeHtml(loteAnt)}</span>`
+                        : '';
 
                     html += `
-                        <tr class="highlight">
-                            <td>${item.PEDIDO ?? 'N/A'}</td>
+                        <tr class="${rowClass}">
+                            <td>${item.PEDIDO ?? 'N/A'}${badgeReemit}</td>
                             <td>${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
                             <td>${item.DESCRIÇÃO ?? 'N/A'}</td>
                             <td>${item.TAMANHO ?? 'N/A'}</td>
                             <td style="text-align:center;font-weight:700;">${fmtInt(saldo)}</td>
                             <td>${codOS}</td>
-                            <td>${dtRecebimento}</td>
+                            <td>${dtReceb}</td>
                             <td>${dtEntrega}</td>
                             <td style="text-align:center;">${prazo}</td>
                             <td style="font-size:10px;color:#374151;">${marcadoPor}</td>
@@ -5085,7 +5183,7 @@ ALL_OCS_ITEMS = itemsObj;
         printWindow.document.close();
         setTimeout(() => { printWindow.print(); }, 250);
 
-        console.log('✅ Relatório de Faturamento gerado com sucesso!');
+        console.log(`✅ Relatório de Faturamento gerado: ${loteId}`);
     }
 
     // ==== ETIQUETA NF ====
