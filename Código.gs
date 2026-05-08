@@ -3166,13 +3166,14 @@ function sincronizarDados() {
       }
     }
 
-    // Limpa MARCAR_FATURAR_USUARIO (col V, índice 21) para itens com reset de ciclo.
-    // novaLinha cobre só 21 colunas (A–U) e não alcança col V — passo separado necessário.
+    // Limpa MARCAR_FATURAR_USUARIO (col V) e LOTE_EMISSAO (col W) para itens com reset de ciclo.
+    // novaLinha cobre só 21 colunas (A–U) e não alcança col V/W — passo separado necessário.
     if (idsParaLimparUsuario.length > 0) {
       idsParaLimparUsuario.forEach(({ linha }) => {
         dbSheet.getRange(linha, MARCAR_FATURAR_USUARIO_COL + 1).setValue('');
+        dbSheet.getRange(linha, LOTE_EMISSAO_COL + 1).setValue('');
       });
-      Logger.log(`   🧹 MARCAR_FATURAR_USUARIO limpo para ${idsParaLimparUsuario.length} item(ns) com reset de ciclo`);
+      Logger.log(`   🧹 MARCAR_FATURAR_USUARIO e LOTE_EMISSAO limpos para ${idsParaLimparUsuario.length} item(ns) com reset de ciclo`);
     }
 
     SpreadsheetApp.flush();
