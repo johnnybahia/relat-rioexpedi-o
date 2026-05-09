@@ -321,8 +321,7 @@
     .user-info-name { font-weight: 600; color: #1f2937; }
     .btn-logout { padding: 0.35rem 0.75rem; background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; border-radius: 0.375rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
     .btn-logout:hover { background: #dc2626; color: white; border-color: #dc2626; }
-    #faturar-header-badge { display:none; align-items:center; gap:0.3rem; background:#fef3c7; border:1.5px solid #f59e0b; border-radius:9999px; padding:2px 10px 2px 8px; font-size:0.72rem; font-weight:700; color:#92400e; white-space:nowrap; cursor:default; }
-    #faturar-header-badge .badge-count { background:#f59e0b; color:#1c1917; border-radius:9999px; padding:1px 7px; font-size:0.72rem; font-weight:800; margin-right:2px; }
+
   </style>
 </head>
 <body>
@@ -350,9 +349,6 @@
       <div id="userInfoBar" class="user-info" style="display:none;">
         <span>👤</span>
         <span id="headerUsuario" class="user-info-name"></span>
-        <span id="faturar-header-badge" title="Itens marcados por você para faturamento">
-          <span class="badge-count" id="faturar-badge-count">0</span>marcados p/ faturar
-        </span>
         <button class="btn-logout" onclick="_logout()">Sair</button>
       </div>
       <div class="auto-refresh-controls">
@@ -419,9 +415,12 @@
         <button id="btn-relatorio-producao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #059669; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
           📄 Imprimir Relatório de Produção
         </button>
-        <button id="btn-relatorio-faturamento" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #10b981; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
-          💰 Relatório para Faturamento
-        </button>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:0.3rem;">
+          <button id="btn-relatorio-faturamento" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #10b981; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+            💰 Relatório para Faturamento
+          </button>
+          <span id="faturar-btn-info" style="display:none; font-size:0.72rem; font-weight:600; color:#065f46; background:#d1fae5; border:1px solid #6ee7b7; border-radius:9999px; padding:2px 10px; white-space:nowrap;"></span>
+        </div>
         <button id="btn-relatorio-ponteiras" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #b45309; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
           📌 Relatório Ponteiras
         </button>
@@ -2308,25 +2307,25 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     function _atualizarBadgeFaturar() {
-      const badge   = document.getElementById('faturar-header-badge');
-      const countEl = document.getElementById('faturar-badge-count');
-      if (!badge || !countEl) return;
+      const btnInfo = document.getElementById('faturar-btn-info');
 
-      const usuarioAtual = (document.getElementById('headerUsuario')?.textContent || '').trim().toLowerCase();
-      if (!usuarioAtual) { badge.style.display = 'none'; return; }
+      const usuarioAtual = (document.getElementById('headerUsuario')?.textContent || '').trim();
+      if (!usuarioAtual) {
+        if (btnInfo) btnInfo.style.display = 'none';
+        return;
+      }
 
-      // Conta checkboxes marcados pelo usuário atual diretamente no DOM
-      // (ALL_OCS_ITEMS não é atualizado localmente ao marcar/desmarcar)
+      const usuarioLower = usuarioAtual.toLowerCase();
       let total = 0;
       document.querySelectorAll('.checkbox-faturar[data-marcado-por]').forEach(cb => {
-        if ((cb.dataset.marcadoPor || '').trim().toLowerCase() === usuarioAtual) total++;
+        if ((cb.dataset.marcadoPor || '').trim().toLowerCase() === usuarioLower) total++;
       });
 
       if (total > 0) {
-        countEl.textContent = total;
-        badge.style.display = 'inline-flex';
+        const label = `${usuarioAtual} possui ${total} ${total === 1 ? 'item marcado' : 'itens marcados'} para faturar`;
+        if (btnInfo) { btnInfo.textContent = label; btnInfo.style.display = 'inline-block'; }
       } else {
-        badge.style.display = 'none';
+        if (btnInfo) btnInfo.style.display = 'none';
       }
     }
     
