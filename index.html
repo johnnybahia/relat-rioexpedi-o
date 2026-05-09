@@ -419,9 +419,12 @@
         <button id="btn-relatorio-producao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #059669; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
           📄 Imprimir Relatório de Produção
         </button>
-        <button id="btn-relatorio-faturamento" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #10b981; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
-          💰 Relatório para Faturamento
-        </button>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:0.3rem;">
+          <button id="btn-relatorio-faturamento" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #10b981; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+            💰 Relatório para Faturamento
+          </button>
+          <span id="faturar-btn-info" style="display:none; font-size:0.72rem; font-weight:600; color:#065f46; background:#d1fae5; border:1px solid #6ee7b7; border-radius:9999px; padding:2px 10px; white-space:nowrap;"></span>
+        </div>
         <button id="btn-relatorio-ponteiras" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #b45309; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
           📌 Relatório Ponteiras
         </button>
@@ -2310,23 +2313,29 @@ ALL_OCS_ITEMS = itemsObj;
     function _atualizarBadgeFaturar() {
       const badge   = document.getElementById('faturar-header-badge');
       const countEl = document.getElementById('faturar-badge-count');
-      if (!badge || !countEl) return;
+      const btnInfo = document.getElementById('faturar-btn-info');
 
-      const usuarioAtual = (document.getElementById('headerUsuario')?.textContent || '').trim().toLowerCase();
-      if (!usuarioAtual) { badge.style.display = 'none'; return; }
+      const usuarioAtual = (document.getElementById('headerUsuario')?.textContent || '').trim();
+      if (!usuarioAtual) {
+        if (badge)   badge.style.display   = 'none';
+        if (btnInfo) btnInfo.style.display = 'none';
+        return;
+      }
 
-      // Conta checkboxes marcados pelo usuário atual diretamente no DOM
-      // (ALL_OCS_ITEMS não é atualizado localmente ao marcar/desmarcar)
+      const usuarioLower = usuarioAtual.toLowerCase();
       let total = 0;
       document.querySelectorAll('.checkbox-faturar[data-marcado-por]').forEach(cb => {
-        if ((cb.dataset.marcadoPor || '').trim().toLowerCase() === usuarioAtual) total++;
+        if ((cb.dataset.marcadoPor || '').trim().toLowerCase() === usuarioLower) total++;
       });
 
       if (total > 0) {
-        countEl.textContent = total;
-        badge.style.display = 'inline-flex';
+        const label = `${usuarioAtual} possui ${total} ${total === 1 ? 'item marcado' : 'itens marcados'} para faturar`;
+        if (countEl) countEl.textContent = total;
+        if (badge)   badge.style.display = 'inline-flex';
+        if (btnInfo) { btnInfo.textContent = label; btnInfo.style.display = 'inline-block'; }
       } else {
-        badge.style.display = 'none';
+        if (badge)   badge.style.display   = 'none';
+        if (btnInfo) btnInfo.style.display = 'none';
       }
     }
     
