@@ -321,6 +321,8 @@
     .user-info-name { font-weight: 600; color: #1f2937; }
     .btn-logout { padding: 0.35rem 0.75rem; background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; border-radius: 0.375rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
     .btn-logout:hover { background: #dc2626; color: white; border-color: #dc2626; }
+    #faturar-header-badge { display:none; align-items:center; gap:0.3rem; background:#fef3c7; border:1.5px solid #f59e0b; border-radius:9999px; padding:2px 10px 2px 8px; font-size:0.72rem; font-weight:700; color:#92400e; white-space:nowrap; cursor:default; }
+    #faturar-header-badge .badge-count { background:#f59e0b; color:#1c1917; border-radius:9999px; padding:1px 7px; font-size:0.72rem; font-weight:800; margin-right:2px; }
   </style>
 </head>
 <body>
@@ -348,6 +350,9 @@
       <div id="userInfoBar" class="user-info" style="display:none;">
         <span>👤</span>
         <span id="headerUsuario" class="user-info-name"></span>
+        <span id="faturar-header-badge" title="Itens marcados por você para faturamento">
+          <span class="badge-count" id="faturar-badge-count">0</span>marcados p/ faturar
+        </span>
         <button class="btn-logout" onclick="_logout()">Sair</button>
       </div>
       <div class="auto-refresh-controls">
@@ -2299,6 +2304,30 @@ ALL_OCS_ITEMS = itemsObj;
       const totalOcs = FILTERED_OCS_INFO.length;
       const cardsRendered = $cardsContainer.querySelectorAll('.card').length;
       $stats.textContent = `Exibindo ${cardsRendered} de ${totalOcs} OCs.`;
+      _atualizarBadgeFaturar();
+    }
+
+    function _atualizarBadgeFaturar() {
+      const badge   = document.getElementById('faturar-header-badge');
+      const countEl = document.getElementById('faturar-badge-count');
+      if (!badge || !countEl) return;
+
+      const usuarioAtual = (document.getElementById('headerUsuario')?.textContent || '').trim().toLowerCase();
+      if (!usuarioAtual) { badge.style.display = 'none'; return; }
+
+      // Conta checkboxes marcados pelo usuário atual diretamente no DOM
+      // (ALL_OCS_ITEMS não é atualizado localmente ao marcar/desmarcar)
+      let total = 0;
+      document.querySelectorAll('.checkbox-faturar[data-marcado-por]').forEach(cb => {
+        if ((cb.dataset.marcadoPor || '').trim().toLowerCase() === usuarioAtual) total++;
+      });
+
+      if (total > 0) {
+        countEl.textContent = total;
+        badge.style.display = 'inline-flex';
+      } else {
+        badge.style.display = 'none';
+      }
     }
     
     // NOVO: Atualiza totalizadores gerais
@@ -2712,6 +2741,7 @@ ALL_OCS_ITEMS = itemsObj;
                         }
                     }
                     console.log(`✅ Item ${marcar ? 'marcado' : 'desmarcado'} para faturamento!`);
+                    _atualizarBadgeFaturar();
                 } else {
                     if (result.bloqueado) {
                         showError(result.error);
