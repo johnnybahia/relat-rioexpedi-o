@@ -4694,6 +4694,24 @@ ALL_OCS_ITEMS = itemsObj;
                 }
 
                 const itensMarcados = result.items || [];
+
+                // Itens marcados sem usuário: herança de versão antiga — limpa automaticamente
+                const semUsuario = itensMarcados.filter(it => !(it.MARCAR_FATURAR_USUARIO || '').trim());
+                if (semUsuario.length > 0) {
+                    console.warn(`⚠️ ${semUsuario.length} item(ns) marcado(s) sem usuário — removendo automaticamente...`);
+                    google.script.run
+                        .withSuccessHandler(r => console.log(`🧹 Limpeza automática: ${r.limpos} item(ns) removido(s).`))
+                        .withFailureHandler(err => console.warn('⚠️ Falha na limpeza automática:', err))
+                        .limparMarcacoesSemUsuario();
+                    // Remove da lista local para não prosseguir com itens inválidos
+                    const itensValidos = itensMarcados.filter(it => (it.MARCAR_FATURAR_USUARIO || '').trim());
+                    if (itensValidos.length === 0) {
+                        showError('Os itens marcados não tinham usuário associado e foram removidos automaticamente. Por favor, marque os itens novamente e tente gerar o relatório.');
+                        return;
+                    }
+                    itensMarcados.splice(0, itensMarcados.length, ...itensValidos);
+                }
+
                 if (itensMarcados.length === 0) {
                     showError('Nenhum item está marcado para faturamento. Marque ao menos um item antes de gerar o relatório.');
                     return;
