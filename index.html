@@ -5127,6 +5127,7 @@ ALL_OCS_ITEMS = itemsObj;
                 .info-usuario { font-weight: bold; color: #166534; }
                 .info-filtro { display: inline-block; margin-top: 3px; font-size: 10px; color: #1e40af; font-weight: 600; }
                 .info-lote { display: inline-block; margin-top: 4px; font-size: 13px; font-weight: 800; color: #b45309; background: #fef3c7; border: 2px solid #f59e0b; border-radius: 6px; padding: 2px 12px; letter-spacing: 0.04em; }
+                .info-marcados { display: inline-block; margin-top: 4px; font-size: 11px; color: #1e40af; }
                 .grupo-section { margin-bottom: 28px; }
                 .grupo-header { background: #1e40af; color: white; padding: 9px 12px; border-radius: 6px 6px 0 0; font-size: 15px; font-weight: bold; letter-spacing: 0.3px; }
                 .grupo-body { border: 2px solid #1e40af; border-top: none; border-radius: 0 0 6px 6px; padding: 10px; background: #f0f7ff; }
@@ -5156,6 +5157,7 @@ ALL_OCS_ITEMS = itemsObj;
                 ${loteIdEsc ? `<span class="info-lote">📋 ${loteIdEsc}</span><br>` : ''}
                 Gerado em: ${dataHoje} às ${horaAgora}
                 ${usuarioLogadoEsc ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogadoEsc}</span>` : ''}
+                ${usuarioLogadoEsc ? `<br><span class="info-marcados">Usuário <strong>${usuarioLogadoEsc}</strong> possui <strong>${itensMarcados.length}</strong> ${itensMarcados.length === 1 ? 'item marcado' : 'itens marcados'} para faturamento neste relatório</span>` : ''}
                 <br><span class="info-filtro">Usuários: ${filtroTextoEsc}</span>
             </div>
         `;
