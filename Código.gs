@@ -4068,6 +4068,56 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario) {
 // ====== LOTE DE EMISSÃO DO RELATÓRIO DE FATURAMENTO ======
 
 /**
+ * Remove marcações de faturamento sem usuário (MARCAR_FATURAR="SIM" + MARCAR_FATURAR_USUARIO vazio).
+ * Ocorre quando itens foram marcados por versões antigas do código que não gravavam o usuário.
+ * Pode ser executada manualmente pelo menu do Apps Script ou chamada pelo frontend.
+ */
+function limparMarcacoesSemUsuario() {
+  const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('⚠️ limparMarcacoesSemUsuario: DB vazio ou não encontrado.');
+    return { success: true, limpos: 0 };
+  }
+
+  const lastRow  = sheet.getLastRow();
+  const lastCol  = Math.max(sheet.getLastColumn(), LOTE_EMISSAO_COL + 1);
+  const headers  = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const colMap   = _getColumnIndexes_(headers);
+
+  const marcarCol  = colMap['MARCAR_FATURAR'];
+  const usuarioCol = colMap['MARCAR_FATURAR_USUARIO'];
+  const loteEmCol  = colMap['LOTE_EMISSAO'];
+
+  if (marcarCol === undefined || usuarioCol === undefined) {
+    Logger.log('❌ limparMarcacoesSemUsuario: colunas necessárias não encontradas.');
+    return { success: false, error: 'Colunas MARCAR_FATURAR ou MARCAR_FATURAR_USUARIO não encontradas.' };
+  }
+
+  const dados = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  let limpos = 0;
+
+  dados.forEach((row, i) => {
+    const marcar  = String(row[marcarCol]  || '').trim().toUpperCase();
+    const usuario = String(row[usuarioCol] || '').trim();
+    if (marcar !== 'SIM' || usuario !== '') return;
+
+    const linhaSheet = i + 2;
+    sheet.getRange(linhaSheet, marcarCol  + 1).setValue('');
+    sheet.getRange(linhaSheet, usuarioCol + 1).setValue('');
+    if (loteEmCol !== undefined) {
+      sheet.getRange(linhaSheet, loteEmCol + 1).setValue('');
+    }
+    limpos++;
+    Logger.log(`🧹 Linha ${linhaSheet}: marcação sem usuário removida (ID="${row[0]}")`);
+  });
+
+  SpreadsheetApp.flush();
+  limparCache();
+  Logger.log(`✅ limparMarcacoesSemUsuario: ${limpos} item(ns) limpo(s).`);
+  return { success: true, limpos };
+}
+
+/**
  * Gera um número sequencial de lote de emissão (FAT-001, FAT-002…).
  * O contador é armazenado em ScriptProperties para persistir entre execuções.
  */
