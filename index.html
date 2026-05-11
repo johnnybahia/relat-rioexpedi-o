@@ -349,6 +349,7 @@
       <div id="userInfoBar" class="user-info" style="display:none;">
         <span>👤</span>
         <span id="headerUsuario" class="user-info-name"></span>
+        <span id="faturar-header-badge" style="display:none; font-size:0.75rem; font-weight:700; color:#065f46; background:#d1fae5; border:1px solid #6ee7b7; border-radius:9999px; padding:2px 12px; white-space:nowrap;">💰 <span id="faturar-header-badge-text"></span></span>
         <button class="btn-logout" onclick="_logout()">Sair</button>
       </div>
       <div class="auto-refresh-controls">
@@ -2308,10 +2309,13 @@ ALL_OCS_ITEMS = itemsObj;
 
     function _atualizarBadgeFaturar() {
       const btnInfo = document.getElementById('faturar-btn-info');
+      const headerBadge = document.getElementById('faturar-header-badge');
+      const headerBadgeText = document.getElementById('faturar-header-badge-text');
 
       const usuarioAtual = (document.getElementById('headerUsuario')?.textContent || '').trim();
       if (!usuarioAtual) {
         if (btnInfo) btnInfo.style.display = 'none';
+        if (headerBadge) headerBadge.style.display = 'none';
         return;
       }
 
@@ -2324,8 +2328,11 @@ ALL_OCS_ITEMS = itemsObj;
       if (total > 0) {
         const label = `${usuarioAtual} possui ${total} ${total === 1 ? 'item marcado' : 'itens marcados'} para faturar`;
         if (btnInfo) { btnInfo.textContent = label; btnInfo.style.display = 'inline-block'; }
+        if (headerBadgeText) headerBadgeText.textContent = `${total} ${total === 1 ? 'item marcado' : 'itens marcados'} para faturar`;
+        if (headerBadge) headerBadge.style.display = 'inline-flex';
       } else {
         if (btnInfo) btnInfo.style.display = 'none';
+        if (headerBadge) headerBadge.style.display = 'none';
       }
     }
     
