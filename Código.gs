@@ -767,11 +767,14 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa, usuarioHtml) {
     // Atualiza na planilha
     sheet.getRange(linhaNum, qtdCol + 1).setValue(novaQtd);
 
-    // Registra no histórico
+    // Registra no histórico — falha aqui deve reverter a operação inteira
     const resultHistorico = registrarBaixa(uniqueId, qtdBaixa, novaQtd, usuarioHtml);
-
-    // Baixa não altera status — Faturado é definido apenas pela sincronização
-    // quando o item desaparece do PEDIDOS/fonte (sincronizarDados).
+    if (!resultHistorico.success) {
+      // Reverte a atualização da planilha para manter consistência com o histórico
+      sheet.getRange(linhaNum, qtdCol + 1).setValue(qtdAtualNum);
+      SpreadsheetApp.flush();
+      throw new Error(`Falha ao registrar no histórico: ${resultHistorico.error || 'erro desconhecido'}`);
+    }
 
     SpreadsheetApp.flush();
     limparCache();
@@ -4254,6 +4257,11 @@ function obterItensMarcadosParaFaturar() {
 
     const itensMarcados = [];
 
+    // Soma real de baixas por ID desde o último checkpoint — usado para calcular SALDO corretamente.
+    // Garante que: (a) múltiplas baixas parciais são somadas, (b) itens sem nenhuma baixa
+    // (marcados p/ faturar pelo sync ou diretamente) usam QTD.ABERTA como quantidade a faturar.
+    const saldoEfetivoMap = _getSaldoEfetivoCache_();
+
     values.forEach((row, idx) => {
       const marcarFaturar = String(row[marcarCol] || '').trim().toUpperCase();
 
@@ -4262,11 +4270,11 @@ function obterItensMarcadosParaFaturar() {
         const item = _rowToItem_(row, displayRow, colMap, idx);
 
         if (item) {
-          // QTD. ORIGINAL já reflete o valor real do DB antes das baixas do ciclo
-          // (calculado em calcularQtdOriginal como QTD_ABERTA + baixas desde checkpoint).
-          const qtdOriginal = item['QTD. ORIGINAL'] || 0;
           const qtdAberta   = item['QTD. ABERTA']   || 0;
-          const saldo = qtdOriginal - qtdAberta;
+          // Soma de todas as baixas registradas desde o último checkpoint.
+          // Se não há baixas (ou nenhum ciclo iniciado), fatura a quantidade aberta integralmente.
+          const saldoBaixas = saldoEfetivoMap[item.uniqueId] || 0;
+          const saldo       = saldoBaixas > 0 ? saldoBaixas : qtdAberta;
 
           // Serializa o item para JSON (converte Date objects para strings)
           const itemSerializado = {
