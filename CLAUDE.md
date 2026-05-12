@@ -391,6 +391,24 @@ O **UUID (CODIGO_FIXO)** garante que o histórico de baixas seja preservado mesm
 Se LOTE DILLY tiver menos Lotes que itens Dilly, os últimos itens ficam sem CÓD. OS.  
 Verificar aba LOTE DILLY se itens Dilly aparecerem com CÓD. OS vazio.
 
+### 15.11 Dilly: IDs instáveis causam QTD reverter após baixa (CORRIGIDO)
+**Causa raiz:** O fingerprint padrão inclui o campo OS. Em DADOS_IMPORTADOS o OS é o valor
+original da fonte; em PEDIDOS o OS é o Lote (da aba LOTE DILLY). Os fingerprints nunca batem
+→ `sincronizarPedidosComFonte()` gerava um novo ID a cada sync para itens Dilly.
+
+**Efeito cascata:** IDs oscilanando entre sufixos `-1` e `-2`. O vínculo com `Baixas_Historico`
+dependia do mecanismo `idsAtualizados` (que atualiza IDs no histórico após cada sync). Em
+cenários com Lote instável (reordenação de DADOS_IMPORTADOS, mudança de QTD no LOTE DILLY key),
+a fingerprint mudava e o item "some" do PEDIDOS → novo item adicionado ao DB com QTD da fonte.
+
+**Correção (branch `claude/fix-invoice-zero-amount-8slzu`):** `pedidosDillyMap` — mapa
+secundário em `sincronizarPedidosComFonte()` com fingerprint **sem OS** (`Cliente|Pedido|Marfim|Tam|OC|Data`).
+Quando o match padrão falha para um item Dilly, tenta este mapa. O ID e UUID existentes são
+reutilizados → IDs estáveis → `idsBaixados.has(id)` sempre TRUE → QTD preservada.
+
+**Não modificar o fingerprint padrão** (`_criarImpressaoDigitalFromRow_`): afetaria matching
+em `sincronizarDados()`. A correção é localizada apenas em `sincronizarPedidosComFonte()`.
+
 ---
 
 ## 16. SEQUÊNCIA SEGURA PARA MUDANÇAS
