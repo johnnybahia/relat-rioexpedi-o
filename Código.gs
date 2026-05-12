@@ -4257,11 +4257,6 @@ function obterItensMarcadosParaFaturar() {
 
     const itensMarcados = [];
 
-    // Soma real de baixas por ID desde o último checkpoint — usado para calcular SALDO corretamente.
-    // Garante que: (a) múltiplas baixas parciais são somadas, (b) itens sem nenhuma baixa
-    // (marcados p/ faturar pelo sync ou diretamente) usam QTD.ABERTA como quantidade a faturar.
-    const saldoEfetivoMap = _getSaldoEfetivoCache_();
-
     values.forEach((row, idx) => {
       const marcarFaturar = String(row[marcarCol] || '').trim().toUpperCase();
 
@@ -4270,11 +4265,12 @@ function obterItensMarcadosParaFaturar() {
         const item = _rowToItem_(row, displayRow, colMap, idx);
 
         if (item) {
-          const qtdAberta   = item['QTD. ABERTA']   || 0;
-          // Soma de todas as baixas registradas desde o último checkpoint.
-          // Se não há baixas (ou nenhum ciclo iniciado), fatura a quantidade aberta integralmente.
-          const saldoBaixas = saldoEfetivoMap[item.uniqueId] || 0;
-          const saldo       = saldoBaixas > 0 ? saldoBaixas : qtdAberta;
+          const qtdAberta        = item['QTD. ABERTA']   || 0;
+          const qtdOriginal      = item['QTD. ORIGINAL'] || 0;
+          const saldoCalculado   = qtdOriginal - qtdAberta;
+          // Se o saldo calculado é 0 ou negativo (nenhuma baixa registrada ou fallback igualou
+          // qtdOriginal a qtdAberta), usa QTD.ABERTA diretamente para não zerar o relatório.
+          const saldo = saldoCalculado > 0 ? saldoCalculado : qtdAberta;
 
           // Serializa o item para JSON (converte Date objects para strings)
           const itemSerializado = {
