@@ -1393,6 +1393,31 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       Logger.log(`📋 PEDIDOS está vazio (primeira sincronização)`);
     }
 
+    // DILLY: mapa secundário de fingerprints SEM o campo OS para recuperar IDs existentes.
+    // Problema: para itens Dilly o OS é substituído pelo Lote (aba LOTE DILLY) em PEDIDOS,
+    // fazendo o fingerprint de PEDIDOS (com Lote) não bater com o de DADOS_IMPORTADOS (OS original).
+    // Solução: indexar por fingerprint sem OS permite reutilizar o mesmo ID/UUID a cada sync,
+    // tornando os IDs estáveis e preservando QTD.ABERTA após baixas no Relatorio_DB.
+    const pedidosDillyMap = new Map();
+    pedidosData.forEach(row => {
+      const _pdCliente_ = String(row[CLIENTE_COL] || '').trim();
+      if (!_pdCliente_.toUpperCase().includes('DILLY')) return;
+      const _pdId_ = String(row[ID_COL] || '').trim();
+      if (!_pdId_) return;
+      const _pdTam_    = String(row[TAM_COL]   || '').trim();
+      const _pdMarfim_ = _normalizarMarfimDilly_(String(row[MARFIM_COL] || '').trim(), _pdTam_, _pdCliente_);
+      const _pdFp_ = `${_pdCliente_}|${String(row[PEDIDO_COL] || '').trim()}|${_pdMarfim_}|${_pdTam_}|${String(row[OC_COL] || '').trim()}|${_normalizarData_(row[DTREC_COL])}`;
+      if (!pedidosDillyMap.has(_pdFp_)) pedidosDillyMap.set(_pdFp_, []);
+      pedidosDillyMap.get(_pdFp_).push({
+        id: _pdId_,
+        timestamp: row[TIMESTAMP_COL] || null,
+        row: row,
+        codigoFixo: String(row[PEDIDOS_CODIGO_FIXO_COL] || '').trim(),
+        usado: false
+      });
+    });
+    if (pedidosDillyMap.size > 0) Logger.log(`🔷 DILLY: ${pedidosDillyMap.size} fingerprint(s) sem OS indexadas de PEDIDOS`);
+
     // PASSO 3: Processar cada linha da fonte
     const novasPedidosData = [];
     let novosItens = 0;
@@ -1568,18 +1593,47 @@ function sincronizarPedidosComFonte(forcarExecucao) {
           }
         }
       } else {
-        // NÃO TEM MATCH em PEDIDOS - pode ser item novo ou PEDIDOS estava vazio
-        // Tenta recuperar ID do DB pela fingerprint antes de gerar novo.
-        // shift() consome o primeiro slot disponível — cada item idêntico pega seu próprio ID.
-        const _fpList2_ = dbFingerprintMap.get(impressao);
-        const idRecuperado = (_fpList2_ && _fpList2_.length > 0) ? _fpList2_.shift() : null;
-        if (idRecuperado) {
-          Logger.log(`   🔄 ID recuperado do DB (sem match em PEDIDOS): "${idRecuperado}"`);
-          idFinal = idRecuperado;
-          timestampFinal = new Date();
-          itensAtualizados++;
-        } else {
-          isNovo = true;
+        // NÃO TEM MATCH em PEDIDOS pelo fingerprint padrão (inclui OS).
+        // DILLY: tenta fingerprint sem OS — em PEDIDOS o OS foi substituído pelo Lote (≠ OS original).
+        const _fonteClienteStr_ = String(fonteRow[1] || '').trim();
+        let _dillyMatchResolvido_ = false;
+        if (_fonteClienteStr_.toUpperCase().includes('DILLY') && pedidosDillyMap.size > 0) {
+          const _dTam_    = String(fonteRow[7] || '').trim();
+          const _dMarfim_ = _normalizarMarfimDilly_(String(fonteRow[5] || '').trim(), _dTam_, _fonteClienteStr_);
+          const _dillyFpSemOS_ = `${_fonteClienteStr_}|${String(fonteRow[3] || '').trim()}|${_dMarfim_}|${_dTam_}|${String(fonteRow[8] || '').trim()}|${_normalizarData_(fonteRow[11])}`;
+          const _dillySlots_ = pedidosDillyMap.get(_dillyFpSemOS_);
+          if (_dillySlots_) {
+            const _dillySlot_ = _dillySlots_.find(m => !m.usado);
+            if (_dillySlot_) {
+              _dillySlot_.usado = true;
+              matchEscolhido = _dillySlot_;
+              codigoFixo = _dillySlot_.codigoFixo || '';
+              const _dillyIdExistente_ = String(_dillySlot_.id || '').trim();
+              if (_dillyIdExistente_) {
+                idFinal = _dillyIdExistente_;
+                timestampFinal = _dillySlot_.timestamp || new Date();
+                itensAtualizados++;
+                _dillyMatchResolvido_ = true;
+                Logger.log(`   🔷 DILLY: ID reutilizado via FP sem OS: "${idFinal}"`);
+              } else {
+                isNovo = true;
+              }
+            }
+          }
+        }
+        if (!_dillyMatchResolvido_) {
+          // Tenta recuperar ID do DB pela fingerprint antes de gerar novo.
+          // shift() consome o primeiro slot disponível — cada item idêntico pega seu próprio ID.
+          const _fpList2_ = dbFingerprintMap.get(impressao);
+          const idRecuperado = (_fpList2_ && _fpList2_.length > 0) ? _fpList2_.shift() : null;
+          if (idRecuperado) {
+            Logger.log(`   🔄 ID recuperado do DB (sem match em PEDIDOS): "${idRecuperado}"`);
+            idFinal = idRecuperado;
+            timestampFinal = new Date();
+            itensAtualizados++;
+          } else {
+            isNovo = true;
+          }
         }
       }
 
