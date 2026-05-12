@@ -767,11 +767,14 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa, usuarioHtml) {
     // Atualiza na planilha
     sheet.getRange(linhaNum, qtdCol + 1).setValue(novaQtd);
 
-    // Registra no histórico
+    // Registra no histórico — falha aqui deve reverter a operação inteira
     const resultHistorico = registrarBaixa(uniqueId, qtdBaixa, novaQtd, usuarioHtml);
-
-    // Baixa não altera status — Faturado é definido apenas pela sincronização
-    // quando o item desaparece do PEDIDOS/fonte (sincronizarDados).
+    if (!resultHistorico.success) {
+      // Reverte a atualização da planilha para manter consistência com o histórico
+      sheet.getRange(linhaNum, qtdCol + 1).setValue(qtdAtualNum);
+      SpreadsheetApp.flush();
+      throw new Error(`Falha ao registrar no histórico: ${resultHistorico.error || 'erro desconhecido'}`);
+    }
 
     SpreadsheetApp.flush();
     limparCache();
@@ -4262,11 +4265,12 @@ function obterItensMarcadosParaFaturar() {
         const item = _rowToItem_(row, displayRow, colMap, idx);
 
         if (item) {
-          // QTD. ORIGINAL já reflete o valor real do DB antes das baixas do ciclo
-          // (calculado em calcularQtdOriginal como QTD_ABERTA + baixas desde checkpoint).
-          const qtdOriginal = item['QTD. ORIGINAL'] || 0;
-          const qtdAberta   = item['QTD. ABERTA']   || 0;
-          const saldo = qtdOriginal - qtdAberta;
+          const qtdAberta        = item['QTD. ABERTA']   || 0;
+          const qtdOriginal      = item['QTD. ORIGINAL'] || 0;
+          const saldoCalculado   = qtdOriginal - qtdAberta;
+          // Se o saldo calculado é 0 ou negativo (nenhuma baixa registrada ou fallback igualou
+          // qtdOriginal a qtdAberta), usa QTD.ABERTA diretamente para não zerar o relatório.
+          const saldo = saldoCalculado > 0 ? saldoCalculado : qtdAberta;
 
           // Serializa o item para JSON (converte Date objects para strings)
           const itemSerializado = {
