@@ -315,6 +315,13 @@
     .login-nivel-badge { display: inline-block; margin-top: 0.9rem; font-size: 0.78rem; font-weight: 600; padding: 0.25rem 0.75rem; border-radius: 9999px; }
     .login-nivel-badge.total { background: #dcfce7; color: #166534; }
     .login-nivel-badge.parcial { background: #fef3c7; color: #92400e; }
+    .login-field select { width: 100%; box-sizing: border-box; padding: 0.6rem 0.75rem; border: 1.5px solid #d1d5db; border-radius: 0.5rem; font-size: 0.95rem; outline: none; background: white; transition: border-color 0.2s; }
+    .login-field select:focus { border-color: #3b82f6; }
+    /* Banner de perfil ativo (BAIXA 2–5) */
+    #perfil-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 9000; display: none; background: #f59e0b; color: #1c1917; text-align: center; font-weight: 700; font-size: 0.9rem; padding: 0.45rem 1rem; letter-spacing: 0.02em; box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
+    body.tem-perfil-banner { padding-top: 2.2rem; }
+    /* Badge de perfil em itens marcados com outro perfil */
+    .badge-outro-perfil { display: inline-block; font-size: 0.6rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; background: #f59e0b; color: #1c1917; letter-spacing: 0.03em; }
     .login-timer { position: fixed; bottom: 1rem; left: 1rem; background: #1f2937; color: #9ca3af; font-size: 0.72rem; padding: 0.35rem 0.75rem; border-radius: 9999px; z-index: 5000; pointer-events: none; }
     /* Barra de usuário no header */
     .user-info { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
@@ -1080,6 +1087,9 @@
   </div>
 
   <!-- ===== MODAL DE LOGIN ===== -->
+  <!-- Banner de perfil ativo (BAIXA 2–5) -->
+  <div id="perfil-banner"></div>
+
   <div id="loginModal">
     <div class="login-box">
       <div class="login-logo">
@@ -1097,6 +1107,16 @@
         <input type="password" id="loginSenha" placeholder="Digite sua senha" autocomplete="off"
           onkeydown="if(event.key==='Enter') _submitLogin()">
       </div>
+      <div class="login-field">
+        <label for="login-perfil">Perfil de Baixa</label>
+        <select id="login-perfil">
+          <option value="BAIXA1">BAIXA 1 (Padrão)</option>
+          <option value="BAIXA2">BAIXA 2</option>
+          <option value="BAIXA3">BAIXA 3</option>
+          <option value="BAIXA4">BAIXA 4</option>
+          <option value="BAIXA5">BAIXA 5</option>
+        </select>
+      </div>
       <div id="loginErro"></div>
       <button id="loginBtn" onclick="_submitLogin()">Entrar</button>
       <div id="loginExpirouMsg">⏱ Sessão expirada. Por favor, faça login novamente.</div>
@@ -1109,6 +1129,7 @@
   <script>
     // ===== SISTEMA DE LOGIN =====
     window.ACCESS_NIVEL = null; // 'TOTAL' | 'PARCIAL' | null (não autenticado)
+    let perfilBaixaAtivo = 'BAIXA1'; // perfil de baixa ativo na sessão
     let _loginCheckTimer = null;
     let _loginTimerInterval = null;
     let _appStarted = false; // garante que carregarListaOcs/initAutoRefresh rodam uma só vez
@@ -1120,9 +1141,10 @@
       } catch(e) { return null; }
     }
 
-    function _salvarSessaoLocal(nivel, tempoSessao, usuario) {
+    function _salvarSessaoLocal(nivel, tempoSessao, usuario, perfilBaixa) {
       localStorage.setItem('_relat_sessao_v1', JSON.stringify({
-        nivel: nivel, tempoSessao: tempoSessao, loginTime: Date.now(), usuario: usuario || ''
+        nivel: nivel, tempoSessao: tempoSessao, loginTime: Date.now(), usuario: usuario || '',
+        perfilBaixa: perfilBaixa || 'BAIXA1'
       }));
     }
 
@@ -1135,8 +1157,24 @@
       const d = _getSessaoLocal();
       if (!d) return; // sessão já foi limpa (logout), não atualiza
       localStorage.setItem('_relat_sessao_v1', JSON.stringify({
-        nivel: nivel, tempoSessao: tempoSessao, loginTime: d.loginTime, usuario: d.usuario
+        nivel: nivel, tempoSessao: tempoSessao, loginTime: d.loginTime, usuario: d.usuario,
+        perfilBaixa: d.perfilBaixa || 'BAIXA1'
       }));
+    }
+
+    function _aplicarPerfilBaixa(perfil) {
+      perfilBaixaAtivo = perfil || 'BAIXA1';
+      const banner = document.getElementById('perfil-banner');
+      if (!banner) return;
+      if (perfilBaixaAtivo !== 'BAIXA1') {
+        const num = perfilBaixaAtivo.replace('BAIXA', '');
+        banner.textContent = `⚠️ Perfil ${perfilBaixaAtivo} ativo — itens marcados aqui saem apenas no relatório BAIXA ${num}`;
+        banner.style.display = 'block';
+        document.body.classList.add('tem-perfil-banner');
+      } else {
+        banner.style.display = 'none';
+        document.body.classList.remove('tem-perfil-banner');
+      }
     }
 
     function _sessaoValida() {
@@ -1176,6 +1214,7 @@
       if (_loginTimerInterval) { clearInterval(_loginTimerInterval); _loginTimerInterval = null; }
       window.ACCESS_NIVEL = null;
       document.body.classList.remove('acesso-parcial');
+      _aplicarPerfilBaixa('BAIXA1');
       _ocultarUserInfo();
       _mostrarLoginModal(false);
     }
@@ -1190,6 +1229,8 @@
       document.getElementById('loginErro').style.display = 'none';
       document.getElementById('loginUsuario').value = '';
       document.getElementById('loginSenha').value = '';
+      const $perfilSel = document.getElementById('login-perfil');
+      if ($perfilSel) $perfilSel.value = 'BAIXA1';
       document.getElementById('loginTimer').style.display = 'none';
       setTimeout(() => document.getElementById('loginUsuario').focus(), 120);
     }
@@ -1273,8 +1314,10 @@
           $btn.textContent = 'Entrar';
           $btn.disabled = false;
           if (result && result.success) {
-            _salvarSessaoLocal(result.nivel, result.tempoSessao, usuario);
+            const perfilSelecionado = (document.getElementById('login-perfil')?.value || 'BAIXA1');
+            _salvarSessaoLocal(result.nivel, result.tempoSessao, usuario, perfilSelecionado);
             _aplicarNivel(result.nivel);
+            _aplicarPerfilBaixa(perfilSelecionado);
             _mostrarUserInfo(usuario);
             _fecharLoginModal();
             _iniciarTimerSessao();
@@ -1312,6 +1355,7 @@
       if (_sessaoValida()) {
         const d = _getSessaoLocal();
         _aplicarNivel(d.nivel);
+        _aplicarPerfilBaixa(d.perfilBaixa || 'BAIXA1');
         _mostrarUserInfo(d.usuario || '');
         _fecharLoginModal();
         _iniciarTimerSessao();
@@ -2209,6 +2253,7 @@ ALL_OCS_ITEMS = itemsObj;
 
             const _sessaoAtual = _getSessaoLocal();
             const _usuarioAtual = (_sessaoAtual && _sessaoAtual.usuario) ? _sessaoAtual.usuario.trim() : '';
+            const _perfilAtual = perfilBaixaAtivo || 'BAIXA1';
             const _osColors = _buildOsColorMap(items, ocInfo.cliente);
 
             items.forEach(item => {
@@ -2218,7 +2263,10 @@ ALL_OCS_ITEMS = itemsObj;
                 const isFaturado = item.Status?.toLowerCase() === 'faturado';
                 const isMarcadoFaturar = item.MARCAR_FATURAR && String(item.MARCAR_FATURAR).toUpperCase() === 'SIM';
                 const usuarioQueMarkou = isMarcadoFaturar ? String(item.MARCAR_FATURAR_USUARIO || '').trim() : '';
-                const corUsuario = (isMarcadoFaturar && usuarioQueMarkou) ? _getUsuarioColor(usuarioQueMarkou) : null;
+                const itemPerfil = isMarcadoFaturar ? String(item.PERFIL_EMISSAO || '').trim() : '';
+                // Item marcado em outro perfil: bloqueia interações
+                const outroPerfil = isMarcadoFaturar && itemPerfil && itemPerfil !== _perfilAtual;
+                const corUsuario = (isMarcadoFaturar && usuarioQueMarkou && !outroPerfil) ? _getUsuarioColor(usuarioQueMarkou) : null;
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
@@ -2258,19 +2306,23 @@ ALL_OCS_ITEMS = itemsObj;
                     if (!isFaturado) {
                         bodyHtml += ` <button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
                         const checkedAttr = isMarcadoFaturar ? 'checked' : '';
-                        const outrousuario = isMarcadoFaturar && usuarioQueMarkou && _usuarioAtual && usuarioQueMarkou.toLowerCase() !== _usuarioAtual.toLowerCase();
-                        const cbDisabled = outrousuario ? 'disabled' : '';
+                        const outrousuario = !outroPerfil && isMarcadoFaturar && usuarioQueMarkou && _usuarioAtual && usuarioQueMarkou.toLowerCase() !== _usuarioAtual.toLowerCase();
+                        const cbDisabled = (outrousuario || outroPerfil) ? 'disabled' : '';
                         const _uEsc = _escapeHtml(usuarioQueMarkou);
                         const _uAtualEsc = _escapeHtml(_usuarioAtual);
-                        const cbTitle = isMarcadoFaturar
-                            ? (outrousuario
-                                ? `Marcado por: ${_uEsc} — apenas ${_uEsc} pode desmarcar`
-                                : `Marcado por: ${_uEsc || _uAtualEsc} — clique para desmarcar`)
-                            : 'Marcar para faturamento';
-                        const cbStyle = outrousuario ? 'opacity:0.5; cursor:not-allowed;' : '';
-                        const badgeHtml = (isMarcadoFaturar && usuarioQueMarkou)
-                            ? (() => { const c = _getUsuarioColor(usuarioQueMarkou); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${_uEsc}</span>` : ''; })()
-                            : '';
+                        const cbTitle = outroPerfil
+                            ? `Marcado no perfil ${itemPerfil} — selecione ${itemPerfil} para alterar`
+                            : (isMarcadoFaturar
+                                ? (outrousuario
+                                    ? `Marcado por: ${_uEsc} — apenas ${_uEsc} pode desmarcar`
+                                    : `Marcado por: ${_uEsc || _uAtualEsc} — clique para desmarcar`)
+                                : 'Marcar para faturamento');
+                        const cbStyle = (outrousuario || outroPerfil) ? 'opacity:0.5; cursor:not-allowed;' : '';
+                        const badgeHtml = outroPerfil
+                            ? `<span class="badge-outro-perfil">${itemPerfil}</span>`
+                            : ((isMarcadoFaturar && usuarioQueMarkou)
+                                ? (() => { const c = _getUsuarioColor(usuarioQueMarkou); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${_uEsc}</span>` : ''; })()
+                                : '');
                         bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} ${cbDisabled} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="${cbTitle}" style="${cbStyle}" data-marcado-por="${_uEsc}">${badgeHtml}`;
                     } else {
                         bodyHtml += ` <span class="badge-faturado">FATURADO</span>`;
@@ -2635,11 +2687,12 @@ ALL_OCS_ITEMS = itemsObj;
     function handleMarcarFaturar(uniqueId, linha, marcar) {
         const sessao = _getSessaoLocal();
         const usuarioAtual = (sessao && sessao.usuario) ? sessao.usuario.trim() : '';
+        const perfilAtual = perfilBaixaAtivo || 'BAIXA1';
 
-        console.log(`${marcar ? '✓' : '✗'} Marcando item para faturar: ${uniqueId} (linha ${linha}) por "${usuarioAtual}"`);
+        console.log(`${marcar ? '✓' : '✗'} Marcando item para faturar: ${uniqueId} (linha ${linha}) por "${usuarioAtual}" perfil ${perfilAtual}`);
 
         if (!marcar) {
-            _executarMarcarFaturar(uniqueId, linha, false, usuarioAtual);
+            _executarMarcarFaturar(uniqueId, linha, false, usuarioAtual, perfilAtual);
             return;
         }
 
@@ -2649,7 +2702,7 @@ ALL_OCS_ITEMS = itemsObj;
 
         // Sem quantidade aberta — marca direto, nada a baixar
         if (qtdAberta <= 0) {
-            _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual);
+            _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual);
             return;
         }
 
@@ -2659,9 +2712,9 @@ ALL_OCS_ITEMS = itemsObj;
                 `Baixa parcial registrada — saldo atual: ${fmtInt(qtdAberta)} unidades.\n\nOK → Faturar completo (zera saldo)\nCancelar → Manter saldo parcial`
             );
             if (faturarCompleto) {
-                _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual);
+                _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual);
             } else {
-                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual);
+                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual);
             }
             return;
         }
@@ -2673,10 +2726,10 @@ ALL_OCS_ITEMS = itemsObj;
             return;
         }
 
-        _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual);
+        _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual);
     }
 
-    function _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual) {
+    function _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfil) {
         const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
         if (checkbox) checkbox.disabled = true;
 
@@ -2693,7 +2746,7 @@ ALL_OCS_ITEMS = itemsObj;
                     if (qtdAbertaCell) qtdAbertaCell.textContent = fmtInt(0);
                 }
                 if (checkbox) checkbox.disabled = false;
-                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual);
+                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfil);
             })
             .withFailureHandler(error => {
                 showError('Falha ao aplicar baixa: ' + error.message);
@@ -2702,7 +2755,7 @@ ALL_OCS_ITEMS = itemsObj;
             .aplicarBaixa(uniqueId, linha, qtdAberta, usuarioAtual);
     }
 
-    function _executarMarcarFaturar(uniqueId, linha, marcar, usuarioAtual) {
+    function _executarMarcarFaturar(uniqueId, linha, marcar, usuarioAtual, perfil) {
         google.script.run
             .withSuccessHandler(result => {
                 console.log('✓ Resultado da marcação:', result);
@@ -2757,7 +2810,7 @@ ALL_OCS_ITEMS = itemsObj;
                 const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
                 if (checkbox) checkbox.checked = !marcar;
             })
-            .marcarParaFaturar(uniqueId, linha, marcar, usuarioAtual);
+            .marcarParaFaturar(uniqueId, linha, marcar, usuarioAtual, perfil || 'BAIXA1');
     }
 
     // ==== MODAL DE BAIXA PARCIAL ====
@@ -4778,7 +4831,7 @@ ALL_OCS_ITEMS = itemsObj;
                 console.error('❌ Erro ao gerar relatório:', error);
                 showError('Falha ao gerar relatório: ' + error.message);
             })
-            .obterItensMarcadosParaFaturar();
+            .obterItensMarcadosParaFaturar(perfilBaixaAtivo || 'BAIXA1');
     }
 
     function _mostrarFiltroFatur(itensMarcados, todosUsuarios) {
@@ -5086,7 +5139,9 @@ ALL_OCS_ITEMS = itemsObj;
         const filtroTextoEsc   = _escapeHtml(
             usuariosFiltro && usuariosFiltro.length > 0 ? usuariosFiltro.join(', ') : 'Todos'
         );
-        const loteIdEsc = _escapeHtml(loteId || '');
+        const loteIdEsc  = _escapeHtml(loteId || '');
+        const perfilAtivo = perfilBaixaAtivo || 'BAIXA1';
+        const perfilEsc  = _escapeHtml(perfilAtivo);
 
         // Agrupar por marca/cliente → dentro de cada grupo, por OC
         // Clientes Dakota: agrupados pelo nome do cliente (cada filial = grupo separado)
@@ -5153,6 +5208,7 @@ ALL_OCS_ITEMS = itemsObj;
             <h1>💰 RELATÓRIO PARA FATURAMENTO</h1>
             <div class="info">
                 ${loteIdEsc ? `<span class="info-lote">📋 ${loteIdEsc}</span><br>` : ''}
+                ${perfilEsc !== 'BAIXA1' ? `<span style="display:inline-block;margin-bottom:4px;font-size:12px;font-weight:800;background:#fef3c7;border:2px solid #f59e0b;border-radius:6px;padding:2px 12px;color:#92400e;">Perfil: ${perfilEsc}</span><br>` : ''}
                 Gerado em: ${dataHoje} às ${horaAgora}
                 ${usuarioLogadoEsc ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogadoEsc}</span>` : ''}
                 <br><span class="info-filtro">Usuários: ${filtroTextoEsc}</span>
