@@ -56,6 +56,7 @@ const MARCAR_FATURAR_COL = 15; // P (coluna 16 ao contar a partir de 1) - Nova c
 const DATA_STATUS_COL = 16;    // Q (coluna 17) - Data em que o status foi alterado para Faturado/Finalizado/Excluido
 const MARCAR_FATURAR_USUARIO_COL = 21; // V (coluna 22) - Usuário que marcou o item para faturamento
 const LOTE_EMISSAO_COL           = 22; // W (coluna 23) - Lote de emissão do relatório de faturamento (FAT-001…)
+const PERFIL_EMISSAO_COL         = 23; // X (coluna 24) - Perfil de baixa (BAIXA1…BAIXA5)
 const PEDIDOS_CODIGO_FIXO_COL = 18; // S (coluna 19) — UUID fixo por item, gerado uma vez e preservado para sempre
 const DB_CODIGO_FIXO_COL      = 18; // S (coluna 19) — mesmo UUID propagado do PEDIDOS para o Relatorio_DB
 const PEDIDOS_POSICAO_FONTE_COL = 16; // Q (coluna 17) — índice do item em DADOS_IMPORTADOS (para manter ordem original)
@@ -3595,7 +3596,8 @@ const RELATORIO_DB_HEADERS = [
   'INFO_X',                 // T - campo da coluna X da fonte (informação adicional da OC)
   'LOTE',                   // U - número de lote da coluna Y da fonte
   'MARCAR_FATURAR_USUARIO', // V - usuário que marcou o item para faturamento
-  'LOTE_EMISSAO'            // W - lote de emissão do relatório de faturamento (FAT-001, FAT-002…)
+  'LOTE_EMISSAO',           // W - lote de emissão do relatório de faturamento (FAT-001, FAT-002…)
+  'PERFIL_EMISSAO'          // X - perfil de baixa (BAIXA1…BAIXA5)
 ];
 
 /**
@@ -3733,7 +3735,8 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     MARCAR_FATURAR_USUARIO: getDisp('MARCAR_FATURAR_USUARIO', ''),
     INFO_X: getDisp('INFO_X', ''),
     LOTE:         getDisp('LOTE',         ''),
-    LOTE_EMISSAO: getDisp('LOTE_EMISSAO', ''),
+    LOTE_EMISSAO:    getDisp('LOTE_EMISSAO',    ''),
+    PERFIL_EMISSAO:  getDisp('PERFIL_EMISSAO',  ''),
     // Posição original em DADOS_IMPORTADOS — lida por índice fixo (col R = índice 17 no DB)
     posicaoFonte: (typeof row[DB_POSICAO_FONTE_COL] === 'number' && !isNaN(row[DB_POSICAO_FONTE_COL]))
       ? row[DB_POSICAO_FONTE_COL]
@@ -4047,22 +4050,24 @@ function finalizarMultiplosItens(items) {
 
 // ====== FUNÇÕES PARA MARCAR ITENS PARA FATURAMENTO ======
 
-function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario) {
+function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil) {
   try {
     const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const linhaNum = Number(planilhaLinha);
+    const perfilNorm = String(perfil || 'BAIXA1').trim() || 'BAIXA1';
 
     if (!sheet) throw new Error("Aba DB não encontrada");
     if (!isFinite(linhaNum) || linhaNum < 2 || linhaNum > sheet.getLastRow()) {
       throw new Error(`Linha inválida: ${planilhaLinha}`);
     }
 
-    // Lê cabeçalhos - força leitura de pelo menos 22 colunas (A-V)
-    const numCols = Math.max(sheet.getLastColumn(), 22);
+    // Lê cabeçalhos - força leitura de pelo menos 24 colunas (A-X)
+    const numCols = Math.max(sheet.getLastColumn(), 24);
     const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
     const colMap = _getColumnIndexes_(headers);
     let marcarCol = colMap['MARCAR_FATURAR'];
     let usuarioCol = colMap['MARCAR_FATURAR_USUARIO'];
+    let perfilCol  = colMap['PERFIL_EMISSAO'];
 
     Logger.log(`📋 DEBUG marcarParaFaturar - Colunas lidas: ${numCols}, Headers: ${headers.length}`);
     Logger.log(`📋 DEBUG - MARCAR_FATURAR encontrada no índice: ${marcarCol}`);
@@ -4082,9 +4087,26 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario) {
       Logger.log("✅ Coluna 'MARCAR_FATURAR_USUARIO' criada na coluna V");
     }
 
+    // Lê linha atual uma vez (evita múltiplas chamadas de getRange)
+    const rowData = sheet.getRange(linhaNum, 1, 1, numCols).getValues()[0];
+    const marcarFaturarAtual = String(rowData[marcarCol] || '').trim().toUpperCase();
+    const perfilAtualNoDb    = perfilCol !== undefined ? String(rowData[perfilCol] || '').trim() : '';
+
+    // Proteção de perfil cruzado: bloqueia operação se item pertence a perfil diferente
+    if (marcarFaturarAtual === 'SIM' && perfilAtualNoDb && perfilAtualNoDb !== perfilNorm) {
+      Logger.log(`🚫 Perfil cruzado: item marcado no ${perfilAtualNoDb}, tentativa de "${perfilNorm}"`);
+      return {
+        success: false,
+        bloqueado: true,
+        error: `Este item está marcado no perfil ${perfilAtualNoDb}. Selecione o perfil ${perfilAtualNoDb} para alterar.`,
+        id: uniqueId,
+        linha: linhaNum
+      };
+    }
+
     // Ao desmarcar: valida que é o mesmo usuário que marcou
     if (!marcar) {
-      const usuarioQueMarkou = String(sheet.getRange(linhaNum, usuarioCol + 1).getValue() || '').trim();
+      const usuarioQueMarkou = String(rowData[usuarioCol] || '').trim();
       const usuarioAtual = String(usuario || '').trim();
       if (usuarioQueMarkou && usuarioAtual && usuarioQueMarkou.toLowerCase() !== usuarioAtual.toLowerCase()) {
         Logger.log(`🚫 Desmarcação bloqueada: item marcado por "${usuarioQueMarkou}", tentativa de "${usuarioAtual}"`);
@@ -4103,6 +4125,12 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario) {
     const usuarioValor = marcar ? String(usuario || '').trim() : "";
     sheet.getRange(linhaNum, marcarCol + 1).setValue(valor);
     sheet.getRange(linhaNum, usuarioCol + 1).setValue(usuarioValor);
+
+    // Grava ou limpa o perfil de emissão
+    if (perfilCol !== undefined) {
+      sheet.getRange(linhaNum, perfilCol + 1).setValue(marcar ? perfilNorm : '');
+    }
+
     // Ao desmarcar, limpa o lote de emissão para que o item apareça como "novo" em futuras emissões
     if (!marcar) {
       const loteEmCol = colMap['LOTE_EMISSAO'];
@@ -4137,13 +4165,14 @@ function limparMarcacoesSemUsuario() {
   }
 
   const lastRow  = sheet.getLastRow();
-  const lastCol  = Math.max(sheet.getLastColumn(), LOTE_EMISSAO_COL + 1);
+  const lastCol  = Math.max(sheet.getLastColumn(), PERFIL_EMISSAO_COL + 1);
   const headers  = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   const colMap   = _getColumnIndexes_(headers);
 
   const marcarCol  = colMap['MARCAR_FATURAR'];
   const usuarioCol = colMap['MARCAR_FATURAR_USUARIO'];
   const loteEmCol  = colMap['LOTE_EMISSAO'];
+  const perfilCol  = colMap['PERFIL_EMISSAO'];
 
   if (marcarCol === undefined || usuarioCol === undefined) {
     Logger.log('❌ limparMarcacoesSemUsuario: colunas necessárias não encontradas.');
@@ -4163,6 +4192,9 @@ function limparMarcacoesSemUsuario() {
     sheet.getRange(linhaSheet, usuarioCol + 1).setValue('');
     if (loteEmCol !== undefined) {
       sheet.getRange(linhaSheet, loteEmCol + 1).setValue('');
+    }
+    if (perfilCol !== undefined) {
+      sheet.getRange(linhaSheet, perfilCol + 1).setValue('');
     }
     limpos++;
     Logger.log(`🧹 Linha ${linhaSheet}: marcação sem usuário removida (ID="${row[0]}")`);
@@ -4260,8 +4292,9 @@ function obterQtdPedidos() {
   }
 }
 
-function obterItensMarcadosParaFaturar() {
-  Logger.log("🔍 INÍCIO obterItensMarcadosParaFaturar");
+function obterItensMarcadosParaFaturar(perfil) {
+  const perfilNorm = String(perfil || 'BAIXA1').trim() || 'BAIXA1';
+  Logger.log(`🔍 INÍCIO obterItensMarcadosParaFaturar — perfil: ${perfilNorm}`);
 
   try {
     const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
@@ -4278,9 +4311,9 @@ function obterItensMarcadosParaFaturar() {
       return { success: true, items: [] };
     }
 
-    // Força leitura de pelo menos 23 colunas (A-W) para incluir LOTE_EMISSAO
-    const lastCol = Math.max(sheet.getLastColumn(), 23);
-    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 23)`);
+    // Força leitura de pelo menos 24 colunas (A-X) para incluir PERFIL_EMISSAO
+    const lastCol = Math.max(sheet.getLastColumn(), 24);
+    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 24)`);
 
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     Logger.log(`📋 Headers lidos: ${headers.length} colunas`);
@@ -4311,10 +4344,19 @@ function obterItensMarcadosParaFaturar() {
 
     const itensMarcados = [];
 
+    const perfilCol = colMap['PERFIL_EMISSAO'];
+
     values.forEach((row, idx) => {
       const marcarFaturar = String(row[marcarCol] || '').trim().toUpperCase();
 
       if (marcarFaturar === 'SIM') {
+        // Filtro de perfil: BAIXA1 inclui itens sem perfil (retrocompatibilidade); demais perfis: exato
+        const itemPerfil = perfilCol !== undefined ? String(row[perfilCol] || '').trim() : '';
+        const pertenceAoPerfil = perfilNorm === 'BAIXA1'
+          ? (itemPerfil === '' || itemPerfil === 'BAIXA1')
+          : (itemPerfil === perfilNorm);
+        if (!pertenceAoPerfil) return;
+
         const displayRow = displayValues[idx];
         const item = _rowToItem_(row, displayRow, colMap, idx);
 
@@ -4347,8 +4389,9 @@ function obterItensMarcadosParaFaturar() {
             Status: item.Status,
             MARCAR_FATURAR: item.MARCAR_FATURAR,
             MARCAR_FATURAR_USUARIO: item.MARCAR_FATURAR_USUARIO || '',
-            INFO_X: item.INFO_X || '',
-            LOTE:   item.LOTE   || '',
+            INFO_X:          item.INFO_X          || '',
+            LOTE:            item.LOTE            || '',
+            PERFIL_EMISSAO:  item.PERFIL_EMISSAO  || '',
             SALDO: saldo
           };
 
