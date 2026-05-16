@@ -4271,7 +4271,13 @@ ALL_OCS_ITEMS = itemsObj;
 
         let html = '';
 
-        [...FILTERED_OCS_INFO].sort((a, b) => (a.posicaoMin ?? 999999) - (b.posicaoMin ?? 999999)).forEach(oc => {
+        [...FILTERED_OCS_INFO].sort((a, b) => {
+            const iA = ALL_OCS_ITEMS[a.ordCompra];
+            const iB = ALL_OCS_ITEMS[b.ordCompra];
+            const minA = (iA && iA.items && iA.items.length) ? Math.min.apply(null, iA.items.map(function(i) { return i.planilhaLinha || 999999; })) : 999999;
+            const minB = (iB && iB.items && iB.items.length) ? Math.min.apply(null, iB.items.map(function(i) { return i.planilhaLinha || 999999; })) : 999999;
+            return minA - minB;
+        }).forEach(oc => {
             const ocData = ALL_OCS_ITEMS[oc.ordCompra];
             if (!ocData || !ocData.items) return;
 
@@ -4396,7 +4402,13 @@ ALL_OCS_ITEMS = itemsObj;
             });
         });
 
-        ocsParaPonteiras.sort((a, b) => (a.ocInfo?.posicaoMin ?? 999999) - (b.ocInfo?.posicaoMin ?? 999999));
+        ocsParaPonteiras.sort((a, b) => {
+            const iA = ALL_OCS_ITEMS[a.ocNum];
+            const iB = ALL_OCS_ITEMS[b.ocNum];
+            const minA = (iA && iA.items && iA.items.length) ? Math.min.apply(null, iA.items.map(function(i) { return i.planilhaLinha || 999999; })) : 999999;
+            const minB = (iB && iB.items && iB.items.length) ? Math.min.apply(null, iB.items.map(function(i) { return i.planilhaLinha || 999999; })) : 999999;
+            return minA - minB;
+        });
 
         // Numeração sequencial por grupo de cliente (cada cliente começa do 1)
         const _contadorCliente = new Map();
