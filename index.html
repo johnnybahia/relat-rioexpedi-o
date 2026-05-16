@@ -4217,9 +4217,13 @@ ALL_OCS_ITEMS = itemsObj;
     });
 
     $ponteirasSelecionarTodas.addEventListener('click', function() {
-        $listaOcsPonteiras.querySelectorAll('input[type="checkbox"]:not(:disabled)').forEach(cb => {
-            cb.checked = true;
-            ocsSelecionadasPonteiras.add(cb.value);
+        $listaOcsPonteiras.querySelectorAll('.oc-item-ponteiras').forEach(item => {
+            if (item.style.display === 'none') return;
+            const cb = item.querySelector('input[type="checkbox"]:not(:disabled)');
+            if (cb) {
+                cb.checked = true;
+                ocsSelecionadasPonteiras.add(cb.value);
+            }
         });
         _atualizarContadorPonteiras();
     });
@@ -4267,7 +4271,7 @@ ALL_OCS_ITEMS = itemsObj;
 
         let html = '';
 
-        FILTERED_OCS_INFO.forEach(oc => {
+        [...FILTERED_OCS_INFO].sort((a, b) => (a.posicaoMin ?? 999999) - (b.posicaoMin ?? 999999)).forEach(oc => {
             const ocData = ALL_OCS_ITEMS[oc.ordCompra];
             if (!ocData || !ocData.items) return;
 
@@ -4392,10 +4396,7 @@ ALL_OCS_ITEMS = itemsObj;
             });
         });
 
-        ocsParaPonteiras.sort((a, b) => {
-            if (a.prazoKey !== b.prazoKey) return a.prazoKey - b.prazoKey;
-            return a.ocKey.localeCompare(b.ocKey, 'pt-BR', { numeric: true, sensitivity: 'base' });
-        });
+        ocsParaPonteiras.sort((a, b) => (a.ocInfo?.posicaoMin ?? 999999) - (b.ocInfo?.posicaoMin ?? 999999));
 
         // Numeração sequencial por grupo de cliente (cada cliente começa do 1)
         const _contadorCliente = new Map();
@@ -4417,10 +4418,10 @@ ALL_OCS_ITEMS = itemsObj;
         }
         function _sortItensPonteiras(itens) {
             return [...itens].sort((a, b) => {
-                const dA = _parseDateMs(a['DT. ENTREGA']);
-                const dB = _parseDateMs(b['DT. ENTREGA']);
-                if (dA !== dB) return dA - dB;
-                return _parseTamanhoNum(a.TAMANHO) - _parseTamanhoNum(b.TAMANHO);
+                const tA = _parseTamanhoNum(a.TAMANHO);
+                const tB = _parseTamanhoNum(b.TAMANHO);
+                if (tA !== tB) return tA - tB;
+                return _parseDateMs(a['DT. ENTREGA']) - _parseDateMs(b['DT. ENTREGA']);
             });
         }
 
