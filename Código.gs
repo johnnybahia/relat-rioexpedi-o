@@ -4089,27 +4089,30 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil) {
 
     // Lê linha atual uma vez (evita múltiplas chamadas de getRange)
     const rowData = sheet.getRange(linhaNum, 1, 1, numCols).getValues()[0];
-    const marcarFaturarAtual = String(rowData[marcarCol] || '').trim().toUpperCase();
-    const perfilAtualNoDb    = perfilCol !== undefined ? String(rowData[perfilCol] || '').trim() : '';
+    const perfilAtualNoDb = perfilCol !== undefined ? String(rowData[perfilCol] || '').trim() : '';
 
-    // Proteção de perfil cruzado: bloqueia operação se item pertence a perfil diferente
-    if (marcarFaturarAtual === 'SIM' && perfilAtualNoDb && perfilAtualNoDb !== perfilNorm) {
-      Logger.log(`🚫 Perfil cruzado: item marcado no ${perfilAtualNoDb}, tentativa de "${perfilNorm}"`);
-      return {
-        success: false,
-        bloqueado: true,
-        error: `Este item está marcado no perfil ${perfilAtualNoDb}. Selecione o perfil ${perfilAtualNoDb} para alterar.`,
-        id: uniqueId,
-        linha: linhaNum
-      };
+    // Parse PERFIL_EMISSAO como lista (suporta múltiplos perfis separados por vírgula)
+    const perfisList = perfilAtualNoDb
+      ? perfilAtualNoDb.split(',').map(function(s) { return s.trim(); }).filter(Boolean)
+      : [];
+
+    // Parse MARCAR_FATURAR_USUARIO como JSON; fallback para dado legado (plain string)
+    let usuarioJson = {};
+    const rawUsuario = String(rowData[usuarioCol] || '').trim();
+    try {
+      usuarioJson = rawUsuario ? JSON.parse(rawUsuario) : {};
+      if (typeof usuarioJson !== 'object' || Array.isArray(usuarioJson)) usuarioJson = {};
+    } catch(e) {
+      // dado legado: string simples — associa ao único perfil registrado
+      if (rawUsuario && perfisList.length === 1) usuarioJson[perfisList[0]] = rawUsuario;
     }
 
-    // Ao desmarcar: valida que é o mesmo usuário que marcou
+    // Ao desmarcar: valida que é o mesmo usuário que marcou NESTE perfil
     if (!marcar) {
-      const usuarioQueMarkou = String(rowData[usuarioCol] || '').trim();
+      const usuarioQueMarkou = String(usuarioJson[perfilNorm] || '').trim();
       const usuarioAtual = String(usuario || '').trim();
       if (usuarioQueMarkou && usuarioAtual && usuarioQueMarkou.toLowerCase() !== usuarioAtual.toLowerCase()) {
-        Logger.log(`🚫 Desmarcação bloqueada: item marcado por "${usuarioQueMarkou}", tentativa de "${usuarioAtual}"`);
+        Logger.log(`🚫 Desmarcação bloqueada: item marcado por "${usuarioQueMarkou}" no perfil ${perfilNorm}, tentativa de "${usuarioAtual}"`);
         return {
           success: false,
           bloqueado: true,
@@ -4120,19 +4123,28 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil) {
       }
     }
 
-    // Marca ou desmarca
-    const valor = marcar ? "SIM" : "";
-    const usuarioValor = marcar ? String(usuario || '').trim() : "";
-    sheet.getRange(linhaNum, marcarCol + 1).setValue(valor);
-    sheet.getRange(linhaNum, usuarioCol + 1).setValue(usuarioValor);
-
-    // Grava ou limpa o perfil de emissão
-    if (perfilCol !== undefined) {
-      sheet.getRange(linhaNum, perfilCol + 1).setValue(marcar ? perfilNorm : '');
+    // Atualiza lista de perfis e mapa de usuários
+    if (marcar) {
+      if (perfisList.indexOf(perfilNorm) === -1) perfisList.push(perfilNorm);
+      usuarioJson[perfilNorm] = String(usuario || '').trim();
+    } else {
+      const idx = perfisList.indexOf(perfilNorm);
+      if (idx !== -1) perfisList.splice(idx, 1);
+      delete usuarioJson[perfilNorm];
     }
 
-    // Ao desmarcar, limpa o lote de emissão para que o item apareça como "novo" em futuras emissões
-    if (!marcar) {
+    const novoPerfilEmissao = perfisList.join(',');
+    const novoUsuarioJson   = perfisList.length > 0 ? JSON.stringify(usuarioJson) : '';
+    const novoMarcar        = perfisList.length > 0 ? 'SIM' : '';
+
+    sheet.getRange(linhaNum, marcarCol + 1).setValue(novoMarcar);
+    sheet.getRange(linhaNum, usuarioCol + 1).setValue(novoUsuarioJson);
+    if (perfilCol !== undefined) {
+      sheet.getRange(linhaNum, perfilCol + 1).setValue(novoPerfilEmissao);
+    }
+
+    // Limpa lote de emissão apenas quando nenhum perfil restar
+    if (!marcar && perfisList.length === 0) {
       const loteEmCol = colMap['LOTE_EMISSAO'];
       if (loteEmCol !== undefined) {
         sheet.getRange(linhaNum, loteEmCol + 1).setValue('');
@@ -4142,7 +4154,8 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil) {
     SpreadsheetApp.flush();
     limparCache();
 
-    Logger.log(`✓ ${uniqueId} → Marcado para faturar: ${marcar} por "${usuarioValor}" (linha ${linhaNum})`);
+    const usuarioValor = marcar ? String(usuario || '').trim() : '';
+    Logger.log(`✓ ${uniqueId} → Marcado para faturar: ${marcar} por "${usuarioValor}" perfil "${perfilNorm}" (linha ${linhaNum}). Perfis ativos: ${novoPerfilEmissao}`);
     return { success: true, id: uniqueId, linha: linhaNum, marcado: marcar, usuario: usuarioValor };
   } catch (e) {
     Logger.log(`❌ marcarParaFaturar: ${e.message}`);
@@ -4350,11 +4363,14 @@ function obterItensMarcadosParaFaturar(perfil) {
       const marcarFaturar = String(row[marcarCol] || '').trim().toUpperCase();
 
       if (marcarFaturar === 'SIM') {
-        // Filtro de perfil: BAIXA1 inclui itens sem perfil (retrocompatibilidade); demais perfis: exato
+        // Filtro de perfil: suporta lista separada por vírgulas ("BAIXA1,BAIXA2")
         const itemPerfil = perfilCol !== undefined ? String(row[perfilCol] || '').trim() : '';
+        const perfilListItem = itemPerfil
+          ? itemPerfil.split(',').map(function(s) { return s.trim(); }).filter(Boolean)
+          : [];
         const pertenceAoPerfil = perfilNorm === 'BAIXA1'
-          ? (itemPerfil === '' || itemPerfil === 'BAIXA1')
-          : (itemPerfil === perfilNorm);
+          ? (perfilListItem.length === 0 || perfilListItem.indexOf('BAIXA1') !== -1)
+          : perfilListItem.indexOf(perfilNorm) !== -1;
         if (!pertenceAoPerfil) return;
 
         const displayRow = displayValues[idx];
@@ -4388,7 +4404,12 @@ function obterItensMarcadosParaFaturar(perfil) {
             'DATA RECEB.': _fmtBR_(item['DATA RECEB.']),  // Converte Date para string
             Status: item.Status,
             MARCAR_FATURAR: item.MARCAR_FATURAR,
-            MARCAR_FATURAR_USUARIO: item.MARCAR_FATURAR_USUARIO || '',
+            MARCAR_FATURAR_USUARIO: (function() {
+              try {
+                var j = item.MARCAR_FATURAR_USUARIO ? JSON.parse(item.MARCAR_FATURAR_USUARIO) : {};
+                return (j && typeof j === 'object' && !Array.isArray(j)) ? (j[perfilNorm] || '') : '';
+              } catch(e) { return item.MARCAR_FATURAR_USUARIO || ''; }
+            })(),
             INFO_X:          item.INFO_X          || '',
             LOTE:            item.LOTE            || '',
             PERFIL_EMISSAO:  item.PERFIL_EMISSAO  || '',
