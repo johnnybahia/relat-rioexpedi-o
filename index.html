@@ -2225,7 +2225,12 @@ ALL_OCS_ITEMS = itemsObj;
 
         let bodyHtml = '';
 
-        if (items.length > 0) {
+        // Oculta itens completamente faturados ou com quantidade zerada
+        const itemsVisiveis = items.filter(function(i) {
+            return i && (parseFloat(i['QTD. ABERTA']) || 0) > 0 && (i.Status || '').toLowerCase() !== 'faturado';
+        });
+
+        if (itemsVisiveis.length > 0) {
             const _isParcial = window.ACCESS_NIVEL === 'PARCIAL';
             const _acoesHeader = _isParcial ? '' : '<th title="Selecionar para lote de etiquetas" style="font-size:0.75em;line-height:1.2;">📦 Etiquetas<br>em lote</th><th>Ações</th>';
             bodyHtml = `<div class="overflow-x-auto"><table class="item-table"><thead><tr>
@@ -2238,9 +2243,9 @@ ALL_OCS_ITEMS = itemsObj;
             const _sessaoAtual = _getSessaoLocal();
             const _usuarioAtual = (_sessaoAtual && _sessaoAtual.usuario) ? _sessaoAtual.usuario.trim() : '';
             const _perfilAtual = perfilBaixaAtivo || 'BAIXA1';
-            const _osColors = _buildOsColorMap(items, ocInfo.cliente);
+            const _osColors = _buildOsColorMap(itemsVisiveis, ocInfo.cliente);
 
-            items.forEach(item => {
+            itemsVisiveis.forEach(item => {
                 if (!item) return;
                 const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
                 const itemId = `item-linha-${item.planilhaLinha}`;
@@ -2320,6 +2325,8 @@ ALL_OCS_ITEMS = itemsObj;
         } else if (itemResponse && itemResponse.ok === false) {
             const errorMsg = itemResponse.error ? (itemResponse.error.message || JSON.stringify(itemResponse.error)) : 'Erro desconhecido';
             bodyHtml = `<div class="card-body error">Erro ao carregar itens: ${errorMsg}</div>`;
+        } else if (items.length > 0) {
+            bodyHtml = `<div class="card-body loading" style="color:#6b7280;font-style:italic;">Todos os itens desta OC já foram faturados ou zerados.</div>`;
         } else {
             bodyHtml = `<div class="card-body loading">Nenhum item encontrado para esta OC.</div>`;
         }
