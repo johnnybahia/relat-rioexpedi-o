@@ -2261,12 +2261,16 @@ ALL_OCS_ITEMS = itemsObj;
                 const itemStatusClass = `item-${(item.Status || 'desconhecido').toLowerCase()}`;
                 const itemId = `item-linha-${item.planilhaLinha}`;
                 const isFaturado = item.Status?.toLowerCase() === 'faturado';
-                const isMarcadoFaturar = item.MARCAR_FATURAR && String(item.MARCAR_FATURAR).toUpperCase() === 'SIM';
-                const usuarioQueMarkou = isMarcadoFaturar ? String(item.MARCAR_FATURAR_USUARIO || '').trim() : '';
-                const itemPerfil = isMarcadoFaturar ? String(item.PERFIL_EMISSAO || '').trim() : '';
-                // Item marcado em outro perfil: bloqueia interações
-                const outroPerfil = isMarcadoFaturar && itemPerfil && itemPerfil !== _perfilAtual;
-                const corUsuario = (isMarcadoFaturar && usuarioQueMarkou && !outroPerfil) ? _getUsuarioColor(usuarioQueMarkou) : null;
+                const perfisMarcados = String(item.PERFIL_EMISSAO || '').split(',').map(function(p) { return p.trim(); }).filter(Boolean);
+                const isMarcadoFaturar = perfisMarcados.indexOf(_perfilAtual) !== -1;
+                let usuarioQueMarkou = '';
+                if (isMarcadoFaturar) {
+                    try {
+                        const _ujson = JSON.parse(item.MARCAR_FATURAR_USUARIO || '{}');
+                        usuarioQueMarkou = (_ujson && typeof _ujson === 'object') ? (String(_ujson[_perfilAtual] || '').trim()) : '';
+                    } catch(e) { usuarioQueMarkou = String(item.MARCAR_FATURAR_USUARIO || '').trim(); }
+                }
+                const corUsuario = (isMarcadoFaturar && usuarioQueMarkou) ? _getUsuarioColor(usuarioQueMarkou) : null;
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
@@ -2306,23 +2310,19 @@ ALL_OCS_ITEMS = itemsObj;
                     if (!isFaturado) {
                         bodyHtml += ` <button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
                         const checkedAttr = isMarcadoFaturar ? 'checked' : '';
-                        const outrousuario = !outroPerfil && isMarcadoFaturar && usuarioQueMarkou && _usuarioAtual && usuarioQueMarkou.toLowerCase() !== _usuarioAtual.toLowerCase();
-                        const cbDisabled = (outrousuario || outroPerfil) ? 'disabled' : '';
+                        const outrousuario = isMarcadoFaturar && usuarioQueMarkou && _usuarioAtual && usuarioQueMarkou.toLowerCase() !== _usuarioAtual.toLowerCase();
+                        const cbDisabled = outrousuario ? 'disabled' : '';
                         const _uEsc = _escapeHtml(usuarioQueMarkou);
                         const _uAtualEsc = _escapeHtml(_usuarioAtual);
-                        const cbTitle = outroPerfil
-                            ? `Marcado no perfil ${itemPerfil} — selecione ${itemPerfil} para alterar`
-                            : (isMarcadoFaturar
-                                ? (outrousuario
-                                    ? `Marcado por: ${_uEsc} — apenas ${_uEsc} pode desmarcar`
-                                    : `Marcado por: ${_uEsc || _uAtualEsc} — clique para desmarcar`)
-                                : 'Marcar para faturamento');
-                        const cbStyle = (outrousuario || outroPerfil) ? 'opacity:0.5; cursor:not-allowed;' : '';
-                        const badgeHtml = outroPerfil
-                            ? `<span class="badge-outro-perfil">${itemPerfil}</span>`
-                            : ((isMarcadoFaturar && usuarioQueMarkou)
-                                ? (() => { const c = _getUsuarioColor(usuarioQueMarkou); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${_uEsc}</span>` : ''; })()
-                                : '');
+                        const cbTitle = isMarcadoFaturar
+                            ? (outrousuario
+                                ? `Marcado por: ${_uEsc} — apenas ${_uEsc} pode desmarcar`
+                                : `Marcado por: ${_uEsc || _uAtualEsc} — clique para desmarcar`)
+                            : 'Marcar para faturamento';
+                        const cbStyle = outrousuario ? 'opacity:0.5; cursor:not-allowed;' : '';
+                        const badgeHtml = (isMarcadoFaturar && usuarioQueMarkou)
+                            ? (() => { const c = _getUsuarioColor(usuarioQueMarkou); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${_uEsc}</span>` : ''; })()
+                            : '';
                         bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} ${cbDisabled} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="${cbTitle}" style="${cbStyle}" data-marcado-por="${_uEsc}">${badgeHtml}`;
                     } else {
                         bodyHtml += ` <span class="badge-faturado">FATURADO</span>`;
