@@ -4422,6 +4422,16 @@ function obterItensMarcadosParaFaturar(perfil) {
 function registrarCheckpointsFaturamento(items) {
   try {
     if (!Array.isArray(items) || items.length === 0) return { success: true, registrados: 0 };
+
+    const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
+    if (!sheet) throw new Error('DB não encontrado');
+    const numCols    = Math.max(sheet.getLastColumn(), PERFIL_EMISSAO_COL + 1);
+    const headers    = sheet.getRange(1, 1, 1, numCols).getValues()[0];
+    const colMap     = _getColumnIndexes_(headers);
+    const marcarCol  = colMap['MARCAR_FATURAR'];
+    const usuarioCol = colMap['MARCAR_FATURAR_USUARIO'];
+    const perfilCol  = colMap['PERFIL_EMISSAO'];
+
     let registrados = 0;
     items.forEach(item => {
       const uniqueId  = String(item.uniqueId  || '').trim();
@@ -4432,8 +4442,21 @@ function registrarCheckpointsFaturamento(items) {
       if (uniqueId && qtdAberta > 0 && saldo > 0) {
         _registrarCheckpointFaturamento_(uniqueId, qtdAberta);
         registrados++;
+        // Libera imediatamente para novo ciclo em qualquer perfil (sem aguardar sync automático)
+        const linhaNum = Number(item.planilhaLinha);
+        if (isFinite(linhaNum) && linhaNum >= 2) {
+          if (marcarCol  !== undefined) sheet.getRange(linhaNum, marcarCol  + 1).setValue('');
+          if (usuarioCol !== undefined) sheet.getRange(linhaNum, usuarioCol + 1).setValue('');
+          if (perfilCol  !== undefined) sheet.getRange(linhaNum, perfilCol  + 1).setValue('');
+        }
       }
     });
+
+    if (registrados > 0) {
+      SpreadsheetApp.flush();
+      limparCache();
+    }
+
     Logger.log(`✅ registrarCheckpointsFaturamento: ${registrados} checkpoint(s) registrado(s)`);
     return { success: true, registrados };
   } catch (e) {
