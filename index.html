@@ -4380,41 +4380,7 @@ ALL_OCS_ITEMS = itemsObj;
             <div class="info">Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}<br>Filtro: ${marfimFilter === 'all' ? 'Todos (CM + MM)' : marfimFilter === 'cm' ? 'Apenas CM' : 'Apenas MM'}</div>
         `;
 
-        // Monta array de OCs na mesma ordem dos cards
-        const ocsParaPonteiras = [];
-        ocsSelecionadasPonteiras.forEach(ocNum => {
-            const ocData = ALL_OCS_ITEMS[ocNum];
-            if (!ocData || !ocData.items) return;
-            const ocInfo = ALL_OCS_INFO.find(oc => oc.ordCompra === ocNum);
-            const items  = ocData.items.filter(i => i.Status?.toLowerCase() !== 'excluido');
-            if (items.length === 0) return;
-            const prazoMin = calcularPrazoMinimo(items);
-            ocsParaPonteiras.push({
-                ocNum, ocData, ocInfo,
-                nomeCliente: ocInfo ? ocInfo.cliente : '',
-                items,
-                prazoKey: (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin,
-                ocKey: String(ocNum)
-            });
-        });
-
-        ocsParaPonteiras.sort((a, b) => {
-            const iA = ALL_OCS_ITEMS[a.ocNum];
-            const iB = ALL_OCS_ITEMS[b.ocNum];
-            const minA = (iA && iA.items && iA.items.length) ? Math.min.apply(null, iA.items.map(function(i) { return i.planilhaLinha || 999999; })) : 999999;
-            const minB = (iB && iB.items && iB.items.length) ? Math.min.apply(null, iB.items.map(function(i) { return i.planilhaLinha || 999999; })) : 999999;
-            return minA - minB;
-        });
-
-        // Numeração sequencial por grupo de cliente (cada cliente começa do 1)
-        const _contadorCliente = new Map();
-        ocsParaPonteiras.forEach(oc => {
-            const cli = oc.nomeCliente || 'SEM CLIENTE';
-            _contadorCliente.set(cli, (_contadorCliente.get(cli) || 0) + 1);
-            oc.numeroCliente = _contadorCliente.get(cli);
-        });
-
-        // Ordena itens dentro de cada OC: 1º DT. ENTREGA, 2º valor numérico do TAMANHO
+        // Funções auxiliares
         function _parseDateMs(v) {
             if (!v) return Infinity;
             const d = (v instanceof Date) ? v : new Date(String(v));
@@ -4433,21 +4399,68 @@ ALL_OCS_ITEMS = itemsObj;
             });
         }
 
-        ocsParaPonteiras.forEach(({ ocNum, ocData, ocInfo, nomeCliente, items: allItems, numeroCliente }) => {
-            let itens = allItems;
+        // Coleta blocos: divide cada OC em grupos por DT.ENTREGA distinta
+        const blocos = [];
+        ocsSelecionadasPonteiras.forEach(ocNum => {
+            const ocData = ALL_OCS_ITEMS[ocNum];
+            if (!ocData || !ocData.items) return;
+            const ocInfo = ALL_OCS_INFO.find(oc => oc.ordCompra === ocNum);
+
+            let itens = ocData.items.filter(i => (i.Status || '').toLowerCase() !== 'excluido');
             if (marfimFilter === 'cm') itens = itens.filter(i => i.TAMANHO && i.TAMANHO.toUpperCase().includes('CM'));
             else if (marfimFilter === 'mm') itens = itens.filter(i => i.TAMANHO && i.TAMANHO.toUpperCase().includes('MM'));
             if (itens.length === 0) return;
 
-            // Não imprime OC se todos os itens CM estão zerados ou faturados
+            // Descarta OC onde todos os itens CM estão zerados ou faturados
             if (itens.every(function(i) {
                 return (parseFloat(i['QTD. ABERTA']) || 0) <= 0 || (i.Status || '').toLowerCase() === 'faturado';
             })) return;
 
+            // Agrupa itens por DT.ENTREGA
+            const porData = new Map();
+            itens.forEach(function(item) {
+                const dtMs = _parseDateMs(item['DT. ENTREGA']);
+                const key  = isFinite(dtMs) ? dtMs : 'sem-data';
+                if (!porData.has(key)) porData.set(key, []);
+                porData.get(key).push(item);
+            });
+
+            // Cria um bloco por data
+            const minLinha = (ocData.items.length)
+                ? Math.min.apply(null, ocData.items.map(function(i) { return i.planilhaLinha || 999999; }))
+                : 999999;
+            porData.forEach(function(itensDaData, key) {
+                blocos.push({
+                    ocNum,
+                    ocData,
+                    ocInfo,
+                    nomeCliente: ocInfo ? ocInfo.cliente : '',
+                    itens: itensDaData,
+                    dtMs: key === 'sem-data' ? Infinity : key,
+                    minLinha
+                });
+            });
+        });
+
+        // Ordena blocos: 1º por data de entrega (mais atrasado primeiro), 2º por posição no DB
+        blocos.sort(function(a, b) {
+            if (a.dtMs !== b.dtMs) return a.dtMs - b.dtMs;
+            return a.minLinha - b.minLinha;
+        });
+
+        // Numeração sequencial por cliente
+        const _contadorCliente = new Map();
+        blocos.forEach(function(bloco) {
+            const cli = bloco.nomeCliente || 'SEM CLIENTE';
+            _contadorCliente.set(cli, (_contadorCliente.get(cli) || 0) + 1);
+            bloco.numeroCliente = _contadorCliente.get(cli);
+        });
+
+        blocos.forEach(function({ ocNum, ocData, ocInfo, nomeCliente, itens, dtMs, numeroCliente }) {
             itens = _sortItensPonteiras(itens);
 
-            const temFaturados = ocData.items.some(i => i.Status?.toLowerCase() === 'faturado');
-            const temInativos  = ocData.items.some(i => i.Status?.toLowerCase() === 'inativo');
+            const temFaturados = itens.some(i => i.Status?.toLowerCase() === 'faturado');
+            const temInativos  = itens.some(i => i.Status?.toLowerCase() === 'inativo');
             let avisos = [];
             if (temFaturados) avisos.push('⚠️ Contém itens Faturados');
             if (temInativos)  avisos.push('⚠️ Contém itens Inativos');
@@ -4457,12 +4470,18 @@ ALL_OCS_ITEMS = itemsObj;
                 ? `<span class="marca-badge">${marcas.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>`
                 : '';
 
+            // Mostra data de entrega do grupo no cabeçalho
+            const dtEntregaStr = isFinite(dtMs)
+                ? new Date(dtMs).toLocaleDateString('pt-BR')
+                : '—';
+
             html += `
                 <div class="oc-section">
                     <div class="oc-header ${temFaturados ? 'faturado-pending' : ''}">
                         <span class="oc-numero">${numeroCliente}</span>
                         <span class="oc-title">OC: ${ocNum} — ${nomeCliente}</span>
                         ${marcaBadgeHtml}
+                        <span style="margin-left:auto;font-size:0.85em;font-weight:600;color:#374151;">📅 Entrega: ${dtEntregaStr}</span>
                         ${avisos.length > 0 ? `<div class="oc-avisos">${avisos.join(' | ')}</div>` : ''}
                     </div>
                     <table>
