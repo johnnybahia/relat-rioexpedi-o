@@ -4265,7 +4265,7 @@ ALL_OCS_ITEMS = itemsObj;
             const ocData = ALL_OCS_ITEMS[oc.ordCompra];
             if (!ocData || !ocData.items) return;
 
-            let itensFiltrados = ocData.items;
+            let itensFiltrados = ocData.items.filter(i => (i.Status || '').toLowerCase() !== 'faturado');
             if (marfimFilter === 'cm') {
                 itensFiltrados = itensFiltrados.filter(i => i.TAMANHO && i.TAMANHO.toUpperCase().includes('CM'));
             } else if (marfimFilter === 'mm') {
@@ -4274,16 +4274,9 @@ ALL_OCS_ITEMS = itemsObj;
 
             if (itensFiltrados.length === 0) return;
 
-            // Oculta OC se todos os itens CM estão zerados ou faturados
-            if (itensFiltrados.every(function(i) {
-                return (parseFloat(i['QTD. ABERTA']) || 0) <= 0 || (i.Status || '').toLowerCase() === 'faturado';
-            })) return;
-
-            const temFaturados = itensFiltrados.some(i => i.Status?.toLowerCase() === 'faturado');
             const temInativos  = itensFiltrados.some(i => i.Status?.toLowerCase() === 'inativo');
             let avisos = '';
             let estilo = '';
-            if (temFaturados) { avisos += ' <span style="color:#dc2626;font-weight:600;">⚠️ Tem Faturados</span>'; estilo = 'background:#fef2f2;border-left:4px solid #dc2626;'; }
             if (temInativos)  { avisos += ' <span style="color:#ea580c;font-weight:600;">⚠️ Tem Inativos</span>'; }
 
             const marca = [...new Set(itensFiltrados.map(i => i.INFO_X || '').filter(Boolean))].join(', ');
@@ -4399,15 +4392,13 @@ ALL_OCS_ITEMS = itemsObj;
             if (!ocData || !ocData.items) return;
             const ocInfo = ALL_OCS_INFO.find(oc => oc.ordCompra === ocNum);
 
-            let itens = ocData.items.filter(i => (i.Status || '').toLowerCase() !== 'excluido');
+            let itens = ocData.items.filter(i => {
+                const s = (i.Status || '').toLowerCase();
+                return s !== 'excluido' && s !== 'faturado';
+            });
             if (marfimFilter === 'cm') itens = itens.filter(i => i.TAMANHO && i.TAMANHO.toUpperCase().includes('CM'));
             else if (marfimFilter === 'mm') itens = itens.filter(i => i.TAMANHO && i.TAMANHO.toUpperCase().includes('MM'));
             if (itens.length === 0) return;
-
-            // Descarta OC onde todos os itens CM estão zerados ou faturados
-            if (itens.every(function(i) {
-                return (parseFloat(i['QTD. ABERTA']) || 0) <= 0 || (i.Status || '').toLowerCase() === 'faturado';
-            })) return;
 
             // Agrupa itens por DT.ENTREGA
             const porData = new Map();
@@ -4452,10 +4443,8 @@ ALL_OCS_ITEMS = itemsObj;
         blocos.forEach(function({ ocNum, ocData, ocInfo, nomeCliente, itens, dtMs, numeroCliente }) {
             itens = _sortItensPonteiras(itens);
 
-            const temFaturados = itens.some(i => i.Status?.toLowerCase() === 'faturado');
             const temInativos  = itens.some(i => i.Status?.toLowerCase() === 'inativo');
             let avisos = [];
-            if (temFaturados) avisos.push('⚠️ Contém itens Faturados');
             if (temInativos)  avisos.push('⚠️ Contém itens Inativos');
 
             const marcas = [...new Set(itens.map(i => i.INFO_X || '').filter(Boolean))].join(', ');
@@ -4470,7 +4459,7 @@ ALL_OCS_ITEMS = itemsObj;
 
             html += `
                 <div class="oc-section">
-                    <div class="oc-header ${temFaturados ? 'faturado-pending' : ''}">
+                    <div class="oc-header">
                         <span class="oc-numero">${numeroCliente}</span>
                         <span class="oc-title">OC: ${ocNum} — ${nomeCliente}</span>
                         ${marcaBadgeHtml}
