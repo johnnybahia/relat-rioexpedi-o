@@ -1845,6 +1845,7 @@
 
                     ALL_OCS_INFO = (response.ordCompras || []).map(oc => ({
                       ordCompra:  oc.ordCompraId,
+                      ocDisplay:  oc.ocDisplay || oc.ordCompraId,
                       cliente:    oc.cliente,
                       infoX:      oc.infoX      || '',
                       posicaoMin: oc.posicaoMin  ?? 999999
@@ -2201,7 +2202,7 @@ ALL_OCS_ITEMS = itemsObj;
         let headerHtml = `
             <div class="card-header">
                 ${statusPrazo ? `<span class="prazo-badge ${statusPrazo}">${textoPrazo}</span>` : ''}
-                <h3>OC: ${ocInfo.ordCompra} | ${ocInfo.cliente || 'Sem cliente'}${ocInfo.infoX ? ` <span class="oc-info-x">| ${ocInfo.infoX}</span>` : ''}${dateGroupLabel}</h3>`;
+                <h3>OC: ${ocInfo.ocDisplay || ocInfo.ordCompra} | ${ocInfo.cliente || 'Sem cliente'}${ocInfo.infoX ? ` <span class="oc-info-x">| ${ocInfo.infoX}</span>` : ''}${dateGroupLabel}</h3>`;
         
         // NOVO: Adiciona totalizador do card
         if (totaisCard.metros > 0 || totaisCard.pares > 0) {
@@ -4141,7 +4142,7 @@ ALL_OCS_ITEMS = itemsObj;
                         <input type="checkbox" value="${oc.ordCompra}" class="oc-checkbox" style="width: 18px; height: 18px; cursor: pointer;">
                         <div style="flex: 1;">
                             <div style="font-weight: 600; color: #111827;">
-                                OC: ${oc.ordCompra} - ${ocData.cliente || ''}
+                                OC: ${oc.ocDisplay || oc.ordCompra} - ${ocData.cliente || ''}
                             </div>
                             <div style="font-size: 0.875rem; color: #6b7280;">
                                 ${itensFiltrados.length} ${itensFiltrados.length === 1 ? 'item' : 'itens'}${avisos}
@@ -4287,7 +4288,7 @@ ALL_OCS_ITEMS = itemsObj;
                     <label style="display:flex;align-items:center;gap:0.75rem;cursor:pointer;">
                         <input type="checkbox" value="${oc.ordCompra}" class="oc-checkbox-pont" style="width:18px;height:18px;cursor:pointer;">
                         <div style="flex:1;">
-                            <div style="font-weight:600;color:#111827;">OC: ${oc.ordCompra} - ${ocData.cliente || ''}${marcaBadge}</div>
+                            <div style="font-weight:600;color:#111827;">OC: ${oc.ocDisplay || oc.ordCompra} - ${ocData.cliente || ''}${marcaBadge}</div>
                             <div style="font-size:0.875rem;color:#6b7280;">${itensFiltrados.length} ${itensFiltrados.length === 1 ? 'item' : 'itens'}${avisos}</div>
                         </div>
                     </label>
@@ -5163,13 +5164,16 @@ ALL_OCS_ITEMS = itemsObj;
         // Demais clientes: agrupados pela marca (INFO_X)
         const gruposPorInfoX = {};
         itensMarcados.forEach(item => {
-            const infoX = _chaveAgrupamentoFatur(item);
-            const oc    = item['ORD. COMPRA'] || 'SEM OC';
+            const infoX   = _chaveAgrupamentoFatur(item);
+            const oc      = item['ORD. COMPRA'] || 'SEM OC';
+            const cliente = item.CLIENTE || 'SEM CLIENTE';
+            // Chave composta: mesmo padrão do backend — evita misturar clientes com OC idêntica
+            const ocKey   = oc + '||' + cliente;
             if (!gruposPorInfoX[infoX]) gruposPorInfoX[infoX] = {};
-            if (!gruposPorInfoX[infoX][oc]) {
-                gruposPorInfoX[infoX][oc] = { cliente: item.CLIENTE || 'SEM CLIENTE', itens: [] };
+            if (!gruposPorInfoX[infoX][ocKey]) {
+                gruposPorInfoX[infoX][ocKey] = { oc, cliente, itens: [] };
             }
-            gruposPorInfoX[infoX][oc].itens.push(item);
+            gruposPorInfoX[infoX][ocKey].itens.push(item);
         });
 
         const gruposOrdenados = Object.keys(gruposPorInfoX).sort((a, b) => {
@@ -5238,14 +5242,14 @@ ALL_OCS_ITEMS = itemsObj;
                 <div class="grupo-header">📋 ${infoX}</div>
                 <div class="grupo-body">`;
 
-            ocsOrdenadas.forEach(ocNum => {
-                const ocData = ocsPorGrupo[ocNum];
+            ocsOrdenadas.forEach(ocKey => {
+                const ocData = ocsPorGrupo[ocKey];
                 const itens  = ocData.itens;
 
                 html += `
                 <div class="oc-section">
                     <div class="oc-header">
-                        <div class="oc-title">OC: ${ocNum} - ${ocData.cliente}</div>
+                        <div class="oc-title">OC: ${ocData.oc} - ${ocData.cliente}</div>
                     </div>
                     <table>
                         <thead>

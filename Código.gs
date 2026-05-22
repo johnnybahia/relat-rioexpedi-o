@@ -3750,26 +3750,30 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
 function _organizeByOC_(items) {
   const byOC = {};
   items.forEach(item => {
-    const oc = item['ORD. COMPRA'] || 'SEM OC';
-    if (!byOC[oc]) {
-      byOC[oc] = {
-        ordCompraId: oc,
-        ordCompra: oc,      // alias para compatibilidade com o front
-        cliente: item.CLIENTE,
-        infoX: item.INFO_X || '',
-        posicaoMin: item.posicaoFonte, // menor posição em DADOS_IMPORTADOS para ordenar os cards
-        items: []
+    const oc      = item['ORD. COMPRA'] || 'SEM OC';
+    const cliente = item.CLIENTE || '';
+    // Chave composta OC||CLIENTE garante que clientes distintos com mesma OC fiquem em grupos separados
+    const ocChave = oc + '||' + cliente;
+    if (!byOC[ocChave]) {
+      byOC[ocChave] = {
+        ordCompraId: ocChave,  // ID único usado como chave no frontend
+        ordCompra:   ocChave,  // alias para compatibilidade
+        ocDisplay:   oc,       // número limpo da OC para exibição
+        cliente:     cliente,
+        infoX:       item.INFO_X || '',
+        posicaoMin:  item.posicaoFonte,
+        items:       []
       };
     }
     // mantém a menor posição entre todos os itens do grupo
-    if (item.posicaoFonte < byOC[oc].posicaoMin) {
-      byOC[oc].posicaoMin = item.posicaoFonte;
+    if (item.posicaoFonte < byOC[ocChave].posicaoMin) {
+      byOC[ocChave].posicaoMin = item.posicaoFonte;
     }
     // captura o primeiro valor não-vazio de INFO_X entre os itens da OC
-    if (!byOC[oc].infoX && item.INFO_X) {
-      byOC[oc].infoX = item.INFO_X;
+    if (!byOC[ocChave].infoX && item.INFO_X) {
+      byOC[ocChave].infoX = item.INFO_X;
     }
-    byOC[oc].items.push(item);
+    byOC[ocChave].items.push(item);
   });
   return Object.values(byOC);
 }
