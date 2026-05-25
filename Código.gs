@@ -2978,13 +2978,20 @@ function sincronizarDados() {
             }
 
             if (!itemAindaEmPedidosPorFingerprint && statusAtual !== "Faturado" && statusAtual !== "Finalizado" && statusAtual !== "Excluido") {
-              if (aguardandoNF && !idsComAlertaAtivo.has(id)) {
-                // MARCAR_FATURAR=SIM posto pelo USUÁRIO (sem alerta ativo) → saída esperada → Faturado direto
-                Logger.log(`   ✋→✅ Marcado pelo usuário + saiu do PEDIDOS → Faturado direto (QTD=${qtdAberta}, ID="${id}")`);
+              // Distingue "marcado pelo usuário" de "marcado automaticamente pelo sync":
+              // MARCAR_FATURAR_USUARIO_COL (col V) fica preenchido quando o usuário marca via UI;
+              // fica vazio quando o próprio sync define MARCAR_FATURAR="SIM" automaticamente.
+              // OBS: idsComAlertaAtivo não é mais usado porque _registrarAlertaFaturamento_ está desativada
+              // e o Set ficava sempre vazio, tornando a distinção inoperante.
+              const marcarFaturarUsuario = String(dbItem.row[MARCAR_FATURAR_USUARIO_COL] || '').trim();
+              const marcadoPeloUsuario = aguardandoNF && marcarFaturarUsuario !== '';
+              if (marcadoPeloUsuario) {
+                // MARCAR_FATURAR=SIM posto pelo USUÁRIO (col V preenchida) → saída esperada → Faturado direto
+                Logger.log(`   ✋→✅ Marcado pelo usuário (${marcarFaturarUsuario}) + saiu do PEDIDOS → Faturado direto (QTD=${qtdAberta}, ID="${id}")`);
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0, marcadoParaNF: true });
-              } else if (aguardandoNF && idsComAlertaAtivo.has(id)) {
-                // MARCAR_FATURAR=SIM posto pelo SYNC (alerta ativo) → mantém Ativo, aguarda confirmação do usuário
-                Logger.log(`   ✋ Alerta ativo pendente de confirmação — mantido Ativo (QTD=${qtdAberta}, ID="${id}")`);
+              } else if (aguardandoNF) {
+                // MARCAR_FATURAR=SIM posto pelo SYNC automaticamente (col V vazia) → mantém Ativo, aguarda confirmação do usuário
+                Logger.log(`   ⚠️ MARCAR_FATURAR automático (sem usuário) — mantido Ativo, aguarda confirmação (QTD=${qtdAberta}, ID="${id}")`);
               } else if (qtdAberta === 0) {
                 // QTD=0 sem marcação: baixas zeraram o item → faturado silencioso
                 itensFaturarPendentes.push({ id: id, linha: dbItem.linha, row: dbItem.row, statusAtual: statusAtual, qtdAberta: 0 });
