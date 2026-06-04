@@ -273,8 +273,12 @@
     #btn-relatorio-producao:active { transform: translateY(0); }
 
     /* Botão de Etiqueta NF */
-    #btn-etiqueta-nf:hover { background: #6d28d9; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
+    #btn-etiqueta-nf:hover { background: #7e22ce; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
     #btn-etiqueta-nf:active { transform: translateY(0); }
+
+    /* Botão Relatório Geral */
+    #btn-relatorio-geral:hover { background: #1e40af; transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
+    #btn-relatorio-geral:active { transform: translateY(0); }
 
     /* Cabeçalho: logo + título */
     .header-brand { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 0.5rem; }
@@ -417,33 +421,38 @@
         </div>
       </div>
 
-      <!-- Botões de Relatório -->
-      <div style="margin: 1rem 0; text-align: center; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-        <button id="btn-relatorio-producao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #059669; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
-          📄 Imprimir Relatório de Produção
-        </button>
-        <div style="display:flex; flex-direction:column; align-items:center; gap:0.3rem;">
-          <button id="btn-relatorio-faturamento" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #10b981; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
-            💰 Relatório para Faturamento
+      <!-- Botões de Relatório e Ação -->
+      <div style="margin: 1rem 0; display: flex; flex-direction: column; gap: 0.75rem; align-items: center;">
+        <!-- Linha 1: Relatórios -->
+        <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+          <button id="btn-relatorio-producao" class="btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem; background: #059669; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+            📄 Imprimir Relatório de Produção
           </button>
-          <span id="faturar-btn-info" style="display:none; font-size:0.72rem; font-weight:600; color:#065f46; background:#d1fae5; border:1px solid #6ee7b7; border-radius:9999px; padding:2px 10px; white-space:nowrap;"></span>
+          <div style="display:flex; flex-direction:column; align-items:center; gap:0.3rem;">
+            <button id="btn-relatorio-faturamento" class="btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem; background: #10b981; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+              💰 Relatório para Faturamento
+            </button>
+            <span id="faturar-btn-info" style="display:none; font-size:0.72rem; font-weight:600; color:#065f46; background:#d1fae5; border:1px solid #6ee7b7; border-radius:9999px; padding:2px 10px; white-space:nowrap;"></span>
+          </div>
+          <button id="btn-relatorio-ponteiras" class="btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem; background: #b45309; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+            📌 Relatório Ponteiras
+          </button>
+          <button id="btn-relatorio-geral" class="btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem; background: #1d4ed8; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+            📊 Relatório Geral
+          </button>
         </div>
-        <button id="btn-relatorio-ponteiras" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #b45309; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
-          📌 Relatório Ponteiras
-        </button>
-        <button id="btn-cadastro-revisao" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #7c3aed; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
-          ✅ Cadastro Revisão
-        </button>
-        <button id="btn-cadastro-conferentes" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #0891b2; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
-          📋 Cadastro Conferentes
-        </button>
-      </div>
-
-      <!-- Botão Etiqueta NF -->
-      <div style="margin: 1rem 0; text-align: center;">
-        <button id="btn-etiqueta-nf" class="btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem; background: #7c3aed; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
-          🏷️ Imprimir Etiqueta NF
-        </button>
+        <!-- Linha 2: Cadastros e Etiqueta -->
+        <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; align-items: center;">
+          <button id="btn-cadastro-revisao" class="btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem; background: #7c3aed; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+            ✅ Cadastro Revisão
+          </button>
+          <button id="btn-cadastro-conferentes" class="btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem; background: #0891b2; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+            📋 Cadastro Conferentes
+          </button>
+          <button id="btn-etiqueta-nf" class="btn-primary" style="padding: 0.75rem 1.5rem; font-size: 1rem; background: #9333ea; border: none; border-radius: 6px; color: white; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s;">
+            🏷️ Imprimir Etiqueta NF
+          </button>
+        </div>
       </div>
 
       <!-- NOVO: Totalizadores Gerais -->
@@ -5992,6 +6001,15 @@ ALL_OCS_ITEMS = itemsObj;
 
         return html;
     }
+
+    // ==== RELATÓRIO GERAL ====
+    document.getElementById('btn-relatorio-geral').addEventListener('click', function() {
+        window.open(
+            'https://docs.google.com/spreadsheets/d/1GtYG4Ahy5XJyJjE37S27u8RyELdRkct8nDAVGIBRI-w/edit?usp=sharing',
+            '_blank',
+            'toolbar=0,location=0,menubar=0,scrollbars=1,resizable=1,width=1400,height=900'
+        );
+    });
 
     (document.getElementById('btn-cadastro-revisao') || {addEventListener:()=>{}}).addEventListener('click', () => {
         renderizarListaRevisores();
