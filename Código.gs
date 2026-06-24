@@ -2524,6 +2524,12 @@ function sincronizarDados() {
     }
 
     const dbMap = new Map();
+    // Linhas extras quando dois ou mais registros do Relatorio_DB compartilham o mesmo ID_UNICO
+    // (ex: resíduo de sync antigo). dbMap.set() por si só sobrescreveria silenciosamente as
+    // ocorrências mais antigas, tornando-as "fantasmas" invisíveis ao loop principal (nunca
+    // resolvidas para Faturado nem alertadas). Aqui guardamos cada ocorrência substituída para
+    // que seja processada também — ver uso em "dbEntriesParaProcessar" abaixo.
+    const dbDuplicatasExtras = [];
     const statusCount = { Ativo: 0, Inativo: 0, Faturado: 0, Excluido: 0 };
 
     dbData.forEach((row, idx) => {
@@ -2534,6 +2540,13 @@ function sincronizarDados() {
       const id = row[ID_COL];  // Coluna A (índice 0)
       if (id && String(id).trim()) {
         const idStr = String(id).trim();
+        if (dbMap.has(idStr)) {
+          // ID_UNICO duplicado: a ocorrência anterior (linha mais antiga) seria perdida.
+          // Guarda para reprocessamento em vez de descartar.
+          const anterior = dbMap.get(idStr);
+          dbDuplicatasExtras.push(anterior);
+          Logger.log(`   ⚠️ ID_UNICO duplicado: "${idStr}" — linha ${anterior.linha} será reprocessada separadamente (substituída pela linha ${linhaReal} no dbMap)`);
+        }
         dbMap.set(idStr, { row: row, linha: linhaReal });
         const st = row[STATUS_COL];  // Coluna O (índice 14)
         if (st === 'Ativo') statusCount.Ativo++;
@@ -2546,6 +2559,9 @@ function sincronizarDados() {
     const totalDB = dbMap.size;
     Logger.log(`   ${totalDB} itens`);
     Logger.log(`   Status: ${statusCount.Ativo} Ativo, ${statusCount.Inativo} Inativo, ${statusCount.Faturado} Faturado, ${statusCount.Excluido} Excluido`);
+    if (dbDuplicatasExtras.length > 0) {
+      Logger.log(`   ⚠️ ${dbDuplicatasExtras.length} linha(s) com ID_UNICO duplicado serão reprocessadas nesta sincronização`);
+    }
 
     // 2.5) CRIAR MAPS DE IMPRESSÕES DIGITAIS
     Logger.log("\n🔍 2.5. CRIANDO IMPRESSÕES DIGITAIS");
@@ -2686,7 +2702,18 @@ function sincronizarDados() {
     }
     Logger.log(`   ${idsComAlertaAtivo.size} IDs com alerta de faturamento ativo`);
 
-    for (let [id, dbItem] of dbMap.entries()) {
+    // Processa primeiro as entradas "vencedoras" do dbMap (uma por ID_UNICO) e só depois as
+    // ocorrências duplicadas capturadas em dbDuplicatasExtras. Essa ordem é essencial: ao
+    // processar a vencedora primeiro, qualquer match bem-sucedido consome (fonteMap.delete) o
+    // slot correspondente em PEDIDOS, garantindo que a duplicata (mesmo ID, linha antiga) não
+    // encontre o mesmo item novamente — ela cai corretamente em "não encontrado" e é resolvida
+    // (Faturado ou alerta) pela mesma lógica já existente, em vez de ficar invisível para sempre.
+    const dbEntriesParaProcessar = [
+      ...dbMap.entries(),
+      ...dbDuplicatasExtras.map(dbItem => [String(dbItem.row[ID_COL]).trim(), dbItem])
+    ];
+
+    for (let [id, dbItem] of dbEntriesParaProcessar) {
       const statusAtual = dbItem.row[STATUS_COL];  // Coluna O (índice 14)
 
       // Se item está Excluido mas voltou ao PEDIDOS: reativa e remove do fonteMap
