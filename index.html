@@ -4390,7 +4390,17 @@ ALL_OCS_ITEMS = itemsObj;
                 const tA = _parseTamanhoNum(a.TAMANHO);
                 const tB = _parseTamanhoNum(b.TAMANHO);
                 if (tA !== tB) return tA - tB;
-                return _parseDateMs(a['DT. ENTREGA']) - _parseDateMs(b['DT. ENTREGA']);
+                const dA = _parseDateMs(a['DT. ENTREGA']);
+                const dB = _parseDateMs(b['DT. ENTREGA']);
+                if (dA !== dB) return dA - dB;
+                // Dentro do mesmo tamanho/data, ordena por OS — sem isso a ordem é a de
+                // gravação no DB e os códigos aparecem fora de sequência no impresso.
+                const osA = String(a['CÓD. OS'] || '').trim();
+                const osB = String(b['CÓD. OS'] || '').trim();
+                if (!osA && !osB) return 0;
+                if (!osA) return 1;  // OS em branco vai para o final do grupo
+                if (!osB) return -1;
+                return osA.localeCompare(osB, 'pt-BR', { numeric: true });
             });
         }
 
@@ -4500,7 +4510,10 @@ ALL_OCS_ITEMS = itemsObj;
                 const oc      = (item['ORD. COMPRA']  || ocNum).toString();
                 const tam     = (item.TAMANHO || '').toString();
                 const qtd     = item['QTD. ABERTA'] ?? 0;
-                const os      = (item['CÓD. OS'] ?? 'N/A').toString();
+                const osRaw   = String(item['CÓD. OS'] ?? '').trim();
+                const os      = osRaw
+                    ? osRaw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                    : '<span style="color:#dc2626;font-weight:700;">PENDENTE</span>';
                 const dtRec   = formatarData(item['DATA RECEB.']);
                 const dtEnt   = formatarData(item['DT. ENTREGA']);
                 const prazo   = formatarPrazoDias(item.PRAZO);
