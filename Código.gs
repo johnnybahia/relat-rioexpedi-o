@@ -1430,6 +1430,13 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // Isso evita que itens ganhem novos IDs após o usuário apagar PEDIDOS e o IMPORTRANGE
     // repopular só as colunas B-O (sem a coluna A que é gerenciada por script).
     const idsUsados = new Set();
+    // Set adicional: somente IDs já atribuídos NESTA execução (vazio no início de cada rodada).
+    // Existe porque idsUsados é pré-carregado com TODOS os IDs do Relatorio_DB — então
+    // idsUsados.has(idFinal) é esperado ser TRUE para praticamente todo ID reutilizado
+    // legitimamente, e não serve para detectar colisão entre duas linhas da fonte que,
+    // na MESMA rodada, resolveram (via pedidosMap OU pedidosDillyMap OU dbFingerprintMap)
+    // para o mesmo idFinal. Ver seção 15.13 do CLAUDE.md.
+    const idsAssignadosNestaRodada = new Set();
     const dbFingerprintMap = new Map(); // fingerprint → [id, ...] (array FIFO — suporta itens 100% idênticos)
     const dbCodigoFixoMap  = new Map(); // id → codigoFixo (reutilizar UUID já gravado no DB)
     const dbSheetRef = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
@@ -1686,6 +1693,26 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         novosItens++;
       }
 
+      // GUARDA ANTI-DUPLICATA: garante que nenhuma outra linha da fonte, NESTA MESMA rodada,
+      // já tenha resolvido para este idFinal — independente de qual caminho (pedidosMap,
+      // pedidosDillyMap ou dbFingerprintMap) o originou. Sem isso, dois tiers de matching
+      // independentes sobre o mesmo pool de linhas de PEDIDOS podiam, em tese, reivindicar
+      // o mesmo ID na mesma execução sem que nenhum dos dois soubesse do outro (ver 15.13).
+      if (idsAssignadosNestaRodada.has(idFinal)) {
+        const idOriginal = idFinal;
+        let dupSufixo = 1;
+        while (idsUsados.has(idFinal) || idsAssignadosNestaRodada.has(idFinal)) {
+          idFinal = idOriginal + "-DUP" + dupSufixo;
+          dupSufixo++;
+        }
+        Logger.log(`   ⚠️ COLISÃO DE ID NA MESMA RODADA: "${idOriginal}" já atribuído a outra linha da fonte. Renomeado para "${idFinal}".`);
+        timestampFinal = new Date();
+        // Força geração de um UUID novo — o UUID antigo (se houver) pertence à linha que já
+        // reivindicou idOriginal e não deve ser herdado pela linha renomeada.
+        codigoFixo = '';
+      }
+
+      idsAssignadosNestaRodada.add(idFinal);
       idsUsados.add(idFinal);
 
       // Resolve CÓDIGO_FIXO: reutiliza o que já existe (PEDIDOS ou DB), senão gera novo UUID
