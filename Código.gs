@@ -1604,7 +1604,23 @@ function sincronizarPedidosComFonte(forcarExecucao) {
           const _dillyFpSemOS_ = `${_fonteClienteStr_}|${String(fonteRow[3] || '').trim()}|${_dMarfim_}|${_dTam_}|${String(fonteRow[8] || '').trim()}|${_normalizarData_(fonteRow[11])}`;
           const _dillySlots_ = pedidosDillyMap.get(_dillyFpSemOS_);
           if (_dillySlots_) {
-            const _dillySlot_ = _dillySlots_.find(m => !m.usado);
+            // Mesmo desempate por QTD do caminho principal (~linha 1546): itens-irmãos Dilly
+            // com OS vazio na fonte caem todos na mesma fingerprint sem-OS — sem isso, o
+            // primeiro slot não-usado era escolhido sem critério e o ID podia trocar de item
+            // físico entre syncs quando o IMPORTRANGE reordenava as linhas.
+            const _dillyUnused_ = _dillySlots_.filter(m => !m.usado);
+            let _dillySlot_ = null;
+            if (_dillyUnused_.length > 1) {
+              const _dillyFonteQtd_ = Number(fonteRow[9] || 0);
+              _dillySlot_ = _dillyUnused_.reduce((best, m) => {
+                const diffBest = Math.abs(Number(best.row[QTD_COL] || 0) - _dillyFonteQtd_);
+                const diffCurr = Math.abs(Number(m.row[QTD_COL] || 0) - _dillyFonteQtd_);
+                return diffCurr < diffBest ? m : best;
+              }, _dillyUnused_[0]);
+              Logger.log(`   🔀 DILLY desempate por QTD: fonte=${_dillyFonteQtd_} → PEDIDOS QTD=${Number(_dillySlot_.row[QTD_COL]||0)} (${_dillyUnused_.length} candidatos com mesma fingerprint sem OS)`);
+            } else {
+              _dillySlot_ = _dillyUnused_[0] || null;
+            }
             if (_dillySlot_) {
               _dillySlot_.usado = true;
               matchEscolhido = _dillySlot_;
