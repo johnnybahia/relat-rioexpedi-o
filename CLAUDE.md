@@ -134,6 +134,9 @@ TZ = 'America/Fortaleza'
   - Tenta reutilizar ID existente (por fingerprint → UUID → geração nova)
   - Normaliza MARFIM e CÓD. CLIENTE para Dilly
   - Para Dilly: substitui CÓD. OS pelo Lote da fila FIFO
+- **Guarda anti-duplicata final** (ver 15.13): `idsAssignadosNestaRodada` detecta se o
+  `idFinal` resolvido já foi usado por outra linha NESTA execução e renomeia
+  (`-DUP{n}`) antes de escrever
 - Escreve resultado em PEDIDOS
 
 ### 7.3 Sync PEDIDOS → Relatorio_DB (`sincronizarDados`)
@@ -441,6 +444,39 @@ Isso garante que toda reivindicação legítima por UUID já esgotou sua vaga em
 **Cuidado ao modificar a cascade:** não fundir as duas passadas de volta em um loop único
 sem reintroduzir esta corrida; qualquer nova tentativa de match adicionada à Passada 1 deve
 resolver para TODOS os itens antes de qualquer lógica de Passada 2 ler `fonteMap`/`fonteImpressoes`.
+
+### 15.13 PEDIDOS sem guarda anti-duplicata final (FECHADO — PREVENTIVO)
+**Gap estrutural (não um bug confirmado em dados reais):** `sincronizarPedidosComFonte()`
+mantém duas estruturas de matching independentes sobre o mesmo pool de linhas de PEDIDOS —
+`pedidosMap` (fingerprint COM OS, caminho principal) e `pedidosDillyMap` (fingerprint SEM OS,
+fallback só usado para clientes Dilly quando o caminho principal não encontra nenhum
+candidato). Cada linha de PEDIDOS é envolvida em DOIS wrapper objects independentes (um por
+mapa), cada um com sua própria flag `usado`. Em tese, duas linhas DIFERENTES de
+DADOS_IMPORTADOS podiam reivindicar a MESMA linha de PEDIDOS via tiers diferentes na mesma
+execução, sem que nenhum dos dois tivesse visibilidade do outro.
+
+Diferente da escrita em Relatorio_DB (`sincronizarDados()`, que tem a "VALIDAÇÃO
+ANTI-DUPLICATA" como rede de segurança final — ver 15.12), a escrita de `novasPedidosData`
+em PEDIDOS não tinha NENHUMA validação final contra `ID_UNICO` duplicado antes do
+`setValues()`. O Set `idsUsados` existente é pré-carregado com todos os IDs do
+Relatorio_DB — serve para evitar colisão ao GERAR um ID novo, mas não detecta duas linhas
+da mesma rodada que ambas "legitimamente" reutilizaram o mesmo ID existente.
+
+PEDIDOS é o ponto mais upstream do pipeline (reescrito do zero a cada ciclo a partir de
+DADOS_IMPORTADOS) — todo o resto (Relatorio_DB, Baixas_Historico) referencia itens por
+`ID_UNICO` originado aqui. Garantir unicidade neste ponto é a defesa de maior alcance
+possível.
+
+**Correção:** novo Set `idsAssignadosNestaRodada`, vazio no início de cada execução,
+populado a cada linha processada. Imediatamente antes do `idsUsados.add(idFinal)` final,
+verifica se este `idFinal` já foi assinalado nesta mesma rodada — se sim, renomeia para
+`"{idFinal}-DUP{n}"` até ser único contra ambos os Sets, e zera `codigoFixo` (força geração
+de um UUID novo, já que o UUID antigo pertence à linha que reivindicou o ID original e não
+deve ser herdado pela linha renomeada).
+
+**Não foi observada nenhuma ocorrência confirmada deste cenário em dados reais** — esta é
+uma defesa estrutural preventiva, não a correção de um bug já manifestado (diferente do
+Bug 3 em 15.12).
 
 ---
 
