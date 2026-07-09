@@ -947,6 +947,7 @@ function onOpen() {
     .addSeparator()
     .addItem('🧹 Confirmar todos os alertas de faturamento (testes)', 'confirmarTodosAlertasMenu')
     .addItem('🔧 Corrigir Faturados com saldo aberto (reverter para Ativo)', 'corrigirFaturadosComSaldoAberto')
+    .addItem('🧹 Remover duplicatas órfãs do Relatorio_DB (OC 488457)', 'limparDuplicatasOrfasDB')
     .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
     .addSeparator()
@@ -1418,6 +1419,15 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     let pedidosData = [];
     let pedidosMap = new Map(); // impressao_digital → {id, timestamp, row, linhaOriginal}
 
+    // DILLY: mapa secundário de fingerprints SEM o campo OS para recuperar IDs existentes.
+    // Problema: para itens Dilly o OS é substituído pelo Lote (aba LOTE DILLY) em PEDIDOS,
+    // fazendo o fingerprint de PEDIDOS (com Lote) não bater com o de DADOS_IMPORTADOS (OS original).
+    // Solução: indexar por fingerprint sem OS permite reutilizar o mesmo ID/UUID a cada sync,
+    // tornando os IDs estáveis e preservando QTD.ABERTA após baixas no Relatorio_DB.
+    // IMPORTANTE: os dois mapas compartilham os MESMOS wrapper objects (mesma flag "usado") —
+    // uma linha de PEDIDOS reivindicada por um caminho fica indisponível para o outro (15.13/15.14).
+    const pedidosDillyMap = new Map();
+
     // Sequências (oc|seq) já atribuídas — em PEDIDOS (col V) ou no Relatorio_DB (col Y).
     // Slots usados nunca são reatribuídos a outro item (sequência é fixa para sempre).
     const seqUsadas = new Set();
@@ -1445,14 +1455,25 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         if (!pedidosMap.has(impressao)) {
           pedidosMap.set(impressao, []);
         }
-        pedidosMap.get(impressao).push({
+        const wrapper = {
           id: id,
           timestamp: timestamp,
           row: row,
           codigoFixo: String(row[PEDIDOS_CODIGO_FIXO_COL] || '').trim(),
           linhaOriginal: idx + FONTE_DATA_START_ROW,
           usado: false
-        });
+        };
+        pedidosMap.get(impressao).push(wrapper);
+
+        // DILLY: indexa o MESMO wrapper também pela fingerprint sem OS (flag "usado" compartilhada)
+        const _wCliente_ = String(row[CLIENTE_COL] || '').trim();
+        if (_wCliente_.toUpperCase().includes('DILLY') && String(id || '').trim()) {
+          const _wTam_    = String(row[TAM_COL] || '').trim();
+          const _wMarfim_ = _normalizarMarfimDilly_(String(row[MARFIM_COL] || '').trim(), _wTam_, _wCliente_);
+          const _wFp_ = `${_wCliente_}|${String(row[PEDIDO_COL] || '').trim()}|${_wMarfim_}|${_wTam_}|${String(row[OC_COL] || '').trim()}|${_normalizarData_(row[DTREC_COL])}`;
+          if (!pedidosDillyMap.has(_wFp_)) pedidosDillyMap.set(_wFp_, []);
+          pedidosDillyMap.get(_wFp_).push(wrapper);
+        }
 
         // Sequência já gravada em PEDIDOS (col V) conta como usada na sua OC
         const seqV = row[PEDIDOS_SEQ_ORIGINAL_COL];
@@ -1463,34 +1484,10 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       });
 
       Logger.log(`🔑 Mapeou ${pedidosMap.size} impressões digitais únicas`);
+      if (pedidosDillyMap.size > 0) Logger.log(`🔷 DILLY: ${pedidosDillyMap.size} fingerprint(s) sem OS indexadas de PEDIDOS (wrappers compartilhados)`);
     } else {
       Logger.log(`📋 PEDIDOS está vazio (primeira sincronização)`);
     }
-
-    // DILLY: mapa secundário de fingerprints SEM o campo OS para recuperar IDs existentes.
-    // Problema: para itens Dilly o OS é substituído pelo Lote (aba LOTE DILLY) em PEDIDOS,
-    // fazendo o fingerprint de PEDIDOS (com Lote) não bater com o de DADOS_IMPORTADOS (OS original).
-    // Solução: indexar por fingerprint sem OS permite reutilizar o mesmo ID/UUID a cada sync,
-    // tornando os IDs estáveis e preservando QTD.ABERTA após baixas no Relatorio_DB.
-    const pedidosDillyMap = new Map();
-    pedidosData.forEach(row => {
-      const _pdCliente_ = String(row[CLIENTE_COL] || '').trim();
-      if (!_pdCliente_.toUpperCase().includes('DILLY')) return;
-      const _pdId_ = String(row[ID_COL] || '').trim();
-      if (!_pdId_) return;
-      const _pdTam_    = String(row[TAM_COL]   || '').trim();
-      const _pdMarfim_ = _normalizarMarfimDilly_(String(row[MARFIM_COL] || '').trim(), _pdTam_, _pdCliente_);
-      const _pdFp_ = `${_pdCliente_}|${String(row[PEDIDO_COL] || '').trim()}|${_pdMarfim_}|${_pdTam_}|${String(row[OC_COL] || '').trim()}|${_normalizarData_(row[DTREC_COL])}`;
-      if (!pedidosDillyMap.has(_pdFp_)) pedidosDillyMap.set(_pdFp_, []);
-      pedidosDillyMap.get(_pdFp_).push({
-        id: _pdId_,
-        timestamp: row[TIMESTAMP_COL] || null,
-        row: row,
-        codigoFixo: String(row[PEDIDOS_CODIGO_FIXO_COL] || '').trim(),
-        usado: false
-      });
-    });
-    if (pedidosDillyMap.size > 0) Logger.log(`🔷 DILLY: ${pedidosDillyMap.size} fingerprint(s) sem OS indexadas de PEDIDOS`);
 
     // PASSO 3: Processar cada linha da fonte
     const novasPedidosData = [];
@@ -1642,13 +1639,11 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       let codigoFixo = ''; // UUID fixo por item — gerado uma vez, preservado para sempre
       let matchEscolhido = null; // declarado no escopo externo para uso na resolução de posicaoFonte
 
+      // Seleciona um slot ainda NÃO usado do fingerprint padrão (com OS), se existir.
+      // Se há múltiplos candidatos com a mesma fingerprint (mesmo produto, QTDs diferentes),
+      // usa QTD como critério de desempate para garantir matching estável mesmo quando o
+      // IMPORTRANGE reordena as linhas — evita troca de IDs entre itens duplicados.
       if (matches && matches.length > 0) {
-        // TEM MATCH(ES) em PEDIDOS - Reusar ID existente
-
-        // Encontra match não usado.
-        // Se há múltiplos candidatos com a mesma fingerprint (mesmo produto, QTDs diferentes),
-        // usa QTD como critério de desempate para garantir matching estável mesmo quando o
-        // IMPORTRANGE reordena as linhas — evita troca de IDs entre itens duplicados.
         const unusedMatches = matches.filter(m => !m.usado);
         if (unusedMatches.length > 1) {
           const fonteQtd = Number(fonteRow[9] || 0); // QTD em DADOS_IMPORTADOS (índice 9)
@@ -1661,47 +1656,53 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         } else {
           matchEscolhido = unusedMatches[0] || null;
         }
+      }
 
-        if (!matchEscolhido) {
-          // Todos os matches já foram usados (mais itens na fonte que em PEDIDOS)
-          isNovo = true;
-        } else {
-          matchEscolhido.usado = true;
-          codigoFixo = matchEscolhido.codigoFixo || ''; // reutiliza UUID já existente em PEDIDOS
+      if (matchEscolhido) {
+        // TEM MATCH em PEDIDOS - Reusar ID existente
+        matchEscolhido.usado = true;
+        codigoFixo = matchEscolhido.codigoFixo || ''; // reutiliza UUID já existente em PEDIDOS
 
-          // Se a coluna A do PEDIDOS estava vazia (usuário apagou o PEDIDOS e o IMPORTRANGE
-          // trouxe de volta só os dados B-O), tenta recuperar o ID do Relatorio_DB antes de
-          // gerar um novo — evita que itens existentes ganhem novos IDs.
-          const idExistente = String(matchEscolhido.id || '').trim();
-          if (!idExistente) {
-            const _fpList1_ = dbFingerprintMap.get(impressao);
-            const idRecuperado = (_fpList1_ && _fpList1_.length > 0) ? _fpList1_.shift() : null;
-            if (idRecuperado) {
-              Logger.log(`   🔄 ID recuperado do DB para item sem ID em PEDIDOS: "${idRecuperado}"`);
-              idFinal = idRecuperado;
-              timestampFinal = matchEscolhido.timestamp || new Date();
-            } else {
-              isNovo = true; // nunca esteve no DB: gerar novo ID normalmente
-            }
+        // Se a coluna A do PEDIDOS estava vazia (usuário apagou o PEDIDOS e o IMPORTRANGE
+        // trouxe de volta só os dados B-O), tenta recuperar o ID do Relatorio_DB antes de
+        // gerar um novo — evita que itens existentes ganhem novos IDs.
+        const idExistente = String(matchEscolhido.id || '').trim();
+        if (!idExistente) {
+          const _fpList1_ = dbFingerprintMap.get(impressao);
+          const idRecuperado = (_fpList1_ && _fpList1_.length > 0) ? _fpList1_.shift() : null;
+          if (idRecuperado) {
+            Logger.log(`   🔄 ID recuperado do DB para item sem ID em PEDIDOS: "${idRecuperado}"`);
+            idFinal = idRecuperado;
+            timestampFinal = matchEscolhido.timestamp || new Date();
           } else {
-            idFinal = idExistente;
-            timestampFinal = matchEscolhido.timestamp;
+            isNovo = true; // nunca esteve no DB: gerar novo ID normalmente
           }
+        } else {
+          idFinal = idExistente;
+          timestampFinal = matchEscolhido.timestamp;
+        }
 
-          if (!isNovo) {
-            itensAtualizados++;
-            // Detecta mudança real nos dados
-            for (let fi = 0; fi <= 13; fi++) {
-              const fv = fonteRow[fi];
-              const pv = matchEscolhido.row[fi + 1];
-              const fStr = fv instanceof Date ? _toISOStringSafe_(fv) : String(fv || '');
-              const pStr = pv instanceof Date ? _toISOStringSafe_(pv) : String(pv || '');
-              if (fStr !== pStr) { itensComMudancaReal++; break; }
-            }
+        if (!isNovo) {
+          itensAtualizados++;
+          // Detecta mudança real nos dados
+          for (let fi = 0; fi <= 13; fi++) {
+            const fv = fonteRow[fi];
+            const pv = matchEscolhido.row[fi + 1];
+            const fStr = fv instanceof Date ? _toISOStringSafe_(fv) : String(fv || '');
+            const pStr = pv instanceof Date ? _toISOStringSafe_(pv) : String(pv || '');
+            if (fStr !== pStr) { itensComMudancaReal++; break; }
           }
         }
       } else {
-        // NÃO TEM MATCH em PEDIDOS pelo fingerprint padrão (inclui OS).
+        // SEM SLOT DISPONÍVEL pelo fingerprint padrão (com OS) — ou não existe nenhum match,
+        // ou todos os matches já foram consumidos por outras linhas da fonte nesta rodada.
+        //
+        // FIX 15.14 (OC 488457): o caso "todos os matches já usados" ia DIRETO para
+        // isNovo=true, sem tentar o fallback Dilly sem OS nem a recuperação pelo DB.
+        // Para grupos Dilly com OS vazio na fonte (LOTE DILLY esgotado deixa uma linha de
+        // PEDIDOS com OS vazio — a única cujo fingerprint padrão bate com a fonte), todas
+        // as linhas-irmãs do grupo disputavam esse único slot; as perdedoras ganhavam
+        // ID + UUID novos A CADA sync, e o Relatorio_DB acumulava uma duplicata por ciclo.
         // DILLY: tenta fingerprint sem OS — em PEDIDOS o OS foi substituído pelo Lote (≠ OS original).
         const _fonteClienteStr_ = String(fonteRow[1] || '').trim();
         let _dillyMatchResolvido_ = false;
@@ -1755,6 +1756,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
             idFinal = idRecuperado;
             timestampFinal = new Date();
             itensAtualizados++;
+            isNovo = false; // slot Dilly com ID vazio pode ter setado isNovo=true — o ID recuperado prevalece
           } else {
             isNovo = true;
           }
@@ -3759,6 +3761,177 @@ function _gravarDuplicatasDebug_(rows) {
     Logger.log('📋 Duplicatas_Debug: nenhuma duplicata nesta sincronização');
   }
   SpreadsheetApp.flush();
+}
+
+// ====== LIMPEZA DE DUPLICATAS ÓRFÃS ======
+/**
+ * Remove do Relatorio_DB as linhas duplicadas "órfãs" fabricadas pelo bug de IDs
+ * instáveis (ver CLAUDE.md 15.14 — ex.: OC 488457/489062, Dilly com OS vazio na fonte).
+ *
+ * Uma linha só é removida se TODOS os critérios forem verdadeiros:
+ *   1. Status = "Ativo" e sem nenhuma marcação (MARCAR_FATURAR, MARCAR_FATURAR_USUARIO
+ *      e LOTE_EMISSAO vazios);
+ *   2. ID_UNICO não existe em PEDIDOS e CODIGO_FIXO não existe em PEDIDOS (órfã);
+ *   3. ID_UNICO sem histórico em Baixas_Historico;
+ *   4. O grupo do item (fingerprint SEM OS) tem MAIS linhas ativas no DB do que linhas em
+ *      PEDIDOS, e o item ainda existe em PEDIDOS (quota > 0) — nunca toca itens que
+ *      saíram legitimamente da fonte (esses seguem o fluxo normal de faturamento).
+ *
+ * As linhas removidas são gravadas na aba "Duplicatas_Removidas" (append) para auditoria.
+ * Na sincronização seguinte, as linhas de PEDIDOS que ficaram sem correspondente no DB
+ * são re-adicionadas normalmente — com os IDs já estabilizados pela correção 15.14.
+ * Roda sob LockService para não concorrer com o sync automático.
+ */
+function limparDuplicatasOrfasDB() {
+  const ui = SpreadsheetApp.getUi();
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (e) {
+    ui.alert('⏳ Sistema ocupado', 'Sincronização automática em andamento. Tente novamente em alguns instantes.', ui.ButtonSet.OK);
+    return;
+  }
+  try {
+    const ss = getSpreadsheet_();
+    const dbSheet = ss.getSheetByName(DB_SHEET_NAME);
+    const pedidosSheet = ss.getSheetByName(FONTE_SHEET_NAME);
+    if (!dbSheet || dbSheet.getLastRow() < 2 || !pedidosSheet || pedidosSheet.getLastRow() < FONTE_DATA_START_ROW) {
+      ui.alert('Nada a fazer', 'Relatorio_DB ou PEDIDOS sem dados.', ui.ButtonSet.OK);
+      return;
+    }
+
+    // Fingerprint SEM OS — mesma chave do pedidosDillyMap (o OS/Lote é o campo instável
+    // que diferenciava as duplicatas entre si; sem ele as cópias do mesmo item se agrupam).
+    const fpSemOS = (cliente, pedido, marfim, tam, oc, dtrec) => {
+      const c = String(cliente || '').trim();
+      const t = String(tam || '').trim();
+      return `${c}|${String(pedido || '').trim()}|${_normalizarMarfimDilly_(String(marfim || '').trim(), t, c)}|${t}|${String(oc || '').trim()}|${_normalizarData_(dtrec)}`;
+    };
+
+    // 1) PEDIDOS: IDs, UUIDs e quota de linhas por fingerprint sem OS
+    const pedidosData = pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosSheet.getLastRow() - FONTE_DATA_START_ROW + 1, PEDIDOS_CODIGO_FIXO_COL + 1).getValues();
+    const peIds = new Set();
+    const peUuids = new Set();
+    const peQuota = new Map();
+    pedidosData.forEach(row => {
+      if (!row[CARTELA_COL] || String(row[CARTELA_COL]).trim() === '') return;
+      const pid = String(row[ID_COL] || '').trim();
+      if (pid) peIds.add(pid);
+      const puuid = String(row[PEDIDOS_CODIGO_FIXO_COL] || '').trim();
+      if (puuid) peUuids.add(puuid);
+      const fp = fpSemOS(row[CLIENTE_COL], row[PEDIDO_COL], row[MARFIM_COL], row[TAM_COL], row[OC_COL], row[DTREC_COL]);
+      peQuota.set(fp, (peQuota.get(fp) || 0) + 1);
+    });
+
+    // 2) IDs com histórico de baixas — nunca remover
+    const idsComBaixa = new Set();
+    const baixasSheet = ss.getSheetByName(BAIXAS_SHEET_NAME);
+    if (baixasSheet && baixasSheet.getLastRow() > 1) {
+      baixasSheet.getRange(2, 1, baixasSheet.getLastRow() - 1, 1).getValues()
+        .forEach(r => { if (r[0]) idsComBaixa.add(String(r[0]).trim()); });
+    }
+
+    // 3) Relatorio_DB: conta linhas ativas por fingerprint e aplica os critérios
+    const numDbRows = dbSheet.getLastRow() - 1;
+    const dbCols = Math.min(LOTE_EMISSAO_COL + 1, dbSheet.getMaxColumns());
+    const dbData = dbSheet.getRange(2, 1, numDbRows, dbCols).getValues();
+
+    const dbAtivosPorFp = new Map();
+    const fpPorLinha = new Array(dbData.length);
+    dbData.forEach((row, i) => {
+      const fp = fpSemOS(row[CLIENTE_COL], row[DB_PEDIDO_COL], row[DB_MARFIM_COL], row[DB_TAM_COL], row[DB_OC_COL], row[11]); // 11 = DATA RECEB. no DB
+      fpPorLinha[i] = fp;
+      const st = String(row[STATUS_COL] || '').trim();
+      if (st !== 'Faturado' && st !== 'Finalizado' && st !== 'Excluido') {
+        dbAtivosPorFp.set(fp, (dbAtivosPorFp.get(fp) || 0) + 1);
+      }
+    });
+
+    const linhasParaRemover = []; // números de linha na planilha (1-based)
+    const auditoria = [];
+    dbData.forEach((row, i) => {
+      const id = String(row[ID_COL] || '').trim();
+      if (!id) return;
+      const fp = fpPorLinha[i];
+      const quota = peQuota.get(fp) || 0;
+      const ativos = dbAtivosPorFp.get(fp) || 0;
+      if (quota === 0 || ativos <= quota) return; // grupo sem excesso, ou item saiu da fonte
+      if (String(row[STATUS_COL] || '').trim() !== 'Ativo') return;
+      if (String(row[MARCAR_FATURAR_COL] || '').trim() !== '') return;
+      if (String(row[MARCAR_FATURAR_USUARIO_COL] || '').trim() !== '') return;
+      if (String(row[LOTE_EMISSAO_COL] || '').trim() !== '') return;
+      if (peIds.has(id)) return; // ainda referenciada por PEDIDOS
+      const uuid = String(row[DB_CODIGO_FIXO_COL] || '').trim();
+      if (uuid && peUuids.has(uuid)) return;
+      if (idsComBaixa.has(id)) return; // tem histórico de baixas
+
+      linhasParaRemover.push(i + 2);
+      auditoria.push([
+        new Date(), 'Órfã removida (limpeza de duplicatas)', id, Number(row[DB_QTD_COL] || 0),
+        row[CARTELA_COL], row[CLIENTE_COL], row[DB_PEDIDO_COL],
+        row[DB_OC_COL], row[DB_DESC_COL], row[DB_TAM_COL]
+      ]);
+    });
+
+    if (linhasParaRemover.length === 0) {
+      ui.alert('✅ Nenhuma duplicata órfã', 'Nenhuma linha do Relatorio_DB atende aos critérios de remoção.', ui.ButtonSet.OK);
+      return;
+    }
+
+    const resp = ui.alert(
+      '🧹 Remover duplicatas órfãs',
+      `Foram encontradas ${linhasParaRemover.length} linha(s) duplicada(s) órfã(s) no Relatorio_DB\n` +
+      `(Ativo, sem baixas, sem marcações e sem referência em PEDIDOS).\n\n` +
+      `Elas serão removidas e registradas na aba "Duplicatas_Removidas".\n\nContinuar?`,
+      ui.ButtonSet.YES_NO
+    );
+    if (resp !== ui.Button.YES) return;
+
+    // Auditoria (append — não é apagada pelo sync, ao contrário da Duplicatas_Debug)
+    let audSheet = ss.getSheetByName('Duplicatas_Removidas');
+    if (!audSheet) {
+      audSheet = ss.insertSheet('Duplicatas_Removidas');
+      audSheet.getRange(1, 1, 1, 10).setValues([[
+        'DATA_REMOCAO', 'MOTIVO', 'ID_REMOVIDO', 'QTD_ABERTA',
+        'CARTELA', 'CLIENTE', 'PEDIDO', 'OC', 'DESC', 'TAMANHO'
+      ]]);
+    }
+    audSheet.getRange(audSheet.getLastRow() + 1, 1, auditoria.length, 10).setValues(auditoria);
+
+    // Deleta de baixo para cima, agrupando intervalos contíguos (menos chamadas à API)
+    linhasParaRemover.sort((a, b) => b - a);
+    const blocos = [];
+    let fim = linhasParaRemover[0];
+    let inicio = fim;
+    for (let k = 1; k < linhasParaRemover.length; k++) {
+      const l = linhasParaRemover[k];
+      if (l === inicio - 1) {
+        inicio = l;
+      } else {
+        blocos.push([inicio, fim]);
+        fim = l;
+        inicio = l;
+      }
+    }
+    blocos.push([inicio, fim]);
+    blocos.forEach(([ini, fi]) => dbSheet.deleteRows(ini, fi - ini + 1));
+    SpreadsheetApp.flush();
+    limparCache();
+
+    Logger.log(`🧹 limparDuplicatasOrfasDB: ${linhasParaRemover.length} linha(s) removida(s) em ${blocos.length} bloco(s)`);
+    ui.alert(
+      '✅ Limpeza concluída',
+      `${linhasParaRemover.length} linha(s) duplicada(s) órfã(s) removida(s) do Relatorio_DB.\n` +
+      `Detalhes na aba "Duplicatas_Removidas".\n\n` +
+      `Na próxima sincronização os itens de PEDIDOS sem correspondente no DB serão re-adicionados com IDs estáveis.`,
+      ui.ButtonSet.OK
+    );
+  } catch (e) {
+    Logger.log(`❌ limparDuplicatasOrfasDB: ${e.message}\n${e.stack}`);
+    ui.alert('Erro', e.message, ui.ButtonSet.OK);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ====== COMPACTAR DB ======
