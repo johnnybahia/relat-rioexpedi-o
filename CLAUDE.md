@@ -478,6 +478,51 @@ deve ser herdado pela linha renomeada).
 uma defesa estrutural preventiva, não a correção de um bug já manifestado (diferente do
 Bug 3 em 15.12).
 
+### 15.14 Dilly com OS vazio: slot único esgotado fabricava duplicatas em massa (CORRIGIDO — OC 488457)
+**Sintoma:** Relatorio_DB com centenas de cópias do mesmo item — todas `Ativo`, cada uma com
+ID e UUID próprios, mesma `POSICAO_FONTE`. Observado: OC 488457 com 424 linhas no DB para
+40 na fonte (405 órfãs) e OC 489062 com 171 órfãs. Cliente DILLY NORDESTE em ambas.
+
+**Causa raiz (em `sincronizarPedidosComFonte`):** quando a fonte tem OS **vazio** (col L de
+DADOS_IMPORTADOS) e a fila LOTE DILLY se esgota (15.10), sobra em PEDIDOS uma linha com
+CÓD. OS vazio. O fingerprint padrão (COM OS) dessa linha (`...|OC||data`) é idêntico ao de
+TODAS as linhas-irmãs da fonte (que têm OS vazio), enquanto as demais linhas de PEDIDOS têm
+fingerprint com o Lote (`...|OC|26021696|data`) que nunca bate com a fonte. Resultado: o
+grupo inteiro disputa UM único slot no `pedidosMap`. O código antigo, no caso
+"`matches` existe mas todos usados", ia **direto para `isNovo=true`** — sem tentar o
+fallback `pedidosDillyMap` (sem OS) nem a recuperação `dbFingerprintMap`, que só existiam no
+branch "nenhum match". As linhas perdedoras ganhavam **ID + UUID novos a cada sync** (sufixos
+crescendo: -96, -97, -111... até -161).
+
+**Efeito cascata (em `sincronizarDados`):** os IDs novos de PEDIDOS não existiam no DB;
+linhas antigas do DB eram renomeadas por fingerprint até esgotarem os slots, e quando o
+FIFO do LOTE DILLY embaralhava os Lotes entre linhas-irmãs (fingerprint com OS mudava),
+linhas de PEDIDOS sem contraparte no DB eram adicionadas como "novas" — acumulando
+duplicatas. As órfãs nunca eram limpas: `consumedFingerprints` é um Set de fingerprints
+(não de slots), então após 1 match o `fpDisponiveisDB` deixava de proteger o grupo inteiro.
+
+**Correção (branch `claude/oc-488457-duplication-2i9h4q`):**
+1. O fluxo de matching foi reestruturado: a seleção de slot do fingerprint padrão foi
+   separada do tratamento; o branch de fallback (Dilly sem OS → `dbFingerprintMap` →
+   `isNovo`) agora roda **sempre que não há slot disponível** — tanto "nenhum match" quanto
+   "todos usados". Validado com dados reais: 2660/2660 linhas passam a reutilizar ID
+   (antes: 48 linhas geravam ID novo a cada sync, exatamente nas OCs 488457/489062).
+2. `pedidosMap` e `pedidosDillyMap` agora compartilham os **mesmos wrapper objects** (flag
+   `usado` única por linha física de PEDIDOS) — uma linha reivindicada por um caminho fica
+   indisponível para o outro na mesma rodada (fecha na origem o cenário do 15.13; a guarda
+   `-DUP` permanece como rede de segurança).
+3. Nova função `limparDuplicatasOrfasDB()` (menu "🧹 Remover duplicatas órfãs do
+   Relatorio_DB"): remove linhas que atendam TODOS os critérios — `Ativo`, sem
+   MARCAR_FATURAR/USUARIO/LOTE_EMISSAO, ID e UUID ausentes de PEDIDOS, sem histórico em
+   Baixas_Historico, e grupo (fingerprint SEM OS) com mais linhas ativas no DB que em
+   PEDIDOS com quota > 0 (nunca toca itens que saíram legitimamente da fonte). Auditoria
+   gravada na aba `Duplicatas_Removidas` (append; a `Duplicatas_Debug` é apagada a cada
+   sync). Roda sob LockService.
+
+**Ordem de aplicação:** publicar o código corrigido → rodar "🔄 Forçar resync agora"
+(estabiliza os IDs em PEDIDOS) → rodar a limpeza de órfãs → o sync seguinte re-adiciona ao
+DB os itens de PEDIDOS que ficaram sem correspondente, já com IDs estáveis.
+
 ---
 
 ## 16. SEQUÊNCIA SEGURA PARA MUDANÇAS
