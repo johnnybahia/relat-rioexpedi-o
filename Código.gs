@@ -74,6 +74,19 @@ const ORIG_DESC_COL = 5;  // F — Descrição
 const ORIG_TAM_COL  = 6;  // G — Tamanho
 const ORIG_QTD_COL  = 8;  // I — Quantidade
 const ORIG_DATA_COL = 11; // L — Data
+
+// ====== SEQUÊNCIA DE ITENS POR OC (a partir da data de corte) ======
+const PEDIDOS_SEQ_ORIGINAL_COL  = 21; // V (coluna 22) — sequência do item dentro da OC conforme aba "original" (fixa, nunca recalculada)
+const DB_SEQUENCIA_COL          = 24; // Y (coluna 25) — sequência propagada do PEDIDOS para o Relatorio_DB (fixa)
+// Colunas da aba "original" que IDENTIFICAM cada item (C,D,E,F,G,H,I,J,K,N):
+// C=PEDIDO, D=CÓD. CLIENTE, E=CÓD. MARFIM, F=DESCRIÇÃO, G=TAMANHO, H=ORD. COMPRA, I=QTD, J=CÓD. OS, K=DATA RECEB., N=LOTE
+const ORIG_SEQ_KEY_COLS  = [2, 3, 4, 5, 6, 7, 8, 9, 10, 13];
+// Mesmos campos em DADOS_IMPORTADOS (fonteRow, 0-based a partir da col B):
+// PEDIDO=3, CÓD. CLIENTE=4, MARFIM=5, DESC=6, TAM=7, OC=8, QTD=9, OS=10, DATA RECEB.=11, LOTE=23
+const FONTE_SEQ_KEY_COLS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 23];
+// Apenas itens com DATA RECEB. (data de entrada) a partir desta data recebem sequência
+const SEQUENCIA_DATA_CORTE = new Date(2026, 6, 9); // 09/07/2026
+
 const DIAS_RETENCAO = 15;      // Itens com status final são purgados após este número de dias
 
 // ====== BAIXAS PARCIAIS ======
@@ -96,6 +109,55 @@ function _toISOStringSafe_(date) {
     Logger.log(`⚠️ Erro ao converter data para ISO: ${e.message}`);
     return '';
   }
+}
+
+// ====== SEQUÊNCIA DA ABA "ORIGINAL" ======
+
+// Normaliza um valor de célula para compor a chave de identificação da sequência:
+// datas → 'yyyy-MM-dd' (objeto Date ou texto 'dd/MM/yyyy'); números → string canônica
+// (240 ≡ "240" ≡ "240,00" ≡ "1.028,00"→"1028"); textos → trim + maiúsculas + espaços únicos.
+function _normSeqVal_(v) {
+  if (v instanceof Date) {
+    return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
+  }
+  if (typeof v === 'number') return isFinite(v) ? String(v) : '';
+  let s = String(v === null || v === undefined ? '' : v).trim().toUpperCase().replace(/\s+/g, ' ');
+  // Data em texto (dd/MM/yyyy) → mesma forma canônica usada para objetos Date
+  const md = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (md) {
+    return md[3] + '-' + String(md[2]).padStart(2, '0') + '-' + String(md[1]).padStart(2, '0');
+  }
+  // Número pt-BR com separador de milhar ("1.028,00") → canônico "1028"
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) {
+    const n = Number(s.replace(/\./g, '').replace(',', '.'));
+    if (isFinite(n)) return String(n);
+  }
+  // Número simples ("240", "12,00", "408.75") → canônico
+  if (/^-?\d+(?:[.,]\d+)?$/.test(s)) {
+    const n = Number(s.replace(',', '.'));
+    if (isFinite(n)) return String(n);
+  }
+  return s;
+}
+
+// Chave de identificação de um item: junção normalizada das colunas indicadas.
+function _chaveSeqOriginal_(row, cols) {
+  return cols.map(i => _normSeqVal_(row[i])).join('|');
+}
+
+// Converte DATA RECEB. (Date, 'dd/MM/yyyy' ou 'yyyy-MM-dd') para ms à meia-noite local.
+// Retorna null se irreconhecível — nesse caso o item NÃO recebe sequência (nunca chuta).
+function _dataEntradaMs_(v) {
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
+    return new Date(v.getFullYear(), v.getMonth(), v.getDate()).getTime();
+  }
+  const s = String(v || '').trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
+  return null;
 }
 
 // ====== FUNÇÃO WEB APP ======
@@ -1356,9 +1418,13 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     let pedidosData = [];
     let pedidosMap = new Map(); // impressao_digital → {id, timestamp, row, linhaOriginal}
 
+    // Sequências (oc|seq) já atribuídas — em PEDIDOS (col V) ou no Relatorio_DB (col Y).
+    // Slots usados nunca são reatribuídos a outro item (sequência é fixa para sempre).
+    const seqUsadas = new Set();
+
     if (pedidosLastRow >= FONTE_DATA_START_ROW) {
       // Lê dados atuais de PEDIDOS (com ID e timestamp)
-      const pedidosNumCols = Math.max(21, pedidosSheet.getLastColumn()); // Garante até coluna U (LOTE)
+      const pedidosNumCols = Math.max(22, pedidosSheet.getLastColumn()); // Garante até coluna V (SEQ_ORIGINAL)
       pedidosData = pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, pedidosLastRow - FONTE_DATA_START_ROW + 1, pedidosNumCols).getValues();
 
       Logger.log(`📋 Leu ${pedidosData.length} linhas de ${FONTE_SHEET_NAME}`);
@@ -1387,6 +1453,13 @@ function sincronizarPedidosComFonte(forcarExecucao) {
           linhaOriginal: idx + FONTE_DATA_START_ROW,
           usado: false
         });
+
+        // Sequência já gravada em PEDIDOS (col V) conta como usada na sua OC
+        const seqV = row[PEDIDOS_SEQ_ORIGINAL_COL];
+        const seqVNum = (typeof seqV === 'number') ? seqV : Number(String(seqV || '').trim() || NaN);
+        if (isFinite(seqVNum) && seqVNum > 0) {
+          seqUsadas.add(`${String(row[OC_COL] || '').trim()}|${seqVNum}`);
+        }
       });
 
       Logger.log(`🔑 Mapeou ${pedidosMap.size} impressões digitais únicas`);
@@ -1442,9 +1515,17 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     const dbSheetRef = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     if (dbSheetRef && dbSheetRef.getLastRow() >= 2) {
       const numDbRows = dbSheetRef.getLastRow() - 1;
-      // Lê 19 colunas (A até S) — inclui CÓDIGO_FIXO na coluna S (índice 18)
-      const dbRange = dbSheetRef.getRange(2, 1, numDbRows, 19).getValues();
+      // Lê até a coluna Y (SEQUENCIA, índice 24) — inclui CÓDIGO_FIXO em S (18) e SEQUENCIA em Y (24)
+      const dbReadCols = Math.min(DB_SEQUENCIA_COL + 1, dbSheetRef.getMaxColumns());
+      const dbRange = dbSheetRef.getRange(2, 1, numDbRows, dbReadCols).getValues();
       dbRange.forEach(dbRow => {
+        // Sequência já fixada no DB (col Y) conta como usada na sua OC — cobre itens
+        // faturados que já saíram de PEDIDOS mas seguem no DB
+        const seqY = dbRow[DB_SEQUENCIA_COL];
+        const seqYNum = (typeof seqY === 'number') ? seqY : Number(String(seqY || '').trim() || NaN);
+        if (isFinite(seqYNum) && seqYNum > 0) {
+          seqUsadas.add(`${String(dbRow[DB_OC_COL] || '').trim()}|${seqYNum}`);
+        }
         const dbId = String(dbRow[0] || '').trim();
         if (dbId) {
           idsUsados.add(dbId);
@@ -1467,11 +1548,23 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // Chave: "OC|DESC|TAM|QTD|DATA" → índice global da linha (usado para ordenar itens no HTML).
     // Regra: uma vez encontrada, a posição NUNCA muda — mesmo que QTD seja alterada depois.
     const originalPosMap = new Map();
+    // Sequência por OC: cada linha da aba "original" recebe um número 1, 2, 3… dentro da
+    // sua OC, na ordem da planilha. originalSeqFifo: chave de identificação (C,D,E,F,G,H,I,J,K,N)
+    // → fila FIFO de slots {oc, seq}; itens 100% idênticos consomem um slot cada, em ordem.
+    const originalSeqFifo = new Map();
     try {
       const origSheet = getSpreadsheet_().getSheetByName(ORIGINAL_SHEET_NAME);
-      if (origSheet && origSheet.getLastRow() > 1) {
-        const origLastRow = origSheet.getLastRow() - 1; // exclui cabeçalho
-        const origData = origSheet.getRange(2, 1, origLastRow, 12).getValues();
+      if (origSheet && origSheet.getLastRow() >= 1) {
+        // A aba "original" NÃO tem linha de cabeçalho — os dados começam na linha 1
+        // (ler a partir da linha 2 descartaria o primeiro item da aba).
+        const origLastRow = origSheet.getLastRow();
+        // Lê até a coluna N (índice 13) para a chave de identificação da sequência
+        const origNumCols = Math.min(Math.max(origSheet.getLastColumn(), 14), origSheet.getMaxColumns());
+        if (origNumCols < 14) {
+          Logger.log(`⚠️ Aba "${ORIGINAL_SHEET_NAME}" tem só ${origNumCols} colunas (esperado ≥14 para a chave de sequência)`);
+        }
+        const origData = origSheet.getRange(1, 1, origLastRow, origNumCols).getValues();
+        const seqContadorOc = {};
         origData.forEach((row, origIdx) => {
           const oc = String(row[ORIG_OC_COL] || '').trim();
           if (!oc) return;
@@ -1485,8 +1578,15 @@ function sincronizarPedidosComFonte(forcarExecucao) {
           if (!originalPosMap.has(chave)) { // guarda apenas a primeira ocorrência
             originalPosMap.set(chave, origIdx);
           }
+
+          // Numera o item dentro da sua OC (ordem da aba "original") e registra o slot
+          seqContadorOc[oc] = (seqContadorOc[oc] || 0) + 1;
+          const chaveSeq = _chaveSeqOriginal_(row, ORIG_SEQ_KEY_COLS);
+          if (!originalSeqFifo.has(chaveSeq)) originalSeqFifo.set(chaveSeq, []);
+          originalSeqFifo.get(chaveSeq).push({ oc: oc, seq: seqContadorOc[oc] });
         });
         Logger.log(`📐 ${originalPosMap.size} posições mapeadas da aba "${ORIGINAL_SHEET_NAME}"`);
+        Logger.log(`🔢 ${originalSeqFifo.size} chaves de sequência indexadas (${Object.keys(seqContadorOc).length} OCs)`);
       } else {
         Logger.log(`⚠️ Aba "${ORIGINAL_SHEET_NAME}" não encontrada ou vazia — usando índice de DADOS_IMPORTADOS como fallback`);
       }
@@ -1745,6 +1845,33 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         // 900000+idx como fallback: mantém ordem relativa de DADOS_IMPORTADOS para itens não encontrados
       }
 
+      // Resolve SEQ_ORIGINAL: número de ordem do item dentro da sua OC, conforme a aba
+      // "original" (identificado pelas colunas C,D,E,F,G,H,I,J,K,N). Uma vez atribuída,
+      // a sequência é FIXA: preserva o valor já gravado em PEDIDOS (col V) e nunca recalcula.
+      // Atribuição apenas para itens com DATA RECEB. >= SEQUENCIA_DATA_CORTE.
+      let seqOriginal = '';
+      if (matchEscolhido && !isNovo) {
+        const seqExist = matchEscolhido.row[PEDIDOS_SEQ_ORIGINAL_COL];
+        const seqExistNum = (typeof seqExist === 'number') ? seqExist : Number(String(seqExist || '').trim() || NaN);
+        if (isFinite(seqExistNum) && seqExistNum > 0) seqOriginal = seqExistNum;
+      }
+      if (seqOriginal === '' && originalSeqFifo.size > 0) {
+        const entradaMs = _dataEntradaMs_(fonteRow[11]); // M da fonte: DATA RECEB. (data de entrada)
+        if (entradaMs !== null && entradaMs >= SEQUENCIA_DATA_CORTE.getTime()) {
+          const chaveSeq = _chaveSeqOriginal_(fonteRow, FONTE_SEQ_KEY_COLS);
+          const fila = originalSeqFifo.get(chaveSeq);
+          if (fila) {
+            // Pula slots cuja sequência já pertence a outro item (PEDIDOS col V ou DB col Y)
+            while (fila.length > 0 && seqUsadas.has(`${fila[0].oc}|${fila[0].seq}`)) fila.shift();
+            if (fila.length > 0) {
+              const slot = fila.shift();
+              seqOriginal = slot.seq;
+              seqUsadas.add(`${slot.oc}|${slot.seq}`);
+            }
+          }
+        }
+      }
+
       // Para o cliente Dilly: corrige CÓD. MARFIM (col G) — veja _normalizarMarfimDilly_
       const _codMarfimFinal_ = _normalizarMarfimDilly_(
         String(fonteRow[5] || '').trim(),
@@ -1804,7 +1931,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         '',                // R: (reservado)
         codigoFixo,        // S: CÓDIGO_FIXO — UUID imutável por item
         fonteRow[22] !== undefined ? fonteRow[22] : '',  // T: INFO_X — coluna X da fonte (informação adicional da OC)
-        fonteRow[23] !== undefined ? fonteRow[23] : ''   // U: LOTE — coluna Y da fonte (número de lote)
+        fonteRow[23] !== undefined ? fonteRow[23] : '',  // U: LOTE — coluna Y da fonte (número de lote)
+        seqOriginal        // V: SEQ_ORIGINAL — posição do item dentro da OC na aba "original" (fixa)
       ];
 
       novasPedidosData.push(novaLinha);
@@ -1830,8 +1958,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       pedidosSheet.getRange(1, 12, rowsToFormat, 1).setNumberFormat(txtFmt); // L
       pedidosSheet.getRange(1, 20, rowsToFormat, 2).setNumberFormat(txtFmt); // T (INFO_X), U (LOTE)
 
-      // Escreve novos dados
-      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 21).setValues(novasPedidosData);
+      // Escreve novos dados (22 colunas: A–V, incluindo SEQ_ORIGINAL em V)
+      pedidosSheet.getRange(FONTE_DATA_START_ROW, 1, novasPedidosData.length, 22).setValues(novasPedidosData);
 
       SpreadsheetApp.flush();
 
@@ -3340,6 +3468,15 @@ function sincronizarDados() {
       Logger.log(`   🧹 MARCAR_FATURAR_USUARIO e LOTE_EMISSAO limpos para ${idsParaLimparUsuario.length} item(ns) com reset de ciclo`);
     }
 
+    // Propaga SEQ_ORIGINAL (PEDIDOS col V) para SEQUENCIA (Relatorio_DB col Y).
+    // Grava apenas células ainda vazias — uma vez gravada, a sequência NUNCA é alterada.
+    try {
+      const seqGravadas = _propagarSequenciaOriginalParaDB_(dbSheet, fonteMap);
+      if (seqGravadas > 0) Logger.log(`   🔢 ${seqGravadas} sequência(s) da aba "original" gravada(s) no DB (col Y)`);
+    } catch (eSeq) {
+      Logger.log(`   ⚠️ Erro ao propagar sequências para o DB: ${eSeq.message}`);
+    }
+
     SpreadsheetApp.flush();
     if (novosValidados.length > 0 || updates.length > 0) {
       limparCache();
@@ -3384,6 +3521,62 @@ function sincronizarDados() {
     Logger.log("\n❌ ERRO: " + error.message);
     throw error;
   }
+}
+
+/**
+ * Propaga a sequência da aba "original" (PEDIDOS col V) para o Relatorio_DB (col Y).
+ * Regras de integridade:
+ *  - Grava SOMENTE células vazias de Y — sequência gravada é imutável.
+ *  - Apenas itens com DATA RECEB. >= SEQUENCIA_DATA_CORTE.
+ *  - Se a coluna Y tiver cabeçalho de outro nome, aborta sem tocar em nada.
+ * @returns {number} quantidade de sequências gravadas
+ */
+function _propagarSequenciaOriginalParaDB_(dbSheet, fonteMap) {
+  // Garante espaço físico até a coluna Y
+  if (dbSheet.getMaxColumns() < DB_SEQUENCIA_COL + 1) {
+    dbSheet.insertColumnsAfter(dbSheet.getMaxColumns(), DB_SEQUENCIA_COL + 1 - dbSheet.getMaxColumns());
+  }
+
+  // Garante o cabeçalho; nunca sobrescreve uma coluna com nome diferente
+  const headerY = String(dbSheet.getRange(1, DB_SEQUENCIA_COL + 1).getValue() || '').trim();
+  if (headerY === '') {
+    dbSheet.getRange(1, DB_SEQUENCIA_COL + 1).setValue('SEQUENCIA')
+      .setFontWeight('bold').setBackground('#f0f2f5');
+  } else if (headerY !== 'SEQUENCIA') {
+    Logger.log(`   ⚠️ Coluna Y do DB tem cabeçalho inesperado ("${headerY}") — propagação de sequência abortada`);
+    return 0;
+  }
+
+  // ID → sequência, a partir das linhas de PEDIDOS recém-sincronizadas
+  const idToSeq = new Map();
+  for (const [id, row] of fonteMap.entries()) {
+    const v = row[PEDIDOS_SEQ_ORIGINAL_COL];
+    const n = (typeof v === 'number') ? v : Number(String(v || '').trim() || NaN);
+    if (isFinite(n) && n > 0) idToSeq.set(id, n);
+  }
+  if (idToSeq.size === 0) return 0;
+
+  const lastRow = dbSheet.getLastRow();
+  if (lastRow < 2) return 0;
+  const numRows = lastRow - 1;
+  const dados = dbSheet.getRange(2, 1, numRows, DB_SEQUENCIA_COL + 1).getValues();
+  const colY  = dados.map(r => [r[DB_SEQUENCIA_COL]]);
+
+  let gravadas = 0;
+  dados.forEach((row, i) => {
+    if (String(colY[i][0] === null || colY[i][0] === undefined ? '' : colY[i][0]).trim() !== '') return; // já fixada
+    const id = String(row[0] || '').trim();
+    if (!id || !idToSeq.has(id)) return;
+    const entradaMs = _dataEntradaMs_(row[11]); // L: DATA RECEB. (data de entrada)
+    if (entradaMs === null || entradaMs < SEQUENCIA_DATA_CORTE.getTime()) return;
+    colY[i][0] = idToSeq.get(id);
+    gravadas++;
+  });
+
+  if (gravadas > 0) {
+    dbSheet.getRange(2, DB_SEQUENCIA_COL + 1, numRows, 1).setValues(colY);
+  }
+  return gravadas;
 }
 
 // ====== ALERTAS DE FATURAMENTO ======
@@ -3703,7 +3896,8 @@ const RELATORIO_DB_HEADERS = [
   'LOTE',                   // U - número de lote da coluna Y da fonte
   'MARCAR_FATURAR_USUARIO', // V - usuário que marcou o item para faturamento
   'LOTE_EMISSAO',           // W - lote de emissão do relatório de faturamento (FAT-001, FAT-002…)
-  'PERFIL_EMISSAO'          // X - perfil de baixa (BAIXA1…BAIXA5)
+  'PERFIL_EMISSAO',         // X - perfil de baixa (BAIXA1…BAIXA5)
+  'SEQUENCIA'               // Y - sequência do item dentro da OC conforme aba "original" (fixa)
 ];
 
 /**
@@ -3843,6 +4037,7 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     LOTE:         getDisp('LOTE',         ''),
     LOTE_EMISSAO:    getDisp('LOTE_EMISSAO',    ''),
     PERFIL_EMISSAO:  getDisp('PERFIL_EMISSAO',  ''),
+    SEQUENCIA:       getDisp('SEQUENCIA',       ''),
     // Posição original em DADOS_IMPORTADOS — lida por índice fixo (col R = índice 17 no DB)
     posicaoFonte: (typeof row[DB_POSICAO_FONTE_COL] === 'number' && !isNaN(row[DB_POSICAO_FONTE_COL]))
       ? row[DB_POSICAO_FONTE_COL]

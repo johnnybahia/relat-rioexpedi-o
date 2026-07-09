@@ -5259,6 +5259,7 @@ ALL_OCS_ITEMS = itemsObj;
                     <table>
                         <thead>
                             <tr>
+                                <th>Sequência</th>
                                 <th>Pedido</th>
                                 <th>Cód. Cliente</th>
                                 <th>Descrição</th>
@@ -5280,6 +5281,7 @@ ALL_OCS_ITEMS = itemsObj;
                     const prazo       = formatarPrazoDias(item.PRAZO);
                     const codOS       = item['CÓD. OS'] ?? 'N/A';
                     const marcadoPor  = _escapeHtml(item.MARCAR_FATURAR_USUARIO || '');
+                    const sequencia   = _escapeHtml(String(item.SEQUENCIA ?? '').trim());
                     const loteAnt     = (item.LOTE_EMISSAO || '').trim();
                     // Item reemitido: estava em lote anterior e o usuário optou por incluí-lo novamente
                     const isReemissao = loteAnt && loteAnt !== loteId;
@@ -5290,6 +5292,7 @@ ALL_OCS_ITEMS = itemsObj;
 
                     html += `
                         <tr class="${rowClass}">
+                            <td style="text-align:center;font-weight:700;">${sequencia}</td>
                             <td>${item.PEDIDO ?? 'N/A'}${badgeReemit}</td>
                             <td>${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
                             <td>${item.DESCRIÇÃO ?? 'N/A'}</td>
