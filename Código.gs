@@ -4798,9 +4798,9 @@ function obterItensMarcadosParaFaturar(perfil) {
       return { success: true, items: [] };
     }
 
-    // Força leitura de pelo menos 24 colunas (A-X) para incluir PERFIL_EMISSAO
-    const lastCol = Math.max(sheet.getLastColumn(), 24);
-    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 24)`);
+    // Força leitura de pelo menos 25 colunas (A-Y) para incluir PERFIL_EMISSAO e SEQUENCIA
+    const lastCol = Math.max(sheet.getLastColumn(), 25);
+    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 25)`);
 
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     Logger.log(`📋 Headers lidos: ${headers.length} colunas`);
@@ -4887,6 +4887,7 @@ function obterItensMarcadosParaFaturar(perfil) {
             INFO_X:          item.INFO_X          || '',
             LOTE:            item.LOTE            || '',
             PERFIL_EMISSAO:  item.PERFIL_EMISSAO  || '',
+            SEQUENCIA:       item.SEQUENCIA       || '',
             SALDO: saldo
           };
 
