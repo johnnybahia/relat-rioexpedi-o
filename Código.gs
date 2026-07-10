@@ -78,12 +78,9 @@ const ORIG_DATA_COL = 11; // L — Data
 // ====== SEQUÊNCIA DE ITENS POR OC (a partir da data de corte) ======
 const PEDIDOS_SEQ_ORIGINAL_COL  = 21; // V (coluna 22) — sequência do item dentro da OC conforme aba "original" (fixa, nunca recalculada)
 const DB_SEQUENCIA_COL          = 24; // Y (coluna 25) — sequência propagada do PEDIDOS para o Relatorio_DB (fixa)
-// Colunas da aba "original" que IDENTIFICAM cada item (C,D,E,F,G,H,I,J,K,N):
-// C=PEDIDO, D=CÓD. CLIENTE, E=CÓD. MARFIM, F=DESCRIÇÃO, G=TAMANHO, H=ORD. COMPRA, I=QTD, J=CÓD. OS, K=DATA RECEB., N=LOTE
-const ORIG_SEQ_KEY_COLS  = [2, 3, 4, 5, 6, 7, 8, 9, 10, 13];
-// Mesmos campos em DADOS_IMPORTADOS (fonteRow, 0-based a partir da col B):
-// PEDIDO=3, CÓD. CLIENTE=4, MARFIM=5, DESC=6, TAM=7, OC=8, QTD=9, OS=10, DATA RECEB.=11, LOTE=23
-const FONTE_SEQ_KEY_COLS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 23];
+// A identificação do item entre DADOS_IMPORTADOS e a aba "original" usa a chave OC|DESC|TAM|QTD
+// (sem data: a DATA RECEB. diverge entre as duas abas). A data de corte abaixo é aplicada
+// somente sobre a DATA RECEB. do DADOS_IMPORTADOS.
 // Apenas itens com DATA RECEB. (data de entrada) a partir desta data recebem sequência
 const SEQUENCIA_DATA_CORTE = new Date(2026, 6, 9); // 09/07/2026
 
@@ -112,38 +109,6 @@ function _toISOStringSafe_(date) {
 }
 
 // ====== SEQUÊNCIA DA ABA "ORIGINAL" ======
-
-// Normaliza um valor de célula para compor a chave de identificação da sequência:
-// datas → 'yyyy-MM-dd' (objeto Date ou texto 'dd/MM/yyyy'); números → string canônica
-// (240 ≡ "240" ≡ "240,00" ≡ "1.028,00"→"1028"); textos → trim + maiúsculas + espaços únicos.
-function _normSeqVal_(v) {
-  if (v instanceof Date) {
-    return isNaN(v.getTime()) ? '' : Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
-  }
-  if (typeof v === 'number') return isFinite(v) ? String(v) : '';
-  let s = String(v === null || v === undefined ? '' : v).trim().toUpperCase().replace(/\s+/g, ' ');
-  // Data em texto (dd/MM/yyyy) → mesma forma canônica usada para objetos Date
-  const md = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (md) {
-    return md[3] + '-' + String(md[2]).padStart(2, '0') + '-' + String(md[1]).padStart(2, '0');
-  }
-  // Número pt-BR com separador de milhar ("1.028,00") → canônico "1028"
-  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) {
-    const n = Number(s.replace(/\./g, '').replace(',', '.'));
-    if (isFinite(n)) return String(n);
-  }
-  // Número simples ("240", "12,00", "408.75") → canônico
-  if (/^-?\d+(?:[.,]\d+)?$/.test(s)) {
-    const n = Number(s.replace(',', '.'));
-    if (isFinite(n)) return String(n);
-  }
-  return s;
-}
-
-// Chave de identificação de um item: junção normalizada das colunas indicadas.
-function _chaveSeqOriginal_(row, cols) {
-  return cols.map(i => _normSeqVal_(row[i])).join('|');
-}
 
 // Converte DATA RECEB. (Date, 'dd/MM/yyyy' ou 'yyyy-MM-dd') para ms à meia-noite local.
 // Retorna null se irreconhecível — nesse caso o item NÃO recebe sequência (nunca chuta).
@@ -1545,22 +1510,17 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // Chave: "OC|DESC|TAM|QTD|DATA" → índice global da linha (usado para ordenar itens no HTML).
     // Regra: uma vez encontrada, a posição NUNCA muda — mesmo que QTD seja alterada depois.
     const originalPosMap = new Map();
-    // Sequência por OC: cada linha da aba "original" recebe um número 1, 2, 3… dentro da
-    // sua OC, na ordem da planilha. originalSeqFifo: chave de identificação (C,D,E,F,G,H,I,J,K,N)
-    // → fila FIFO de slots {oc, seq}; itens 100% idênticos consomem um slot cada, em ordem.
+    // Sequência por OC: cada linha da aba "original" recebe um número 1, 2, 3… dentro da sua
+    // OC, na ordem da planilha. originalSeqFifo é indexado por OC|DESC|TAM|QTD (SEM a data:
+    // a DATA RECEB. diverge entre a aba "original" e o DADOS_IMPORTADOS — dia/mês trocados —
+    // e quebraria o casamento) → fila FIFO de slots {oc, seq}; itens idênticos consomem um
+    // slot cada, em ordem.
     const originalSeqFifo = new Map();
     try {
       const origSheet = getSpreadsheet_().getSheetByName(ORIGINAL_SHEET_NAME);
-      if (origSheet && origSheet.getLastRow() >= 1) {
-        // A aba "original" NÃO tem linha de cabeçalho — os dados começam na linha 1
-        // (ler a partir da linha 2 descartaria o primeiro item da aba).
-        const origLastRow = origSheet.getLastRow();
-        // Lê até a coluna N (índice 13) para a chave de identificação da sequência
-        const origNumCols = Math.min(Math.max(origSheet.getLastColumn(), 14), origSheet.getMaxColumns());
-        if (origNumCols < 14) {
-          Logger.log(`⚠️ Aba "${ORIGINAL_SHEET_NAME}" tem só ${origNumCols} colunas (esperado ≥14 para a chave de sequência)`);
-        }
-        const origData = origSheet.getRange(1, 1, origLastRow, origNumCols).getValues();
+      if (origSheet && origSheet.getLastRow() > 1) {
+        const origLastRow = origSheet.getLastRow() - 1; // exclui a linha de cabeçalho
+        const origData = origSheet.getRange(2, 1, origLastRow, 12).getValues();
         const seqContadorOc = {};
         origData.forEach((row, origIdx) => {
           const oc = String(row[ORIG_OC_COL] || '').trim();
@@ -1576,9 +1536,9 @@ function sincronizarPedidosComFonte(forcarExecucao) {
             originalPosMap.set(chave, origIdx);
           }
 
-          // Numera o item dentro da sua OC (ordem da aba "original") e registra o slot
+          // Numera o item dentro da sua OC e registra o slot na fila FIFO (chave SEM data)
           seqContadorOc[oc] = (seqContadorOc[oc] || 0) + 1;
-          const chaveSeq = _chaveSeqOriginal_(row, ORIG_SEQ_KEY_COLS);
+          const chaveSeq = `${oc}|${desc}|${tam}|${qtd}`;
           if (!originalSeqFifo.has(chaveSeq)) originalSeqFifo.set(chaveSeq, []);
           originalSeqFifo.get(chaveSeq).push({ oc: oc, seq: seqContadorOc[oc] });
         });
@@ -1848,7 +1808,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       }
 
       // Resolve SEQ_ORIGINAL: número de ordem do item dentro da sua OC, conforme a aba
-      // "original" (identificado pelas colunas C,D,E,F,G,H,I,J,K,N). Uma vez atribuída,
+      // "original", identificado pela chave OC|DESC|TAM|QTD (sem data). Uma vez atribuída,
       // a sequência é FIXA: preserva o valor já gravado em PEDIDOS (col V) e nunca recalcula.
       // Atribuição apenas para itens com DATA RECEB. >= SEQUENCIA_DATA_CORTE.
       let seqOriginal = '';
@@ -1860,7 +1820,11 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       if (seqOriginal === '' && originalSeqFifo.size > 0) {
         const entradaMs = _dataEntradaMs_(fonteRow[11]); // M da fonte: DATA RECEB. (data de entrada)
         if (entradaMs !== null && entradaMs >= SEQUENCIA_DATA_CORTE.getTime()) {
-          const chaveSeq = _chaveSeqOriginal_(fonteRow, FONTE_SEQ_KEY_COLS);
+          const _ocSeq_   = String(fonteRow[8] || '').trim();
+          const _descSeq_ = String(fonteRow[6] || '').trim();
+          const _tamSeq_  = String(fonteRow[7] || '').trim();
+          const _qtdSeq_  = String(fonteRow[9] || '').trim();
+          const chaveSeq = `${_ocSeq_}|${_descSeq_}|${_tamSeq_}|${_qtdSeq_}`;
           const fila = originalSeqFifo.get(chaveSeq);
           if (fila) {
             // Pula slots cuja sequência já pertence a outro item (PEDIDOS col V ou DB col Y)
@@ -4798,9 +4762,9 @@ function obterItensMarcadosParaFaturar(perfil) {
       return { success: true, items: [] };
     }
 
-    // Força leitura de pelo menos 24 colunas (A-X) para incluir PERFIL_EMISSAO
-    const lastCol = Math.max(sheet.getLastColumn(), 24);
-    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 24)`);
+    // Força leitura de pelo menos 25 colunas (A-Y) para incluir PERFIL_EMISSAO e SEQUENCIA
+    const lastCol = Math.max(sheet.getLastColumn(), 25);
+    Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 25)`);
 
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
     Logger.log(`📋 Headers lidos: ${headers.length} colunas`);
@@ -4887,6 +4851,7 @@ function obterItensMarcadosParaFaturar(perfil) {
             INFO_X:          item.INFO_X          || '',
             LOTE:            item.LOTE            || '',
             PERFIL_EMISSAO:  item.PERFIL_EMISSAO  || '',
+            SEQUENCIA:       item.SEQUENCIA       || '',
             SALDO: saldo
           };
 
