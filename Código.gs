@@ -4232,9 +4232,11 @@ function _garantirAbaConfiguracoes_() {
   sheet.getRange('A2').setValue('Horário da limpeza de itens Faturados (0 a 23, horário de Fortaleza):');
   sheet.getRange(CONFIG_HORA_LIMPEZA_CELL).setValue(CONFIG_HORA_LIMPEZA_PADRAO).setFontWeight('bold');
   sheet.getRange('A3').setValue(
-    'Todo dia, na primeira sincronização a partir desse horário, os itens Faturado/Finalizado/' +
-    'Excluído com pelo menos ' + DIAS_RETENCAO + ' dia(s) somem do relatório. Para mudar, edite ' +
-    'só o número da célula ' + CONFIG_HORA_LIMPEZA_CELL + ' — vale a partir da próxima sincronização.'
+    'De segunda a sexta, na primeira sincronização a partir desse horário, os itens ' +
+    'Faturado/Finalizado/Excluído com pelo menos ' + DIAS_RETENCAO + ' dia(s) somem do ' +
+    'relatório. Nunca roda sozinha aos sábados e domingos — só via "🧹 Limpar Faturados ' +
+    'agora" no menu. Para mudar o horário, edite só o número da célula ' + CONFIG_HORA_LIMPEZA_CELL +
+    ' — vale a partir da próxima sincronização.'
   ).setFontStyle('italic').setFontColor('#666666');
   sheet.autoResizeColumn(1);
   SpreadsheetApp.flush();
@@ -4269,6 +4271,10 @@ function _getHoraLimpezaFaturados_() {
  * seja igual ou depois do horário configurado. Usa uma propriedade do script (não uma
  * hora exata) para não depender de cair bem na hora certa — se o trigger horário atrasar
  * ou for adiado por lock, ainda assim libera na primeira passada seguinte.
+ *
+ * NUNCA roda sozinha aos sábados e domingos — só via "🧹 Limpar Faturados agora" no
+ * menu (chamada manual, ignora esta função). Sexta-feira roda normalmente; como sábado
+ * e domingo ficam de fora, a próxima automática cai naturalmente na segunda.
  * @returns {boolean}
  */
 function _deveLimparFaturadosAgora_() {
@@ -4276,6 +4282,12 @@ function _deveLimparFaturadosAgora_() {
   const agora = new Date();
   const horaAtual = Number(Utilities.formatDate(agora, TZ, 'H'));
   const hojeStr = Utilities.formatDate(agora, TZ, 'yyyy-MM-dd');
+
+  // Dia da semana no fuso de Fortaleza (0=domingo … 6=sábado). Constrói um Date local
+  // só a partir de ano/mês/dia (sem hora) — evita qualquer ambiguidade de fuso no getDay().
+  const [ano, mes, dia] = hojeStr.split('-').map(Number);
+  const diaSemana = new Date(ano, mes - 1, dia).getDay();
+  if (diaSemana === 0 || diaSemana === 6) return false; // sábado ou domingo
 
   if (horaAtual < horaLimpeza) return false; // ainda não chegou o horário de hoje
 
