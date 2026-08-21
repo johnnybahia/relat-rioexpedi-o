@@ -87,7 +87,17 @@ const FONTE_SEQ_KEY_COLS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 23];
 // Apenas itens com DATA RECEB. (data de entrada) a partir desta data recebem sequência
 const SEQUENCIA_DATA_CORTE = new Date(2026, 6, 9); // 09/07/2026
 
-const DIAS_RETENCAO = 15;      // Itens com status final são purgados após este número de dias
+const DIAS_RETENCAO = 15;      // Idade mínima (dias) para um item Faturado ser purgado.
+// A purga roda em um HORÁRIO FIXO, uma vez por dia — não a toda hora com prazo individual
+// por item. O horário é definido pelo usuário na aba CONFIGURAÇÕES (célula B2) — ver
+// _getHoraLimpezaFaturados_. Feita por purgarItensFinalizados(), chamada pela Etapa 3 de
+// processoAutomaticoCompleto só quando _deveLimparFaturadosAgora_() autoriza. Nunca toca
+// em item Ativo, nunca troca ID de ninguém — diferente do RESET COMPLETO
+// (resetarEReprocessar/resetarEReprocessarSilencioso), que apaga e regenera a identidade
+// de TODOS os itens, inclusive os ainda em aberto.
+const CONFIG_SHEET_NAME = 'CONFIGURAÇÕES'; // aba onde o usuário ajusta configurações do sistema
+const CONFIG_HORA_LIMPEZA_CELL = 'B2';     // hora (0-23, fuso de Fortaleza) da limpeza diária de Faturados
+const CONFIG_HORA_LIMPEZA_PADRAO = 11;     // usado se a célula estiver vazia/inválida
 
 // ====== TRAVAS DO AUTO-FATURAMENTO POR SAÍDA DA FONTE ======
 // Um item que some de PEDIDOS e de DADOS_IMPORTADOS saiu do sistema de origem e deve virar
@@ -96,6 +106,13 @@ const DIAS_RETENCAO = 15;      // Itens com status final são purgados após est
 const MIN_LINHAS_FONTE_PARA_FATURAR = 50;   // abaixo disso a fonte não é o livro de pedidos inteiro
 const MAX_FRACAO_SEM_FONTE          = 0.5;  // metade do DB em aberto sumindo de uma vez = importação quebrada
 const TOLERANCIA_QUEDA_FONTE        = 0.15; // queda maior que esta entre duas leituras adia o faturamento um ciclo
+
+// ====== PORTÃO DE INTEGRIDADE DA IMPORTAÇÃO ======
+// Fração máxima de linhas com campo essencial vazio (CLIENTE, PEDIDO, ORD. COMPRA,
+// DATA RECEB. ou produto) tolerada em DADOS_IMPORTADOS. Acima disso a importação está
+// no meio de uma atualização e a sincronização inteira é abortada — nada é gravado em
+// PEDIDOS e o timestamp não avança, então a rodada seguinte repete.
+const MAX_FRACAO_LINHAS_QUEBRADAS   = 0.02;
 
 // ====== BAIXAS PARCIAIS ======
 const BAIXAS_SHEET_NAME = "Baixas_Historico";
@@ -957,6 +974,10 @@ function onOpen() {
     .addItem('🔧 Corrigir Faturados com saldo aberto (reverter para Ativo)', 'corrigirFaturadosComSaldoAberto')
     .addItem('🧹 Remover duplicatas órfãs do Relatorio_DB (OC 488457)', 'limparDuplicatasOrfasDB')
     .addSeparator()
+    .addItem('🚑 REPARAR duplicatas de importação parcial (CLIENTE vazio)', 'repararLinhasDeImportacaoParcial')
+    .addSeparator()
+    .addItem('🧹 Limpar Faturados agora (ignora horário configurado)', 'limparFaturadosAgoraMenu')
+    .addSeparator()
     .addItem('⚠️ RESET COMPLETO (apaga DB + regenera IDs)', 'resetarEReprocessar')
     .addSeparator()
     .addItem('🔄 Forçar resync agora (aplica correções Dilly)', 'forcarResyncDilly')
@@ -1416,6 +1437,53 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     const fonteData = fonteSheet.getRange(FONTE_DATA_START_ROW, 2, fonteLastRow - FONTE_DATA_START_ROW + 1, fonteNumCols).getValues();
     Logger.log(`📥 Leu ${fonteData.length} linhas de ${IMPORTRANGE_SHEET_NAME}`);
 
+    // PASSO 1.5: PORTÃO DE INTEGRIDADE DA FONTE
+    //
+    // O guard de B1/H2 acima só prova que ALGO chegou; não prova que chegou INTEIRO.
+    // A fonte externa pode entregar a aba em ondas — no sistema irmão (Bahia) já houve
+    // uma rodada em que CARTELA estava preenchida e CLIENTE ainda vazia; como o único
+    // teste por linha era "tem CARTELA?", o livro de pedidos inteiro entrou de novo como
+    // itens novos. Preventivo aqui também: mesma fonte externa, mesmo padrão de leitura.
+    //
+    // Regra: uma linha só é aceita com TODOS os campos essenciais. Se muitas linhas
+    // vierem quebradas, a importação está no meio do caminho e a rodada inteira é
+    // abortada SEM gravar ULTIMO_IMPORTRANGE_TS — a próxima execução tenta de novo
+    // com os dados já completos, e PEDIDOS fica intacto nesse meio-tempo.
+    const linhasIncompletas = [];
+    let linhasComCartela = 0;
+    fonteData.forEach((fonteRow, idx) => {
+      if (!String(fonteRow[0] || '').trim()) return; // sem CARTELA: ruído, ignorado como sempre
+      linhasComCartela++;
+      const faltando = _camposEssenciaisAusentes_(fonteRow);
+      if (faltando.length > 0) {
+        linhasIncompletas.push({ linha: idx + FONTE_DATA_START_ROW, campos: faltando });
+      }
+    });
+
+    if (linhasIncompletas.length > 0) {
+      const fracaoQuebrada = linhasComCartela > 0 ? (linhasIncompletas.length / linhasComCartela) : 1;
+      const amostra = linhasIncompletas.slice(0, 5)
+        .map(x => `linha ${x.linha} sem ${x.campos.join('/')}`).join('; ');
+      Logger.log(`   ⚠️ ${linhasIncompletas.length} de ${linhasComCartela} linha(s) com campo essencial vazio (${(fracaoQuebrada * 100).toFixed(1)}%): ${amostra}`);
+
+      if (fracaoQuebrada > MAX_FRACAO_LINHAS_QUEBRADAS) {
+        Logger.log(`   ⛔ IMPORTAÇÃO INCOMPLETA — acima do teto de ${(MAX_FRACAO_LINHAS_QUEBRADAS * 100).toFixed(0)}%. Sync ABORTADO.`);
+        Logger.log(`      PEDIDOS mantido como estava e ULTIMO_IMPORTRANGE_TS não gravado — a próxima execução repete com os dados completos.`);
+        return {
+          houveMudancas: false,
+          motivo: 'importrange_incompleto',
+          linhasQuebradas: linhasIncompletas.length,
+          totalLinhas: linhasComCartela
+        };
+      }
+      Logger.log(`   ↷ Abaixo do teto: as ${linhasIncompletas.length} linha(s) quebrada(s) serão puladas individualmente (não viram itens novos).`);
+    }
+
+    // Conjunto das linhas a pular no laço principal (índice dentro de fonteData)
+    const idxIncompletos = new Set(
+      linhasIncompletas.map(x => x.linha - FONTE_DATA_START_ROW)
+    );
+
     // PASSO 2: Ler aba PEDIDOS (atual com IDs)
     const pedidosSheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
     if (!pedidosSheet) {
@@ -1435,6 +1503,10 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // IMPORTANTE: os dois mapas compartilham os MESMOS wrapper objects (mesma flag "usado") —
     // uma linha de PEDIDOS reivindicada por um caminho fica indisponível para o outro (15.13/15.14).
     const pedidosDillyMap = new Map();
+
+    // Índice para resgatar linhas cuja versão na fonte veio quebrada (ver PASSO 1.5).
+    // Chave = impressão digital SEM o CLIENTE; wrappers compartilhados com pedidosMap.
+    const pedidosResgateMap = new Map();
 
     // Sequências (oc|seq) já atribuídas — em PEDIDOS (col V) ou no Relatorio_DB (col Y).
     // Slots usados nunca são reatribuídos a outro item (sequência é fixa para sempre).
@@ -1477,11 +1549,23 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         const _wCliente_ = String(row[CLIENTE_COL] || '').trim();
         if (_wCliente_.toUpperCase().includes('DILLY') && String(id || '').trim()) {
           const _wTam_    = String(row[TAM_COL] || '').trim();
-          const _wMarfim_ = _normalizarMarfimDilly_(String(row[MARFIM_COL] || '').trim(), _wTam_, _wCliente_);
-          const _wFp_ = `${_wCliente_}|${String(row[PEDIDO_COL] || '').trim()}|${_wMarfim_}|${_wTam_}|${String(row[OC_COL] || '').trim()}|${_normalizarData_(row[DTREC_COL])}`;
+          const _wProd_ = _chaveProduto_(row[MARFIM_COL], row[DESC_COL], _wTam_, _wCliente_);
+          const _wFp_ = `${_wCliente_}|${String(row[PEDIDO_COL] || '').trim()}|${_wProd_}|${_wTam_}|${String(row[OC_COL] || '').trim()}|${_normalizarData_(row[DTREC_COL])}`;
           if (!pedidosDillyMap.has(_wFp_)) pedidosDillyMap.set(_wFp_, []);
           pedidosDillyMap.get(_wFp_).push(wrapper);
         }
+
+        // Índice de RESGATE para linhas quebradas da fonte: mesma impressão digital,
+        // porém SEM o CLIENTE — o campo que costuma vir vazio numa importação parcial.
+        const _rTam_  = String(row[TAM_COL] || '').trim();
+        const _rProd_ = _chaveProduto_(row[MARFIM_COL], row[DESC_COL], _rTam_, String(row[CLIENTE_COL] || '').trim());
+        const _rKey_  = [
+          String(row[PEDIDO_COL] || '').trim(), _rProd_, _rTam_,
+          String(row[OC_COL] || '').trim(), String(row[OS_COL] || '').trim(),
+          _normalizarData_(row[DTREC_COL])
+        ].join('|');
+        if (!pedidosResgateMap.has(_rKey_)) pedidosResgateMap.set(_rKey_, []);
+        pedidosResgateMap.get(_rKey_).push(wrapper);
 
         // Sequência já gravada em PEDIDOS (col V) conta como usada na sua OC
         const seqV = row[PEDIDOS_SEQ_ORIGINAL_COL];
@@ -1499,6 +1583,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
 
     // PASSO 3: Processar cada linha da fonte
     const novasPedidosData = [];
+    let linhasResgatadas = 0; // linhas quebradas cuja versão anterior foi preservada
+    let linhasPerdidas   = 0; // linhas quebradas sem equivalente em PEDIDOS
     let novosItens = 0;
     let itensAtualizados = 0;
     let itensComMudancaReal = 0;
@@ -1635,6 +1721,38 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         return;
       }
 
+      // Linha com CARTELA mas sem campo essencial (importação parcial): NUNCA vira item novo.
+      // Simplesmente pular não basta: PEDIDOS é REESCRITO do zero a cada rodada, então a
+      // linha pulada sumiria de PEDIDOS e o sync seguinte a leria como "saiu da origem",
+      // podendo marcá-la Faturado. RESGATAMOS a linha que já está em PEDIDOS pela chave sem
+      // CLIENTE e a reemitimos intacta — mesmo ID, mesmo UUID, mesmos dados — até a fonte
+      // voltar completa.
+      if (idxIncompletos.has(idx)) {
+        const _iTam_  = String(fonteRow[7] || '').trim();
+        const _iProd_ = _chaveProduto_(fonteRow[5], fonteRow[6], _iTam_, String(fonteRow[1] || '').trim());
+        const _iKey_  = [
+          String(fonteRow[3] || '').trim(), _iProd_, _iTam_,
+          String(fonteRow[8] || '').trim(), String(fonteRow[10] || '').trim(),
+          _normalizarData_(fonteRow[11])
+        ].join('|');
+        const _iSlots_ = pedidosResgateMap.get(_iKey_);
+        const _iSlot_  = _iSlots_ ? _iSlots_.find(m => !m.usado && String(m.id || '').trim()) : null;
+        if (_iSlot_) {
+          _iSlot_.usado = true;
+          const _iLinha_ = _iSlot_.row.slice(0, 22);
+          while (_iLinha_.length < 22) _iLinha_.push('');
+          novasPedidosData.push(_iLinha_);
+          idsAssignadosNestaRodada.add(String(_iSlot_.id).trim());
+          idsUsados.add(String(_iSlot_.id).trim());
+          linhasResgatadas++;
+          Logger.log(`   🧊 Linha ${idx + FONTE_DATA_START_ROW} veio quebrada — linha atual de PEDIDOS preservada (ID="${_iSlot_.id}")`);
+        } else {
+          linhasPerdidas++;
+          Logger.log(`   ⚠️ Linha ${idx + FONTE_DATA_START_ROW} veio quebrada e não há linha equivalente em PEDIDOS — ignorada nesta rodada`);
+        }
+        return;
+      }
+
       // Cria impressão digital da linha fonte (offset 0 porque não tem coluna ID)
       const impressao = _criarImpressaoDigitalFromRow_(fonteRow, 0);
 
@@ -1716,8 +1834,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         let _dillyMatchResolvido_ = false;
         if (_fonteClienteStr_.toUpperCase().includes('DILLY') && pedidosDillyMap.size > 0) {
           const _dTam_    = String(fonteRow[7] || '').trim();
-          const _dMarfim_ = _normalizarMarfimDilly_(String(fonteRow[5] || '').trim(), _dTam_, _fonteClienteStr_);
-          const _dillyFpSemOS_ = `${_fonteClienteStr_}|${String(fonteRow[3] || '').trim()}|${_dMarfim_}|${_dTam_}|${String(fonteRow[8] || '').trim()}|${_normalizarData_(fonteRow[11])}`;
+          const _dProd_ = _chaveProduto_(fonteRow[5], fonteRow[6], _dTam_, _fonteClienteStr_);
+          const _dillyFpSemOS_ = `${_fonteClienteStr_}|${String(fonteRow[3] || '').trim()}|${_dProd_}|${_dTam_}|${String(fonteRow[8] || '').trim()}|${_normalizarData_(fonteRow[11])}`;
           const _dillySlots_ = pedidosDillyMap.get(_dillyFpSemOS_);
           if (_dillySlots_) {
             // Mesmo desempate por QTD do caminho principal (~linha 1546): itens-irmãos Dilly
@@ -1834,14 +1952,15 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       // Uma vez encontrada, a posição é preservada para sempre (matchEscolhido já tem o valor).
       // Nunca sobrescreve uma posição válida já gravada em PEDIDOS (< 500000).
       let posicaoFonte = null;
-      if (matchEscolhido && !isNovo) {
-        const posExistente = matchEscolhido.row[PEDIDOS_POSICAO_FONTE_COL];
-        if (typeof posExistente === 'number' && posExistente < 500000) {
-          posicaoFonte = posExistente; // já encontrado antes — preserva
-        }
-      }
-      if (posicaoFonte === null) {
-        // Primeira vez: procura na aba "original"
+      const _posExistente_ = matchEscolhido && !isNovo
+        ? Number(matchEscolhido.row[PEDIDOS_POSICAO_FONTE_COL])
+        : NaN;
+      const _temPosExistente_ = isFinite(_posExistente_) && _posExistente_ > 0;
+
+      if (_temPosExistente_ && _posExistente_ < 500000) {
+        posicaoFonte = _posExistente_; // posição real da aba "original" — definitiva
+      } else {
+        // Procura (ou reprocura) na aba "original"
         const oc   = String(fonteRow[8]  || '').trim(); // J: ORD. COMPRA
         const desc = String(fonteRow[6]  || '').trim(); // H: DESCRIÇÃO
         const tam  = String(fonteRow[7]  || '').trim(); // I: TAMANHO
@@ -1851,8 +1970,18 @@ function sincronizarPedidosComFonte(forcarExecucao) {
           : String(fonteRow[11] || '').trim();          // M: DATA RECEB.
         const chave = `${oc}|${desc}|${tam}|${qtd}|${data}`;
         const posOriginal = originalPosMap.get(chave);
-        posicaoFonte = (posOriginal !== undefined) ? posOriginal : (900000 + idx);
-        // 900000+idx como fallback: mantém ordem relativa de DADOS_IMPORTADOS para itens não encontrados
+
+        if (posOriginal !== undefined) {
+          posicaoFonte = posOriginal;      // achou agora: promove de provisória para definitiva
+        } else if (_temPosExistente_) {
+          // MANTÉM a posição provisória já atribuída em vez de recalcular 900000+idx — sem
+          // isso a ordem de exibição dependeria do índice da linha em DADOS_IMPORTADOS, e
+          // bastaria um item entrar/sair no topo para todos abaixo mudarem de posição.
+          posicaoFonte = _posExistente_;
+        } else {
+          // Primeira vez que este item aparece: ordem relativa de DADOS_IMPORTADOS
+          posicaoFonte = 900000 + idx;
+        }
       }
 
       // Resolve SEQ_ORIGINAL: número de ordem do item dentro da sua OC, conforme a aba
@@ -1984,6 +2113,17 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       // BUG FIX: houveMudancas agora só é true se há itens NOVOS ou com dados
       // realmente alterados. Antes era true para qualquer item correspondido,
       // causando limpeza desnecessária de cache a cada execução do trigger.
+      Logger.log(`   🧊 Linhas quebradas preservadas: ${linhasResgatadas} | sem equivalente em PEDIDOS: ${linhasPerdidas}`);
+
+      // Se alguma linha quebrada não pôde ser preservada, o item correspondente sumiu de
+      // PEDIDOS sem ter saído da origem. Sinaliza para sincronizarDados() não faturar por
+      // "saída da fonte" nesta rodada — sem isso a importação parcial viraria faturamento.
+      if (linhasPerdidas > 0) {
+        props.setProperty('IMPORT_PARCIAL_ULTIMA_RODADA', 'true');
+      } else {
+        props.deleteProperty('IMPORT_PARCIAL_ULTIMA_RODADA');
+      }
+
       // Grava timestamp do IMPORTRANGE processado — próxima execução só roda se G2 mudar
       props.setProperty('ULTIMO_IMPORTRANGE_TS', tsAtual);
 
@@ -2047,12 +2187,12 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
   const os      = String(row[10 + offset] || '').trim();
   const dataStr = _normalizarData_(row[11 + offset]);    // normalizado para Date e número serial
 
-  // Normaliza CÓD. MARFIM para Dilly: garante fingerprint idêntica tanto ao ler
-  // de DADOS_IMPORTADOS (valor original, ex: "202480-105") quanto de PEDIDOS
-  // (valor já corrigido, ex: "202480-100"). A correção é idempotente.
-  const marfim = _normalizarMarfimDilly_(String(row[5 + offset] || '').trim(), tam, cliente);
+  // Produto identificado pela DESCRIÇÃO (índice 6+offset), não pelo CÓD. MARFIM.
+  // Ver _chaveProduto_ — o CÓD. MARFIM muda entre importações para a mesma linha
+  // física no sistema irmão (Bahia); esta troca é preventiva, mesmo padrão de fonte.
+  const produto = _chaveProduto_(row[5 + offset], row[6 + offset], tam, cliente);
 
-  return `${cliente}|${pedido}|${marfim}|${tam}|${oc}|${os}|${dataStr}`;
+  return `${cliente}|${pedido}|${produto}|${tam}|${oc}|${os}|${dataStr}`;
 }
 
 // ─── CONTROLE DE PAUSA ───────────────────────────────────────────────────────
@@ -2216,15 +2356,21 @@ function processoAutomaticoCompleto() {
       Logger.log(`   ✓ Nenhuma mudança - dados já sincronizados`);
     }
 
-    // ETAPA 3: Purgar itens finalizados com mais de DIAS_RETENCAO dias
-    Logger.log(`\n🗑️ ETAPA 3: Purga de itens finalizados (>${DIAS_RETENCAO} dias)`);
+    // ETAPA 3: Purgar itens finalizados — uma vez por dia, no horário configurado
+    // pelo usuário (aba CONFIGURAÇÕES), não a toda hora com prazo individual por item.
+    Logger.log(`\n🗑️ ETAPA 3: Purga de itens finalizados (Faturado há ≥${DIAS_RETENCAO} dia(s))`);
     try {
-      const resultadoPurga = purgarItensFinalizados();
-      if (resultadoPurga.purgados > 0) {
-        Logger.log(`   ✅ ${resultadoPurga.purgados} item(ns) purgado(s) do DB`);
-        houveMudancas = true;
+      if (!_deveLimparFaturadosAgora_()) {
+        Logger.log(`   ⏭️ Fora do horário configurado (ou já rodou hoje) — purga adiada`);
       } else {
-        Logger.log(`   ✓ Nenhum item para purgar`);
+        const resultadoPurga = purgarItensFinalizados();
+        _registrarLimpezaFaturadosFeitaHoje_();
+        if (resultadoPurga.purgados > 0) {
+          Logger.log(`   ✅ ${resultadoPurga.purgados} item(ns) purgado(s) do DB`);
+          houveMudancas = true;
+        } else {
+          Logger.log(`   ✓ Nenhum item para purgar`);
+        }
       }
     } catch (ePurga) {
       Logger.log(`   ⚠️ Erro na purga (não crítico): ${ePurga.message}`);
@@ -2584,13 +2730,132 @@ function _normalizarData_(val) {
  * @param {string} cliente @param {string} pedido @param {string} marfim @param {string} tam
  * @returns {string} identidade, ou '' quando não há identificador nenhum
  */
-function _identidadeItem_(cliente, pedido, marfim, tam) {
+/**
+ * Remove o sufixo " [uuid]" que PEDIDOS e Relatorio_DB anexam à DESCRIÇÃO.
+ *
+ * A âncora visível do CÓDIGO_FIXO é gravada dentro da própria DESCRIÇÃO
+ * ("ATAC. 4000MG … [9a628c34-…]"), então a DESCRIÇÃO lida de PEDIDOS/DB
+ * NUNCA é igual à de DADOS_IMPORTADOS sem esta limpeza. Toda chave que use
+ * DESCRIÇÃO precisa passar por aqui, nas três abas.
+ */
+function _descBase_(v) {
+  return String(v === null || v === undefined ? '' : v)
+    .replace(/\s*\[[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\]\s*$/, '')
+    .trim();
+}
+
+/**
+ * Discriminador de PRODUTO usado por TODAS as chaves de identidade do sistema.
+ *
+ * POR QUE NÃO USAR CÓD. MARFIM: no sistema irmão (Bahia), o CÓD. MARFIM de
+ * DADOS_IMPORTADOS é resultado de uma busca por cartela na planilha de origem
+ * ("EM VERMELHO CÓD. DA CARTELA NÃO LOCALIZADO" / coluna "CÓD. ALTERADO" cheia de
+ * #N/A — mesmo padrão de layout usado aqui no Ceará) e MUDA de uma importação para
+ * outra na MESMA linha física. No Relatorio_DB da Bahia isso chegou a gerar 149
+ * linhas para um único item físico, sob 44 CÓD. MARFIM diferentes — todas com a
+ * MESMA DESCRIÇÃO. Como CÓD. MARFIM estava embutido em toda chave de identidade
+ * (ID, impressão digital, identidade "saiu da fonte"), uma troca de código furava
+ * todas as camadas ao mesmo tempo: o item não era reconhecido, a linha antiga era
+ * marcada "Faturado" na OC errada e a nova entrava como item novo.
+ *
+ * Não foi medido o mesmo padrão nos dados atuais do Ceará (ver análise antes de
+ * portar), mas a vulnerabilidade é estrutural — o mesmo motor, a mesma fonte
+ * (busca por cartela) — por isso a correção é preventiva aqui também.
+ *
+ * A DESCRIÇÃO é estável e igualmente discriminante entre produtos diferentes.
+ * CÓD. MARFIM continua sendo gravado e exibido normalmente; ele só deixa de
+ * decidir QUEM é o item.
+ *
+ * @param {*} marfim  CÓD. MARFIM (usado só como reserva)
+ * @param {*} desc    DESCRIÇÃO (com ou sem o sufixo [uuid])
+ * @param {string} tam     TAMANHO  — para a normalização Dilly do código reserva
+ * @param {string} cliente CLIENTE  — para a normalização Dilly do código reserva
+ * @returns {string} discriminador de produto
+ */
+function _chaveProduto_(marfim, desc, tam, cliente) {
+  const d = _descBase_(desc);
+  if (d) return d;
+  // Sem DESCRIÇÃO (linha atípica): cai para o CÓD. MARFIM normalizado, que é o
+  // comportamento histórico — melhor uma chave frágil do que chave nenhuma.
+  return _normalizarMarfimDilly_(String(marfim || '').trim(), String(tam || '').trim(), String(cliente || ''));
+}
+
+/**
+ * Campos sem os quais uma linha da fonte NÃO pode virar item.
+ *
+ * Índices de DADOS_IMPORTADOS (fonteRow, lido a partir da col B, sem a coluna LOTES
+ * que existe na Bahia): CLIENTE=1, PEDIDO=3, CÓD.MARFIM=5, DESCRIÇÃO=6, TAMANHO=7,
+ * ORD.COMPRA=8, CÓD.OS=10, DATA RECEB.=11.
+ *
+ * @param {Array} row linha da fonte (DADOS_IMPORTADOS, lida a partir da col B)
+ * @returns {Array<string>} nomes dos campos essenciais ausentes (vazio = linha íntegra)
+ */
+function _camposEssenciaisAusentes_(row) {
+  const faltando = [];
+  if (!String(row[1]  || '').trim()) faltando.push('CLIENTE');
+  if (!String(row[3]  || '').trim()) faltando.push('PEDIDO');
+  if (!String(row[8]  || '').trim()) faltando.push('ORD. COMPRA');
+  if (!_normalizarData_(row[11]))    faltando.push('DATA RECEB.');
+  if (!_descBase_(row[6]) && !String(row[5] || '').trim()) faltando.push('DESCRIÇÃO/CÓD. MARFIM');
+  return faltando;
+}
+
+/**
+ * Variante da impressão digital que IGNORA a ORD. COMPRA.
+ *
+ * Quando o sistema de origem move uma linha de uma OC para outra, o item deixa de
+ * ser reconhecível por ID, por UUID (o CÓDIGO_FIXO é regerado junto com o ID novo) e
+ * pela impressão digital padrão (que inclui OC). O sync então trata a linha antiga
+ * como "saiu do PEDIDOS" (podendo marcá-la Faturado) e insere a linha nova como item
+ * novo — resultado: o mesmo item aparece em DUAS OCs no HTML, uma delas com o selo
+ * FATURADO indevido. Esta chave permite reconhecer que é o MESMO item físico.
+ *
+ * Retorna '' quando faltam identificadores fortes (CLIENTE, PEDIDO, produto ou DATA
+ * RECEB.). Quem consome esta chave para AUTORIZAR uma inserção deve tratar '' como
+ * REJEIÇÃO, nunca como liberação.
+ */
+function _criarImpressaoDigitalSemOC_(row, isDbRow) {
+  const pedidoIdx = isDbRow ? 3  : PEDIDO_COL;
+  const marfimIdx = isDbRow ? 5  : MARFIM_COL;
+  const descIdx   = isDbRow ? 6  : DESC_COL;
+  const tamIdx    = isDbRow ? 7  : TAM_COL;
+  const osIdx     = isDbRow ? 10 : OS_COL;
+  const dtrecIdx  = isDbRow ? 11 : DTREC_COL;
+
+  const _cliente_ = String(row[CLIENTE_COL] || '').trim();
+  const _pedido_  = String(row[pedidoIdx]   || '').trim();
+  const _tam_     = String(row[tamIdx]      || '').trim();
+  const _os_      = String(row[osIdx]       || '').trim();
+  const _produto_ = _chaveProduto_(row[marfimIdx], row[descIdx], _tam_, _cliente_);
+  const _dtrec_   = _normalizarData_(row[dtrecIdx]);
+
+  if (!_cliente_ || !_pedido_ || !_produto_ || !_dtrec_) return '';
+
+  return [_cliente_, _pedido_, _produto_, _tam_, _os_, _dtrec_].join('|');
+}
+
+/**
+ * Identidade de um item para responder "a fonte ainda conhece este item?":
+ * CLIENTE|PEDIDO|PRODUTO|TAMANHO. Ver _chaveProduto_ para o motivo do produto
+ * ser a DESCRIÇÃO em vez do CÓD. MARFIM.
+ *
+ * Diferente da impressão digital, NÃO inclui ORD. COMPRA (a fonte move itens de OC),
+ * CÓD. OS nem DATA RECEB. — largura que faz a chave funcionar em milímetros, onde
+ * linhas irmãs podem ser cópias quase perfeitas. A largura é segura porque quem
+ * decide não é a chave sozinha e sim a CONTAGEM: só é faturado o que exceder o
+ * número de linhas que a fonte tem para essa identidade.
+ *
+ * @param {string} cliente @param {string} pedido @param {string} marfim @param {string} tam
+ * @param {string} desc DESCRIÇÃO — discriminador primário de produto
+ * @returns {string} identidade, ou '' quando não há identificador nenhum
+ */
+function _identidadeItem_(cliente, pedido, marfim, tam, desc) {
   const c = String(cliente || '').trim();
   const p = String(pedido  || '').trim();
   const t = String(tam     || '').trim();
-  const mf = _normalizarMarfimDilly_(String(marfim || '').trim(), t, c);
-  if (!c && !p && !mf && !t) return '';
-  return `${c}|${p}|${mf}|${t}`;
+  const prod = _chaveProduto_(marfim, desc, t, c);
+  if (!c && !p && !prod && !t) return '';
+  return `${c}|${p}|${prod}|${t}`;
 }
 
 function _criarImpressaoDigital_(row, isDbRow) {
@@ -2604,14 +2869,15 @@ function _criarImpressaoDigital_(row, isDbRow) {
   const osIdx     = isDbRow ? 10 : OS_COL;       // PEDIDOS=11, DB=10
   const dtrecIdx  = isDbRow ? 11 : DTREC_COL;    // PEDIDOS=12, DB=11
 
+  const descIdx   = isDbRow ? 6  : DESC_COL;      // PEDIDOS=7, DB=6
   const _cliente_ = String(row[CLIENTE_COL] || '').trim();
   const _tam_     = String(row[tamIdx]      || '').trim();
-  const _marfim_  = _normalizarMarfimDilly_(String(row[marfimIdx] || '').trim(), _tam_, _cliente_);
+  const _produto_ = _chaveProduto_(row[marfimIdx], row[descIdx], _tam_, _cliente_);
 
   const partes = [
     _cliente_,                                     // índice 2 em ambos
     String(row[pedidoIdx]   || '').trim(),
-    _marfim_,                                      // normalizado para Dilly (idempotente)
+    _produto_,                                     // DESCRIÇÃO sem o sufixo [uuid] (estável entre importações)
     _tam_,                                         // TAMANHO — distingue itens do mesmo pedido em tamanhos diferentes
     String(row[ocIdx]       || '').trim(),
     String(row[osIdx]       || '').trim(),
@@ -2761,13 +3027,45 @@ function sincronizarDados() {
     // FIX Bug 2: era Map simples (sobrescrevia duplicatas); agora guarda array e consome um slot por vez.
     const fonteImpressoes = new Map();
     const fonteImpressoesCount = new Map(); // fingerprint → quantas vezes aparece em PEDIDOS
+    // Map<impressaoSemOC, [slot]> — MESMOS objetos de fonteImpressoes, para que o flag
+    // "usado" seja compartilhado: um slot consumido por qualquer caminho fica indisponível
+    // para os demais. Usado para detectar itens que mudaram de ORD. COMPRA.
+    const fonteImpressoesSemOC = new Map();
     for (let [id, row] of fonteMap.entries()) {
       const impressao = _criarImpressaoDigital_(row);
+      const slot = { id: id, row: row, usado: false };
       if (!fonteImpressoes.has(impressao)) fonteImpressoes.set(impressao, []);
-      fonteImpressoes.get(impressao).push({ id: id, row: row, usado: false });
+      fonteImpressoes.get(impressao).push(slot);
       fonteImpressoesCount.set(impressao, (fonteImpressoesCount.get(impressao) || 0) + 1);
+
+      const impressaoSemOc = _criarImpressaoDigitalSemOC_(row);
+      if (impressaoSemOc) {
+        if (!fonteImpressoesSemOC.has(impressaoSemOc)) fonteImpressoesSemOC.set(impressaoSemOc, []);
+        fonteImpressoesSemOC.get(impressaoSemOc).push(slot);
+      }
     }
     Logger.log(`   ✓ ${fonteImpressoes.size} impressões digitais únicas criadas para PEDIDOS`);
+    Logger.log(`   ✓ ${fonteImpressoesSemOC.size} impressões digitais sem OC (detecção de troca de ORD. COMPRA)`);
+
+    // Contagem de identidades SEM OC entre os itens do DB ainda EM ABERTO — trava de
+    // inserção: se a fonte trouxer um item cuja identidade já existe no DB em aberto e
+    // nenhuma linha foi consumida por um match, a linha nova seria uma segunda cópia do
+    // mesmo item em outra ORD. COMPRA (a assinatura de uma OC divergente entre fonte e DB).
+    const dbIdentidadesAbertas = new Map();
+    for (let [, dbItem] of dbMap.entries()) {
+      const st = String(dbItem.row[STATUS_COL] || '').trim();
+      if (st === 'Faturado' || st === 'Finalizado' || st === 'Excluido') continue;
+      const ident = _criarImpressaoDigitalSemOC_(dbItem.row, true);
+      if (ident) dbIdentidadesAbertas.set(ident, (dbIdentidadesAbertas.get(ident) || 0) + 1);
+    }
+    // Identidades consumidas por algum match — liberam uma vaga para o item novo legítimo
+    // (ex.: o mesmo produto realmente pedido em duas OCs distintas).
+    const consumidasPorIdentidade = new Map();
+    const _consumirIdentidade_ = (row) => {
+      const ident = _criarImpressaoDigitalSemOC_(row, true);
+      if (ident) consumidasPorIdentidade.set(ident, (consumidasPorIdentidade.get(ident) || 0) + 1);
+    };
+    Logger.log(`   ✓ ${dbIdentidadesAbertas.size} identidades sem OC em aberto no DB (trava de inserção)`);
 
     // Map<impressao, {id, linha, row}> para Relatorio_DB (usado só para cheque de duplicatas em novos itens)
     const dbImpressoes = new Map();
@@ -2825,7 +3123,7 @@ function sincronizarDados() {
           }
           if (!String(linha[1] || '').trim()) return; // mesma regra do pipeline: sem CARTELA é ruído
           fonteLinhasLidas++;
-          const ident = _identidadeItem_(linha[2], linha[4], linha[6], linha[8]);
+          const ident = _identidadeItem_(linha[2], linha[4], linha[6], linha[8], linha[7]);
           if (ident) fonteIdent.set(ident, (fonteIdent.get(ident) || 0) + 1);
         });
         Logger.log(`   ✓ ${dadosImportadosOcs.size} pares OC+OS únicos em DADOS_IMPORTADOS`);
@@ -2862,7 +3160,7 @@ function sincronizarDados() {
     for (const [, dbi] of dbMap.entries()) {
       const s2 = String(dbi.row[STATUS_COL] || '').trim();
       if (s2 === 'Faturado' || s2 === 'Finalizado' || s2 === 'Excluido') continue;
-      const ident = _identidadeItem_(dbi.row[CLIENTE_COL], dbi.row[DB_PEDIDO_COL], dbi.row[DB_MARFIM_COL], dbi.row[DB_TAM_COL]);
+      const ident = _identidadeItem_(dbi.row[CLIENTE_COL], dbi.row[DB_PEDIDO_COL], dbi.row[DB_MARFIM_COL], dbi.row[DB_TAM_COL], dbi.row[DB_DESC_COL]);
       if (ident) dbAbertasPorIdent.set(ident, (dbAbertasPorIdent.get(ident) || 0) + 1);
     }
 
@@ -2899,7 +3197,7 @@ function sincronizarDados() {
      */
     const _motivoSaidaDaFonte_ = (row, orcamento) => {
       if (fonteIdent.size === 0) return null; // sem índice confiável → nunca decide
-      const ident = _identidadeItem_(row[CLIENTE_COL], row[DB_PEDIDO_COL], row[DB_MARFIM_COL], row[DB_TAM_COL]);
+      const ident = _identidadeItem_(row[CLIENTE_COL], row[DB_PEDIDO_COL], row[DB_MARFIM_COL], row[DB_TAM_COL], row[DB_DESC_COL]);
       if (!ident) return null;                // linha sem identificadores
       const restante = orcamento.get(ident) || 0;
       if (restante <= 0) return null;         // grupo já equilibrado com a fonte → não mexe
@@ -2931,10 +3229,17 @@ function sincronizarDados() {
     const quedaBrusca    = totalAnterior > 0 && fonteLinhasLidas < totalAnterior * (1 - TOLERANCIA_QUEDA_FONTE);
     if (fonteLinhasLidas > 0) propsFonte.setProperty('ULTIMO_TOTAL_FONTE', String(fonteLinhasLidas));
 
+    // Sinal deixado por sincronizarPedidosComFonte(): a última importação veio parcial e
+    // ao menos uma linha sumiu de PEDIDOS sem ter saído da origem. Faturar nessa condição
+    // marcaria como entregue um item que só ficou invisível.
+    const importParcial = propsFonte.getProperty('IMPORT_PARCIAL_ULTIMA_RODADA') === 'true';
+    if (importParcial) Logger.log(`   🚧 Última importação veio parcial — auto-faturamento suspenso nesta rodada`);
+
     const autoFaturarSaidaFonte = (fonteIdent.size > 0)
       && (fonteLinhasLidas >= MIN_LINHAS_FONTE_PARA_FATURAR)
       && (fracaoSemFonte <= MAX_FRACAO_SEM_FONTE)
-      && !quedaBrusca;
+      && !quedaBrusca
+      && !importParcial;
     if (!autoFaturarSaidaFonte) {
       Logger.log(`   🚧 Auto-faturamento por saída da fonte DESLIGADO nesta rodada ` +
                  `(linhas na fonte=${fonteLinhasLidas}, anterior=${totalAnterior}${quedaBrusca ? ' → QUEDA BRUSCA' : ''}, ` +
@@ -3159,6 +3464,7 @@ function sincronizarDados() {
         const fpListId = fonteImpressoes.get(fpFonteId);
         if (fpListId) { const fi = fpListId.find(i => i.id === id); if (fi) fi.usado = true; }
         _consumirFingerprint_(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
+        _consumirIdentidade_(dbItem.row);
 
       } else {
         // SEGUNDA TENTATIVA: Buscar por CÓDIGO_FIXO (UUID imutável por item — ideia do usuário)
@@ -3217,6 +3523,7 @@ function sincronizarDados() {
           const fpList = fonteImpressoes.get(fpFonte);
           if (fpList) { const fi = fpList.find(i => i.id === novoId); if (fi) fi.usado = true; }
           _consumirFingerprint_(_criarImpressaoDigital_(dbItem.row, true));
+          _consumirIdentidade_(dbItem.row);
 
         } else {
           // Adiada para a Passada 2 (fingerprint + não-encontrado) — ver comentário acima do loop.
@@ -3236,13 +3543,36 @@ function sincronizarDados() {
       const impressaoDB = _criarImpressaoDigital_(dbItem.row, true); // row do Relatorio_DB
       // FIX Bug 2: era fonteImpressoes.get() (sobrescrevia duplicatas); agora encontra primeiro slot livre.
       const fonteItens = fonteImpressoes.get(impressaoDB);
-      const fonteItem = fonteItens ? fonteItens.find(i => !i.usado) : null;
+      let fonteItem = fonteItens ? fonteItens.find(i => !i.usado) : null;
+      let migrouDeOc = false;
+
+      // QUARTA TENTATIVA: o item pode ter sido MOVIDO para outra ORD. COMPRA.
+      // ID, CÓDIGO_FIXO e impressão digital padrão embutem a OC, então todos falham
+      // nesse caso e o item seria contado como "saiu do PEDIDOS" (marcado Faturado)
+      // enquanto a linha da nova OC entrava como item novo — duplicando o item no HTML.
+      // Só aceita quando há exatamente UM candidato livre.
+      if (!fonteItem) {
+        const impressaoSemOcDB = _criarImpressaoDigitalSemOC_(dbItem.row, true);
+        const livresSemOc = impressaoSemOcDB
+          ? (fonteImpressoesSemOC.get(impressaoSemOcDB) || []).filter(f => !f.usado)
+          : [];
+        if (livresSemOc.length === 1) {
+          fonteItem = livresSemOc[0];
+          migrouDeOc = true;
+        } else if (livresSemOc.length > 1) {
+          Logger.log(`   ⚠️ Troca de OC ambígua (${livresSemOc.length} candidatos em PEDIDOS) para ID="${id}" — não aplicada`);
+        }
+      }
 
       if (fonteItem) {
         // ENCONTROU POR FINGERPRINT! O ID mudou devido ao IMPORTRANGE
         fonteItem.usado = true; // consome este slot sem apagar outros com a mesma fingerprint
         const novoId = fonteItem.id;
-        Logger.log(`   🔄 ID atualizado por fingerprint: "${id}" → "${novoId}" (Linha ${dbItem.linha})`);
+        if (migrouDeOc) {
+          Logger.log(`   🔀 Item mudou de ORD. COMPRA: "${dbItem.row[DB_OC_COL]}" → "${fonteItem.row[OC_COL]}" — linha ${dbItem.linha} atualizada (ID "${id}" → "${novoId}")`);
+        } else {
+          Logger.log(`   🔄 ID atualizado por fingerprint: "${id}" → "${novoId}" (Linha ${dbItem.linha})`);
+        }
 
         const fonteRow = fonteItem.row;
         let marcarFaturarAtual = dbItem.row[MARCAR_FATURAR_COL] || "";
@@ -3288,6 +3618,7 @@ function sincronizarDados() {
         // permitindo que outros DB-items com a mesma fingerprint ainda encontrem seus slots.
         fonteMap.delete(novoId);
         _consumirFingerprint_(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
+        _consumirIdentidade_(dbItem.row);
 
       } else {
         // NÃO ENCONTROU por ID, UUID nem fingerprint — item não está em PEDIDOS
@@ -3463,6 +3794,38 @@ function sincronizarDados() {
           fonteRow[OC_COL], fonteRow[DESC_COL], fonteRow[TAM_COL]
         ]);
         continue;
+      }
+
+      // TRAVA DE IDENTIDADE (independente da ORD. COMPRA): se este item já existe no DB EM
+      // ABERTO e nenhuma dessas linhas foi consumida por um match, inserir criaria a mesma
+      // fita/cordão em duas OCs — o item apareceria em dois cards no HTML. É a assinatura de
+      // uma OC divergente entre a fonte e o DB, não de um pedido novo. Uma vaga consumida
+      // libera a inserção: o mesmo produto realmente pedido em duas OCs distintas.
+      const identidadeFonte = _criarImpressaoDigitalSemOC_(fonteRow);
+      if (!identidadeFonte) {
+        // FALHA FECHADA. A chave só volta vazia quando faltam CLIENTE, PEDIDO, produto ou
+        // DATA RECEB. — ou seja, quando a linha veio quebrada da importação. Sem identidade
+        // não há como provar que o item é novo, então NÃO se insere.
+        Logger.log(`   ⛔ INSERÇÃO BLOQUEADA (sem identidade): ID="${id}" não tem CLIENTE/PEDIDO/produto/DATA RECEB. suficientes — linha incompleta, ignorada`);
+        duplicatasDebug.push([
+          new Date(), 'Linha sem identidade (importação incompleta)', id, '',
+          fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL], fonteRow[PEDIDO_COL],
+          fonteRow[OC_COL], fonteRow[DESC_COL], fonteRow[TAM_COL]
+        ]);
+        continue;
+      }
+      {
+        const abertasDB  = dbIdentidadesAbertas.get(identidadeFonte)   || 0;
+        const consumidas = consumidasPorIdentidade.get(identidadeFonte) || 0;
+        if (abertasDB > consumidas) {
+          Logger.log(`   ⚠️ DUPLICATA EVITADA POR IDENTIDADE: ID="${id}" (OC="${fonteRow[OC_COL]}") já existe no DB em aberto sob outra ORD. COMPRA — ignorado (abertas=${abertasDB}, consumidas=${consumidas})`);
+          duplicatasDebug.push([
+            new Date(), 'Mesmo item já aberto no DB em outra OC', id, '',
+            fonteRow[CARTELA_COL], fonteRow[CLIENTE_COL], fonteRow[PEDIDO_COL],
+            fonteRow[OC_COL], fonteRow[DESC_COL], fonteRow[TAM_COL]
+          ]);
+          continue;
+        }
       }
 
       Logger.log(`   🆕 Novo item: ID="${id}" está em PEDIDOS mas não em Relatorio_DB - será adicionado como Ativo`);
@@ -3854,6 +4217,233 @@ function _removerAlertasDoItem_(id) {
  * Chamada automaticamente pelo processoAutomaticoCompleto().
  * Pode também ser executada manualmente pelo editor (sem UI).
  */
+/**
+ * Garante que a aba CONFIGURAÇÕES existe, com o rótulo e o valor padrão na célula da hora
+ * de limpeza — só na criação; nunca sobrescreve um valor que o usuário já tenha ajustado.
+ * @returns {Sheet}
+ */
+function _garantirAbaConfiguracoes_() {
+  let sheet = getSpreadsheet_().getSheetByName(CONFIG_SHEET_NAME);
+  if (sheet) return sheet;
+
+  Logger.log(`📝 Criando aba ${CONFIG_SHEET_NAME}...`);
+  sheet = getSpreadsheet_().insertSheet(CONFIG_SHEET_NAME);
+  sheet.getRange('A1').setValue('CONFIGURAÇÕES DO SISTEMA').setFontWeight('bold').setFontSize(12);
+  sheet.getRange('A2').setValue('Horário da limpeza de itens Faturados (0 a 23, horário de Fortaleza):');
+  sheet.getRange(CONFIG_HORA_LIMPEZA_CELL).setValue(CONFIG_HORA_LIMPEZA_PADRAO).setFontWeight('bold');
+  sheet.getRange('A3').setValue(
+    'Todo dia, na primeira sincronização a partir desse horário, os itens Faturado/Finalizado/' +
+    'Excluído com pelo menos ' + DIAS_RETENCAO + ' dia(s) somem do relatório. Para mudar, edite ' +
+    'só o número da célula ' + CONFIG_HORA_LIMPEZA_CELL + ' — vale a partir da próxima sincronização.'
+  ).setFontStyle('italic').setFontColor('#666666');
+  sheet.autoResizeColumn(1);
+  SpreadsheetApp.flush();
+  Logger.log(`✅ Aba ${CONFIG_SHEET_NAME} criada com horário padrão ${CONFIG_HORA_LIMPEZA_PADRAO}h`);
+  return sheet;
+}
+
+/**
+ * Lê o horário (0-23) configurado pelo usuário para a limpeza diária de Faturados.
+ * Cria a aba CONFIGURAÇÕES com o padrão se ela não existir. Valor ausente ou fora de
+ * 0-23 cai no padrão — nunca lança erro, a limpeza não pode travar por causa disto.
+ * @returns {number} hora 0-23
+ */
+function _getHoraLimpezaFaturados_() {
+  try {
+    const sheet = _garantirAbaConfiguracoes_();
+    const val = sheet.getRange(CONFIG_HORA_LIMPEZA_CELL).getValue();
+    const n = Number(val);
+    if (isFinite(n) && n >= 0 && n <= 23) return Math.floor(n);
+    Logger.log(`   ⚠️ CONFIGURAÇÕES!${CONFIG_HORA_LIMPEZA_CELL}="${val}" inválido — usando padrão ${CONFIG_HORA_LIMPEZA_PADRAO}h`);
+    return CONFIG_HORA_LIMPEZA_PADRAO;
+  } catch (e) {
+    Logger.log(`   ⚠️ _getHoraLimpezaFaturados_: ${e.message} — usando padrão ${CONFIG_HORA_LIMPEZA_PADRAO}h`);
+    return CONFIG_HORA_LIMPEZA_PADRAO;
+  }
+}
+
+/**
+ * Decide se a limpeza diária de Faturados deve rodar AGORA.
+ *
+ * Só autoriza uma vez por dia: na primeira execução cuja hora local (fuso de Fortaleza)
+ * seja igual ou depois do horário configurado. Usa uma propriedade do script (não uma
+ * hora exata) para não depender de cair bem na hora certa — se o trigger horário atrasar
+ * ou for adiado por lock, ainda assim libera na primeira passada seguinte.
+ * @returns {boolean}
+ */
+function _deveLimparFaturadosAgora_() {
+  const horaLimpeza = _getHoraLimpezaFaturados_();
+  const agora = new Date();
+  const horaAtual = Number(Utilities.formatDate(agora, TZ, 'H'));
+  const hojeStr = Utilities.formatDate(agora, TZ, 'yyyy-MM-dd');
+
+  if (horaAtual < horaLimpeza) return false; // ainda não chegou o horário de hoje
+
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('ULTIMA_LIMPEZA_FATURADOS_DATA') === hojeStr) return false; // já rodou hoje
+
+  return true;
+}
+
+/** Marca que a limpeza diária de Faturados já rodou hoje (fuso de Fortaleza). */
+function _registrarLimpezaFaturadosFeitaHoje_() {
+  const hojeStr = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  PropertiesService.getScriptProperties().setProperty('ULTIMA_LIMPEZA_FATURADOS_DATA', hojeStr);
+}
+
+/**
+ * Roda a limpeza de Faturados agora, ignorando o horário configurado em CONFIGURAÇÕES —
+ * para testar a configuração nova ou forçar uma limpeza fora do horário de rotina.
+ * Não mexe no registro de "já rodou hoje": a rotina automática no horário configurado
+ * continua valendo normalmente depois desta chamada manual.
+ */
+function limparFaturadosAgoraMenu() {
+  const ui = SpreadsheetApp.getUi();
+  const resultado = purgarItensFinalizados();
+  if (resultado.purgados > 0) limparCache();
+  ui.alert(
+    '✅ Limpeza concluída',
+    `${resultado.purgados} item(ns) Faturado/Finalizado/Excluído com ≥${DIAS_RETENCAO} dia(s) removido(s).\n\n` +
+    `O horário automático configurado em "${CONFIG_SHEET_NAME}" continua rodando normalmente — isto foi só um empurrão manual.`,
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * REPARO ÚNICO: arquiva as linhas do Relatorio_DB que entraram por importação parcial,
+ * isto é, linhas cujos campos de identidade vieram vazios (tipicamente CLIENTE) e que
+ * por isso ganharam ID e UUID próprios, duplicando um item que já existia.
+ *
+ * SEGURANÇA — uma linha só é arquivada quando TODAS as condições valem:
+ *   1. tem campo de identidade vazio (é uma linha quebrada, sem impressão digital sem OC);
+ *   2. existe outra linha, com identidade completa, com os mesmos dados de negócio
+ *      (pedido, produto, tamanho, OC, OS, data) — o item não se perde;
+ *   3. não tem baixa registrada no Baixas_Historico;
+ *   4. não tem MARCAR_FATURAR, MARCAR_FATURAR_USUARIO nem LOTE_EMISSAO — nenhum
+ *      trabalho de usuário é descartado.
+ * Nada é apagado: as linhas viram "Excluido", ficam ocultas no HTML e continuam
+ * auditáveis na planilha.
+ */
+function repararLinhasDeImportacaoParcial() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) {
+    ui.alert('Relatorio_DB vazio', 'Nada a reparar.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const lastRow = sheet.getLastRow();
+  const numCols = Math.max(sheet.getLastColumn(), DB_QTD_COL + 1);
+  const dados = sheet.getRange(2, 1, lastRow - 1, numCols).getValues();
+
+  // IDs com baixa registrada — nunca arquivar
+  const idsBaixados = new Set();
+  try {
+    const baixasSheet = getSpreadsheet_().getSheetByName(BAIXAS_SHEET_NAME);
+    if (baixasSheet && baixasSheet.getLastRow() > 1) {
+      baixasSheet.getRange(2, 1, baixasSheet.getLastRow() - 1, 1).getValues()
+        .forEach(r => { if (r[0]) idsBaixados.add(String(r[0]).trim()); });
+    }
+  } catch (e) {
+    ui.alert('❌ Não foi possível ler o histórico de baixas',
+      `${e.message}\n\nOperação cancelada — sem essa lista não é seguro arquivar nada.`, ui.ButtonSet.OK);
+    return;
+  }
+
+  const T = v => String(v === null || v === undefined ? '' : v).trim();
+  // Dados de negócio da linha, IGNORANDO o CLIENTE (o campo que costuma vir vazio):
+  // é por esta chave que a linha quebrada reencontra sua gêmea íntegra.
+  const chaveNegocio = row => [
+    T(row[DB_PEDIDO_COL]),
+    _chaveProduto_(row[DB_MARFIM_COL], row[DB_DESC_COL], T(row[DB_TAM_COL]), T(row[CLIENTE_COL])),
+    T(row[DB_TAM_COL]), T(row[DB_OC_COL]), T(row[10]), _normalizarData_(row[11])
+  ].join('|');
+
+  // Linhas ÍNTEGRAS (identidade completa) indexadas pela chave de negócio
+  const integras = new Map();
+  dados.forEach(row => {
+    if (!T(row[ID_COL])) return;
+    if (!_criarImpressaoDigitalSemOC_(row, true)) return; // esta é quebrada
+    const k = chaveNegocio(row);
+    integras.set(k, (integras.get(k) || 0) + 1);
+  });
+
+  const candidatas = [];
+  const semGemea   = [];
+  const comTrabalho = [];
+  dados.forEach((row, i) => {
+    const id = T(row[ID_COL]);
+    if (!id) return;
+    const status = T(row[STATUS_COL]);
+    if (status === 'Excluido') return;                       // já arquivada
+    if (_criarImpressaoDigitalSemOC_(row, true)) return;     // identidade completa: não mexe
+
+    const info = {
+      linha: i + 2, id: id, status: status,
+      oc: T(row[DB_OC_COL]), pedido: T(row[DB_PEDIDO_COL]),
+      desc: _descBase_(row[DB_DESC_COL]), tam: T(row[DB_TAM_COL])
+    };
+
+    if (idsBaixados.has(id) || T(row[MARCAR_FATURAR_COL]) ||
+        T(row[MARCAR_FATURAR_USUARIO_COL]) || T(row[LOTE_EMISSAO_COL])) {
+      comTrabalho.push(info);
+      return;
+    }
+    if (!integras.has(chaveNegocio(row))) {
+      semGemea.push(info);
+      return;
+    }
+    candidatas.push(info);
+  });
+
+  Logger.log(`🔍 repararLinhasDeImportacaoParcial: ${candidatas.length} arquiváveis, ` +
+             `${semGemea.length} sem gêmea íntegra, ${comTrabalho.length} com trabalho de usuário`);
+
+  if (candidatas.length === 0) {
+    ui.alert('✅ Nada a reparar',
+      'Nenhuma linha de importação parcial atende a todos os critérios de segurança.\n\n' +
+      `Sem gêmea íntegra (mantidas): ${semGemea.length}\n` +
+      `Com baixa/marcação do usuário (mantidas): ${comTrabalho.length}`,
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  const amostra = candidatas.slice(0, 8)
+    .map(c => `• linha ${c.linha}: pedido ${c.pedido} / OC ${c.oc} / ${c.tam} — ${c.desc.slice(0, 40)}`)
+    .join('\n');
+  const resposta = ui.alert(
+    '⚠️ Confirmar reparo',
+    `${candidatas.length} linha(s) criada(s) por importação parcial (campo de identidade vazio) ` +
+    `serão marcadas como Excluido.\n\nCada uma tem uma linha íntegra equivalente, nenhuma tem ` +
+    `baixa ou marcação de usuário, e nada é apagado da planilha.\n\n` + amostra +
+    (candidatas.length > 8 ? `\n… e mais ${candidatas.length - 8}.` : '') +
+    `\n\nMantidas por segurança: ${semGemea.length} sem gêmea, ${comTrabalho.length} com trabalho de usuário.` +
+    '\n\nDeseja continuar?',
+    ui.ButtonSet.YES_NO
+  );
+  if (resposta !== ui.Button.YES) {
+    Logger.log('ℹ️ repararLinhasDeImportacaoParcial: cancelado pelo usuário.');
+    return;
+  }
+
+  const agora = new Date();
+  candidatas.forEach(c => {
+    sheet.getRange(c.linha, STATUS_COL + 1).setValue('Excluido');
+    sheet.getRange(c.linha, MARCAR_FATURAR_COL + 1).setValue('');
+    sheet.getRange(c.linha, DATA_STATUS_COL + 1).setValue(agora);
+    Logger.log(`🧹 Linha ${c.linha} → Excluido (importação parcial, ID="${c.id}")`);
+  });
+
+  SpreadsheetApp.flush();
+  limparCache();
+  ui.alert('✅ Reparo concluído',
+    `${candidatas.length} linha(s) arquivada(s) como Excluido.\n\n` +
+    'A válvula de auto-faturamento volta a ligar sozinha na próxima sincronização.\n' +
+    'Atualize o HTML para ver o resultado.',
+    ui.ButtonSet.OK);
+  Logger.log(`✅ repararLinhasDeImportacaoParcial: ${candidatas.length} linha(s) arquivada(s).`);
+}
+
 function purgarItensFinalizados() {
   const STATUS_FINAIS = new Set(['Faturado', 'Finalizado', 'Excluido']);
   const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
