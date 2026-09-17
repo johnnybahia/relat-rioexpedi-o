@@ -1906,6 +1906,11 @@ ALL_OCS_ITEMS = itemsObj;
                         showAvisosBanner(response.avisosPendentes);
                     }
 
+                    // Sentinela de duplicidade — tem precedência: indica dado inconsistente no DB
+                    if (response.alertaDuplicatas) {
+                        showAlertaDuplicidade(response.alertaDuplicatas);
+                    }
+
                     // Construir autocomplete
                     buildAutocompleteData();
 
@@ -2483,6 +2488,30 @@ ALL_OCS_ITEMS = itemsObj;
                 <button class="avisos-banner-dismiss" onclick="this.closest('#avisos-banner').classList.add('hidden')" title="Dispensar">✕</button>
             </div>
             <ul>${itensHtml}</ul>`;
+        $avisosBanner.classList.remove('hidden');
+    }
+
+    // Exibe o alerta da sentinela de duplicidade (gravado ao fim de cada sincronização
+    // em Código.gs, ver _registrarSentinelaDuplicatas_) no mesmo banner de avisos.
+    function showAlertaDuplicidade(alerta) {
+        if (!alerta) return;
+        const partes = [];
+        if (alerta.itensEmVariasOCs) partes.push(`${alerta.itensEmVariasOCs} item(ns) aberto(s) em mais de uma OC`);
+        if (alerta.idsRepetidos)     partes.push(`${alerta.idsRepetidos} ID repetido(s)`);
+        if (alerta.uuidsRepetidos)   partes.push(`${alerta.uuidsRepetidos} código fixo repetido(s)`);
+        if (alerta.orfasRedundantes) partes.push(`${alerta.orfasRedundantes} linha(s) sem correspondência no PEDIDOS`);
+        if (alerta.orfasSemFonte)    partes.push(`${alerta.orfasSemFonte} item(ns) que já saíram da origem e continuam em aberto`);
+        if (partes.length === 0) return;
+
+        const exemplos = (alerta.exemplos || []).map(e =>
+            `<li>Pedido ${_escapeHtml(e.pedido || '')} · cód. cliente ${_escapeHtml(e.codCliente || '')} → OCs ${_escapeHtml((e.ocs || []).join(' e '))}</li>`
+        ).join('');
+        $avisosBanner.innerHTML = `
+            <div class="avisos-banner-header">
+                🚨 Duplicidade detectada no banco: ${partes.join(' · ')} — avise o responsável antes de faturar esses itens
+                <button class="avisos-banner-dismiss" onclick="this.closest('#avisos-banner').classList.add('hidden')" title="Dispensar">✕</button>
+            </div>
+            ${exemplos ? `<ul>${exemplos}</ul>` : ''}`;
         $avisosBanner.classList.remove('hidden');
     }
 
