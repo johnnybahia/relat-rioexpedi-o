@@ -523,6 +523,58 @@ duplicatas. As órfãs nunca eram limpas: `consumedFingerprints` é um Set de fi
 (estabiliza os IDs em PEDIDOS) → rodar a limpeza de órfãs → o sync seguinte re-adiciona ao
 DB os itens de PEDIDOS que ficaram sem correspondente, já com IDs estáveis.
 
+### 15.15 Sentinela de duplicidade + ferramentas manuais (portado do sistema irmão Bahia)
+
+As correções de 15.9–15.14 impedem os casos conhecidos de duplicação, mas não davam um
+sinal automático caso um caminho novo escapasse — o problema só aparecia visualmente,
+semanas depois, com centenas de linhas já acumuladas. Portado do projeto irmão
+(`johnnybahia/EXPEDICAOBAHIA`) um conjunto de proteções que rodam **depois** de qualquer
+duplicata já ter passado pelas travas de `sincronizarPedidosComFonte`/`sincronizarDados`.
+
+**Sentinela automática** (`_verificarIntegridadeDuplicatas_` + `_registrarSentinelaDuplicatas_`,
+chamada ao fim de `sincronizarDados()`, logo após `_gravarDuplicatasDebug_`): varre o
+Relatorio_DB a cada sync e checa 5 condições —
+1. `ID_UNICO` repetido;
+2. `CÓDIGO_FIXO` (UUID) repetido;
+3. mesmo item **aberto** em mais de uma ORD. COMPRA (mesma impressão digital sem OC);
+4. linha aberta sem correspondência em PEDIDOS, quando outra linha do mesmo grupo é
+   reconhecida (cobre o caso em que a contraparte já está Faturado — a verificação 3 não
+   vê, porque só uma das linhas está aberta);
+5. linhas abertas além do que `DADOS_IMPORTADOS` reconhece por identidade (mesmo orçamento
+   de excedente que o sync usa para faturar automaticamente — ver 15.14 / `2ceb277`).
+
+O resultado é gravado em `PropertiesService` (`ALERTA_DUPLICATAS`) e devolvido no payload
+de `fetchAllDataUnified` como `result.alertaDuplicatas`; o frontend (`showAlertaDuplicidade`)
+mostra isso no mesmo banner de avisos (`$avisosBanner`) já usado por `AVISOS_PENDENTES` —
+**a duplicidade tem precedência**: se os dois avisos coincidirem no mesmo ciclo, o banner de
+duplicidade sobrescreve o de avisos pendentes (decisão herdada do Bahia, não um bug). Quando
+o próximo sync não encontra mais nada, a propriedade é apagada e o aviso some sozinho.
+
+**Ferramentas de menu adicionadas** (todas leem o mesmo `_agruparItensDuplicadosDB_`, que
+agrupa linhas do DB por impressão digital sem OC ou por UUID repetido):
+- `verificarDuplicidadeAgora()` — roda a sentinela sob demanda e mostra o resultado num alert.
+- `diagnosticarItensDuplicadosOC()` — só leitura; grava a aba `Duplicatas_OC_Diagnostico`
+  com todo item em mais de uma OC, sinalizando qual cópia é a "provável correta" (a que
+  não está `Faturado`) quando há uma órfã fantasma.
+- `arquivarDuplicatasOrfas()` — marca `Excluido` (nunca apaga) as cópias órfãs que atendem
+  simultaneamente: grupo de exatamente 2 linhas em OCs diferentes, uma `Faturado`/`Inativo`
+  e a outra `Ativo`, o par OC+OS da órfã não existe mais em `DADOS_IMPORTADOS`, e a órfã não
+  tem nenhuma baixa registrada em `Baixas_Historico`. Complementar a `limparDuplicatasOrfasDB()`
+  (15.14): esta última compara contagem PEDIDOS vs. DB por fingerprint sem OS; a nova
+  compara pares de linhas explicitamente em OCs diferentes.
+- `faturarItensForaDaFonte()` — reforço manual do que o sync automático já decide sozinho a
+  cada ciclo (mesma lógica de orçamento por identidade de 15.14/`2ceb277`); útil só para
+  adiantar o resultado sem esperar os próximos 5 minutos. Mesmas travas do sync:
+  `MIN_LINHAS_FONTE_PARA_FATURAR` e `MAX_FRACAO_SEM_FONTE` abortam se a fonte parecer
+  incompleta. Auditoria em aba própria `Itens_Fora_Da_Fonte`.
+
+**Não portado do Bahia:** a coluna `INFO_Y` (Bahia usa a coluna Y da fonte para "conta e
+ordem" — transferência entre filiais; no Ceará a coluna Y da fonte já é `LOTE`, usada para
+outra coisa — não há dado de origem equivalente) e o rodapé de etiquetas NF (dados da
+Marfim Bahia; o Ceará já tem os dados corretos da Marfim Ceará). A retenção de itens
+Faturados continua em `DIAS_RETENCAO = 15` (Bahia mudou para 1 dia — decisão operacional
+da filial, não replicada).
+
 ---
 
 ## 16. SEQUÊNCIA SEGURA PARA MUDANÇAS
