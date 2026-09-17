@@ -5545,10 +5545,19 @@ function _readAllData_() {
   };
 }
 
+// Normaliza nome de coluna para comparação tolerante: colapsa qualquer sequência de
+// espaços (inclusive espaço não separável  , que \s cobre) num único espaço normal,
+// remove bordas, e normaliza acentuação Unicode (NFC) — cabeçalhos digitados ou colados de
+// outra fonte podem parecer idênticos visualmente e diferir só nesses detalhes invisíveis,
+// fazendo o mapeamento por nome falhar silenciosamente e cair no valor padrão ('N/A').
+function _normalizarNomeColuna_(s) {
+  return String(s || '').normalize('NFC').replace(/\s+/g, ' ').trim();
+}
+
 function _getColumnIndexes_(headers) {
   const map = {};
   headers.forEach((h, i) => {
-    const key = String(h || '').trim();
+    const key = _normalizarNomeColuna_(h);
     if (key) map[key] = i;
   });
   return map;
@@ -5557,11 +5566,11 @@ function _getColumnIndexes_(headers) {
 // Usa displayRow para campos textuais/identificadores (evita virar Data / perder zeros à esquerda)
 function _rowToItem_(row, displayRow, colMap, rowIndex) {
   const get = (colName, def = '') => {
-    const idx = colMap[colName];
+    const idx = colMap[_normalizarNomeColuna_(colName)];
     return (idx !== undefined && idx < row.length) ? row[idx] : def;
   };
   const getDisp = (colName, def = '') => {
-    const idx = colMap[colName];
+    const idx = colMap[_normalizarNomeColuna_(colName)];
     return (idx !== undefined && idx < displayRow.length) ? displayRow[idx] : def;
   };
 
