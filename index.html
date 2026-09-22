@@ -3711,7 +3711,7 @@ ALL_OCS_ITEMS = itemsObj;
         <div class="linha"><span class="label">OC:</span>${oc}</div>
         <div class="linha"><span class="label">Descrição:</span>${item.DESCRIÇÃO || 'N/A'}</div>
         <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
-        <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
+        <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || item.LOTE || '—'}</div>
         <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
         ${_obsHtml}
     </div>
@@ -3734,7 +3734,7 @@ ALL_OCS_ITEMS = itemsObj;
         <div class="linha"><span class="label">OC:</span>${oc}</div>
         <div class="linha"><span class="label">Descrição:</span>${item.DESCRIÇÃO || 'N/A'}</div>
         <div class="linha"><span class="label">Tamanho:</span>${item.TAMANHO || 'N/A'}</div>
-        <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
+        <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || item.LOTE || '—'}</div>
         <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
         ${_obsHtml}
     </div>
@@ -4000,7 +4000,7 @@ ALL_OCS_ITEMS = itemsObj;
                     <div class="linha"><span class="label">OC:</span>${currentEtiquetaOC}</div>
                     <div class="linha"><span class="label">Descrição:</span>${currentEtiquetaItem.DESCRIÇÃO || 'N/A'}</div>
                     <div class="linha"><span class="label">Tamanho:</span>${currentEtiquetaItem.TAMANHO || 'N/A'}</div>
-                    <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || '—'}</div>
+                    <div class="linha"><span class="label">Lote do produto:</span>${loteProduto || currentEtiquetaItem.LOTE || '—'}</div>
                     <div class="linha"><span class="label">${totalLabel ? 'TOTAL NO PACOTE:' : 'Quantidade:'}</span><strong style="${totalLabel ? 'font-size:14px;' : ''}">${fmtInt(qtdExibida)}</strong></div>
                     <div class="linha"><span class="label">Data:</span>${dataEmissao}</div>
                     ${observacoes ? `<div class="obs"><span class="label">Obs:</span> ${observacoes}</div>` : ''}
