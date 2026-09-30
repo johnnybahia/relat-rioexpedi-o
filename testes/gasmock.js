@@ -113,6 +113,7 @@ class Sheet {
   deleteRow(r) { this.data.splice(r - 1, 1); }
   insertColumnsAfter(c, n) { this.maxCols += n; }
   appendRow(vals) { this.data.push([...vals]); }
+  protect() { const p = { warningOnly: false, setDescription() { return p; }, setWarningOnly(v) { p.warningOnly = !!v; return p; } }; this.protecao = p; return p; }
   clearContents() { this.data = this.data.map(r => r.map(() => '')); return this; }
   clear() { return this.clearContents(); }
   setFrozenRows() {} setColumnWidth() {} setTabColor() {} hideSheet() {} activate() {}

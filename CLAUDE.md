@@ -2,7 +2,7 @@
 
 > Lido automaticamente em toda sessão. Atualizar sempre que houver mudança arquitetural.
 > Versão do sistema: **v15.6-SINCRONIZACAO** · Backend em Google Apps Script · Frontend em HTML+JS embutido no Apps Script
-> Última revisão contra o código e dados reais: **30/09/2026** (plano da seção 17 implementado). Se este documento
+> Última revisão contra o código e dados reais: **30/09/2026** (plano da seção 17 implementado + `Historico_Decisoes`). Se este documento
 > divergir do código, o código descreve o comportamento real — mas as **regras de negócio da seção 1.1 prevalecem**:
 > se o código as viola, é o código que deve ser corrigido. Antes de propor mudanças, ler 1.1, 15.16–15.19 e 17
 > (estado da implantação e ideias descartadas).
@@ -71,6 +71,7 @@ aba `RELATÓRIO GERAL DA PRODUÇÃO1` (constantes `SOURCE_ID`/`SOURCE_SHEET` em 
 | `CONFIGURAÇÕES` | Configuração editável pelo usuário | B2 = hora (0-23) da limpeza diária, padrão 11. **B4 = modo `SIMULACAO`/`ATIVO`** (vazio → `SIMULACAO`). A3/A4 são texto, regravados pelo código (`_atualizarTextosConfiguracoes_`). **Não existe célula de dias** |
 | `Auditoria_Sincronizacao` | Registro do que o sistema fez ou faria (modo simulação) | DATA_HORA · MODO · TIPO · ID · DETALHE. Criada sozinha; guarda as últimas 5.000 linhas (tipos em 15.19) |
 | `Reparo_Faturados` | Resultado do menu "🩹 Reparar faturados sem usuário" | Append; lista o que voltou para conferência e os pares com gêmea para decisão manual |
+| `Historico_Decisoes` | Registro **permanente** de quem decidiu o quê + cópia de toda linha que a limpeza apaga | Criada sozinha; só acréscimo, o código nunca apaga nem limita; protegida com aviso contra edição manual. 15 colunas (`HISTORICO_HEADERS`). Eventos na seção 14 |
 | `CADASTRO` | Login | Col A usuário, B senha, C nível (TOTAL/PARCIAL); E1 = minutos de sessão |
 | `Baixas_Historico` | Histórico de parcializações de QTD | Cabeçalho lido dinamicamente. Suporta coluna TIPO para CHECKPOINTs |
 | `LOTE DILLY` | Mapeamento OC→Lotes para cliente Dilly | Consumido em FIFO durante sincronização |
@@ -176,6 +177,7 @@ DIAS_RETENCAO = 15              // só no modo SIMULACAO (regra antiga da limpez
 CONFIG_SHEET_NAME = 'CONFIGURAÇÕES', CONFIG_HORA_LIMPEZA_CELL = 'B2', CONFIG_HORA_LIMPEZA_PADRAO = 11
 CONFIG_MODO_CELL = 'B4', CONFIG_MODO_PADRAO = 'SIMULACAO'   // lido por _modoAtivo_() (cache por execução)
 AUDITORIA_SHEET_NAME = 'Auditoria_Sincronizacao', AUDITORIA_MAX_LINHAS = 5000
+HISTORICO_SHEET_NAME = 'Historico_Decisoes', HISTORICO_HEADERS (15 colunas) // sem limite de linhas
 MIN_LINHAS_FONTE_PARA_FATURAR = 50 // travas de fonte confiável (7.3) — valem para faturar E para sinalizar
 MAX_FRACAO_SEM_FONTE = 0.5
 TOLERANCIA_QUEDA_FONTE = 0.15
@@ -339,6 +341,9 @@ Consequência: item marcado cuja QTD muda na origem perde a marcação (precisa 
 | Sync: marcado pelo usuário (P=SIM + col V) + saiu da origem + fonte confiável | col V (preservada) + col Z `FATURADO\|{col V}\|data\|marcado pelo usuário` |
 | Tela: aviso de conferência → botão **Faturado** (`confirmarSaidaFonte`, só nível TOTAL, validado no servidor) | col Z `FATURADO\|{login}\|data\|confirmado no aviso` |
 
+Os dois caminhos também gravam uma linha `FATURADO` no `Historico_Decisoes` com o usuário (seção 14) — o do sync
+só depois da releitura (faturamento cancelado no meio não entra).
+
 Removidos em 30/09: faturamento por QTD=0, faturamento por `_motivoSaidaDaFonte_` (agora → `PENDENTE`),
 `marcarFaturado()`, `confirmarTodosAlertas()`/`confirmarTodosAlertasMenu()` e o item de menu "(testes)".
 `faturarItensForaDaFonte()` (menu "📤 Sinalizar itens que já saíram da origem") só grava `PENDENTE`.
@@ -469,7 +474,9 @@ Configuração em produção informada pelo usuário em 28/09/2026 (tela Acionad
 **Guard de execução dupla:** `LockService.getScriptLock()` — processo completo (`waitLock(30000)`), importação
 (`tryLock(20000)`) e ferramentas de menu. Ações de usuário não pegam a trava; o sync protege o que elas
 gravam relendo as linhas antes de escrever (`_mesclarAlteracoesConcorrentes_`). `confirmarSaidaFonte` usa a
-trava do documento (respostas simultâneas ao aviso).  
+trava do documento (respostas simultâneas ao aviso). As gravações nas abas `Auditoria_Sincronizacao` e
+`Historico_Decisoes` (`_anexarNaAba_`) também usam a trava do documento — sync e usuário não escrevem na mesma
+linha; sem a trava em 20 s, gravam linha a linha com `appendRow` (atômica).  
 **Pause do sistema:** `PropertiesService.SISTEMA_PAUSADO='true'` (menu IDs Personalizados)
 
 ---
@@ -488,6 +495,7 @@ obterItensMarcadosParaFaturar()             // para gerar relatório
 gerarNumeroLoteEmissao()                    // FAT-001, FAT-002...
 registrarLoteEmissao(itensData)             // persiste lotes em col W — itensData: {planilhaLinha, uniqueId, loteId}
 confirmarSaidaFonte(id, linha, decisao, usuario) // resposta ao aviso: FATURADO | CANCELADO | DUPLICATA | ABERTO
+excluirMultiplosItens(items, usuario)       // "excluir inativos"; o login vai para o Historico_Decisoes
 ```
 
 ### Aviso de conferência (itens que saíram da origem sem marcação)
@@ -502,10 +510,32 @@ confirmarSaidaFonte(id, linha, decisao, usuario) // resposta ao aviso: FATURADO 
   (clicável) e "✔ conferido" para `ABERTO`. Nível PARCIAL não vê janela nem contador (o servidor também recusa).
 - O usuário enviado é o login da sessão (aba CADASTRO), não o perfil BAIXA1…BAIXA5.
 - **Quem decidiu fica registrado** na col Z (`FATURADO|ANA|30/09/2026 08:52|confirmado no aviso…`, idem ABERTO,
-  CANCELADO, DUPLICATA) e na auditoria (`CONFERENCIA_*`, com data/hora). Limites: a limpeza em ATIVO apaga a linha
-  Faturado/Excluido (e a col Z junto); a auditoria guarda só as últimas 5.000 linhas; col Z `ABERTO` é apagada se o
-  item volta à origem; o nome vem da sessão do navegador — o servidor só confere que existe com nível TOTAL na
-  CADASTRO (não há token de sessão), então é atribuição, não prova forte.
+  CANCELADO, DUPLICATA), na auditoria (`CONFERENCIA_*`) e, **de forma permanente, no `Historico_Decisoes`**
+  (desde 30/09; nos dois modos). A col Z some na limpeza e a auditoria só guarda 5.000 linhas; o histórico não.
+
+### Historico_Decisoes (registro permanente)
+Colunas: DATA_HORA · EVENTO · USUARIO · ORIGEM · ID_UNICO · CLIENTE · PEDIDO · ORD. COMPRA · CÓD. MARFIM ·
+DESCRIÇÃO (sem `[uuid]`) · TAMANHO · LOTE · QTD. ABERTA · LOTE_EMISSAO (FAT-xxx) · DETALHE.
+
+| EVENTO | Onde nasce | USUARIO |
+|---|---|---|
+| `FATURADO` `CANCELADO` `DUPLICATA` `ABERTO` | resposta ao aviso (`confirmarSaidaFonte`) | login da tela |
+| `FATURADO` | sync: marcado + saiu da origem — registrado **depois** de gravado | col V formatada: `EVELINE (BAIXA1)` |
+| `EXCLUIDO` | tela "excluir inativos" (`excluirItem`) | login da tela (`não informado` se a página antiga não enviar) |
+| `REABERTO` | menu 🩹 reparo | conta Google de quem rodou (`menu` se o Google não informar) |
+| `APAGADO_NA_LIMPEZA` | `purgarItensFinalizados`, **antes** de apagar, nos dois modos | nome da col Z (decisão) ou da col V (marcação); `sem nome na linha` |
+
+- Gravação: `_registrarDecisao_` acumula em memória; `_gravarDecisoes_` grava uma vez por execução (também chamada
+  por `_gravarAuditoria_`), sob a trava do documento (seção 13). Nada por item no sync.
+- Falha ao gravar: decisão do usuário continua valendo (col Z) e o conteúdo vai para a auditoria (`HISTORICO_FALHOU`);
+  a limpeza **não apaga nada** nessa rodada (15.18).
+- Não cobre: reset completo (menu) — apaga o DB, o histórico fica; exclusões de ferramentas de menu
+  (`arquivarDuplicatasOrfas`, `repararLinhasDeImportacaoParcial`) — só aparecem na cópia da limpeza; `limparDuplicatasOrfasDB`
+  (tem a aba `Duplicatas_Removidas`); edição manual na planilha.
+- O nome vem da sessão do navegador — o servidor só confere que existe com nível TOTAL na CADASTRO (sem token de
+  sessão): é atribuição, não prova forte.
+- Volume: ~100 linhas por dia útil (decisões + cópias da limpeza), ~25 mil/ano. Sem rotação automática; arquivar à
+  mão (copiar para outro arquivo) se passar de ~100 mil linhas.
 
 ### Fluxo de marcação para faturamento (checkbox)
 ```
@@ -774,7 +804,7 @@ ordem" — transferência entre filiais; no Ceará a coluna Y da fonte já é `L
 outra coisa — não há dado de origem equivalente) e o rodapé de etiquetas NF (dados da
 Marfim Bahia; o Ceará já tem os dados corretos da Marfim Ceará). A retenção de itens
 Faturados ficou em `DIAS_RETENCAO = 15` (Bahia mudou para 1 dia). **Em 28/09/2026 o usuário decidiu que
-o Ceará também deve apagar todos os faturados diariamente** — regra 1.1.5, pendente de implementação (15.18).
+o Ceará também deve apagar todos os faturados diariamente** — regra 1.1.5, implementada em 30/09 (15.18).
 
 ### 15.16 Incidente 28/09/2026: `Faturado` sem usuário + limite de identidade (linhas-irmãs) — CORRIGIDO (30/09)
 **Situação em 30/09:** o sync não fatura mais sem usuário (nos dois modos); o planejador de irmãs, a recuperação
@@ -836,6 +866,9 @@ faz a irmã marcada/zerada ser a que "saiu" — o dano máximo é um aviso, nunc
 - Nos dois modos, `Faturado` **sem usuário** (col V vazia e col Z sem `FATURADO`) não é apagado
   (auditoria `LIMPEZA_RETIDA`). `Excluido` por "Cancelado"/"Duplicata" do aviso some na limpeza seguinte:
   se a linha voltar à origem depois disso, entra como item novo.
+- **Antes de apagar**, copia cada linha no `Historico_Decisoes` (`APAGADO_NA_LIMPEZA`, com quem decidiu e a col Z).
+  Se a cópia falhar, nada é apagado (`LIMPEZA_ADIADA`, `{ adiada: true }`) e o processo automático **não** marca o dia
+  (`ULTIMA_LIMPEZA_FATURADOS_DATA`) — tenta de novo na execução seguinte. Nunca apaga sem cópia.
 - A3/A4 da aba são texto regravado pelo código — não controlam nada.
 
 ### 15.19 Modo SIMULACAO × ATIVO (`CONFIGURAÇÕES!B4`) e auditoria
@@ -851,10 +884,11 @@ faz a irmã marcada/zerada ser a que "saiu" — o dano máximo é um aviso, nunc
 
 **Não depende de B4 (vale desde a publicação):** nenhum `Faturado` sem usuário; `PENDENTE` + aviso na tela;
 `PENDENTE`/`ABERTO` fora das contagens e das vagas; trava na importação; conferência de ID por linha; releitura
-antes de gravar; sentinela 6–8; reparo; remoção de `marcarFaturado`/`confirmarTodosAlertas`; instaladores 15 min/1 h.
+antes de gravar; sentinela 6–8; reparo; remoção de `marcarFaturado`/`confirmarTodosAlertas`; instaladores 15 min/1 h;
+`Historico_Decisoes` (inclusive a cópia antes de apagar, nas duas regras de limpeza).
 
 Outros tipos na auditoria: `PENDENTE`, `PENDENCIA_RESOLVIDA`, `FATURADO_POR_MARCACAO`, `FATURAMENTO_CANCELADO`,
-`CONFERENCIA_FATURADO|CANCELADO|DUPLICATA|ABERTO`, `REPARO_REABERTO`, `REPARO_MANUAL`.
+`CONFERENCIA_FATURADO|CANCELADO|DUPLICATA|ABERTO`, `REPARO_REABERTO`, `REPARO_MANUAL`, `HISTORICO_FALHOU`, `LIMPEZA_ADIADA`.
 
 **Como validar o modo novo antes de ligar:** com B4 = SIMULACAO, olhar `Auditoria_Sincronizacao` por 3–5 dias
 úteis. Cada `IDENTIDADE_SIMULADA` mostra a linha da origem, o ID de hoje e o que o ATIVO daria — conferir alguns
@@ -909,6 +943,7 @@ Objetivo: cumprir 1.1.3 (nenhum `Faturado` sem usuário) e 1.1.5 (limpeza diári
 | 8 | Sentinela 6–8 | `_verificarIntegridadeDuplicatas_` (15.15) | os dois |
 | 9 | Modo simulação com auditoria | `_modoAtivo_`, `Auditoria_Sincronizacao` (15.19) | — |
 | 10 | Reparo dos faturados sem usuário | menu 🩹 `repararFaturadosSemUsuario` | os dois |
+| 11 | `Historico_Decisoes`: quem decidiu, permanente; cópia antes da limpeza | `_registrarDecisao_`, `_gravarDecisoes_`, `_anexarNaAba_` (14) | os dois |
 
 **Sequência de implantação (usuário):**
 1. Publicar `Código.gs` e `index.html` no Apps Script (nova versão da implantação web).
@@ -926,6 +961,10 @@ sem marcação nunca some calado (vai para o aviso); numa importação suspeita 
 aviso é perguntado uma vez só ("Continua aberto" não volta); com ATIVO, linha nova nunca herda item finalizado e
 lote que não mudou não troca de ID. **Não garantível** (limite da origem, 1.1.4): saber qual linha é qual entre
 irmãs 100% idênticas — o dano fica contido a um aviso, nunca a um faturamento.
+
+**Corrigido junto (30/09):** a exclusão de inativos na tela chamava `updateInactiveRowsList`/`updateInactiveCount`, que
+não existem (erro de JavaScript depois do sucesso; `reorderCards` não rodava) — chamadas removidas; a auditoria podia
+perder linhas se o sync e uma resposta ao aviso gravassem ao mesmo tempo — agora sob a trava do documento.
 
 **Pendências conhecidas:** decisão manual dos 9 pares do incidente; `corrigirFaturadosComSaldoAberto()` segue no
 menu (reverte todo Faturado com QTD>0 para Ativo sem pendência — não usar; o sync depois os manda para o aviso);
@@ -955,9 +994,9 @@ Relatorio_DB), roda o `Código.gs` de verdade e confere o resultado nos dois mod
 | Arquivo | O que confere |
 |---|---|
 | `testes/dados_reais.js` | Em cada base: 2ª rodada do sync com a mesma origem não muda nada; nenhum Faturado sem usuário; nenhum ID/UUID repetido novo; base padrão: 1ª rodada não troca ID |
-| `testes/cenarios.js` | 12 situações do dia a dia: irmã marcada sai (incidente 28/09), DESCRIÇÃO corrigida (1 linha e grupo inteiro), lote novo ao lado de faturado, saída com/sem marcação, importação truncada, faturamento parcial entre irmãs, pendência que volta, reordenação, lote novo no grupo, troca de OC |
-| `testes/funcoes.js` | Sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos |
-| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; PARCIAL não vê. Sem Playwright → pulado |
+| `testes/cenarios.js` | 12 situações do dia a dia: irmã marcada sai (incidente 28/09), DESCRIÇÃO corrigida (1 linha e grupo inteiro), lote novo ao lado de faturado, saída com/sem marcação, importação truncada, faturamento parcial entre irmãs, pendência que volta, reordenação, lote novo no grupo, troca de OC. Em todos: nenhum Faturado sem usuário novo e, no `Historico_Decisoes`, todo Faturado novo registrado com o usuário e nenhum faturamento registrado que não aconteceu |
+| `testes/funcoes.js` | Sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos; `Historico_Decisoes`: respostas do aviso, reparo, marcação, desmarcado durante o sync (não registra), exclusão com/sem login, gravação sem a trava (appendRow), cópia de cada linha apagada com o nome, falha na cópia → nada apagado e o processo automático não marca o dia |
+| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê. Sem Playwright → pulado |
 | `testes/rodar_todos.js` | Roda tudo; placar; código 1 se falhar (~1 min) |
 
 **Quando rodar:** antes de todo commit que mexa em `Código.gs`, `index.html` ou `testes/`. O hook
@@ -976,7 +1015,9 @@ Actions (`.github/workflows/testes.yml`) roda de novo em todo push/PR (inclusive
 
 **Teste de mutação** (prova que a bateria pega defeitos): `CODIGO_GS=<cópia alterada do .gs>` e
 `INDEX_HTML=<cópia alterada do .html>` fazem os testes rodarem contra uma cópia com defeito proposital. Em 30/09:
-faturar sem usuário, planejador ignorando LOTE/QTD, limpeza apagando faturado sem usuário e aviso que não abre —
+faturar sem usuário, planejador ignorando LOTE/QTD, limpeza apagando faturado sem usuário e aviso que não abre;
+histórico: resposta do aviso sem registro, limpeza apagando sem cópia, sync sem registrar faturamento, registro antes
+da releitura, trava do documento não liberada, tela sem o login na exclusão, perda de linhas sem a trava —
 todos detectados.
 
 **Limites do simulador:** não reproduz tipos de célula além do que o CSV mostra (número × texto já causou um falso

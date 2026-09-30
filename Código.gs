@@ -107,6 +107,11 @@ const CONFIG_MODO_CELL       = 'B4';
 const CONFIG_MODO_PADRAO     = 'SIMULACAO';
 const AUDITORIA_SHEET_NAME   = 'Auditoria_Sincronizacao';
 const AUDITORIA_MAX_LINHAS   = 5000;
+// Registro permanente de quem decidiu o quê (faturou, cancelou, excluiu, "continua aberto"…) e cópia
+// de toda linha que a limpeza apaga. Só recebe linhas novas: o código nunca apaga nem limita esta aba.
+const HISTORICO_SHEET_NAME   = 'Historico_Decisoes';
+const HISTORICO_HEADERS      = ['DATA_HORA', 'EVENTO', 'USUARIO', 'ORIGEM', 'ID_UNICO', 'CLIENTE', 'PEDIDO',
+  'ORD. COMPRA', 'CÓD. MARFIM', 'DESCRIÇÃO', 'TAMANHO', 'LOTE', 'QTD. ABERTA', 'LOTE_EMISSAO', 'DETALHE'];
 // Z (coluna 26) — conferência de item que saiu da origem SEM marcação de usuário.
 // "PENDENTE|data|motivo" = aguardando alguém responder o aviso; "ABERTO|usuário|data" = usuário
 // disse que continua aberto; "FATURADO|…", "CANCELADO|…", "DUPLICATA|…" = registro da decisão.
@@ -2741,8 +2746,11 @@ function processoAutomaticoCompleto() {
         Logger.log(`   ⏭️ Fora do horário configurado (ou já rodou hoje) — limpeza adiada`);
       } else {
         const resultadoPurga = purgarItensFinalizados();
-        _registrarLimpezaFaturadosFeitaHoje_();
-        if (resultadoPurga.purgados > 0) {
+        // Adiada (cópia para o histórico falhou): não marca o dia — a próxima execução tenta de novo.
+        if (!resultadoPurga.adiada) _registrarLimpezaFaturadosFeitaHoje_();
+        if (resultadoPurga.adiada) {
+          Logger.log(`   ⚠️ Limpeza adiada: cópia para ${HISTORICO_SHEET_NAME} falhou, nada apagado`);
+        } else if (resultadoPurga.purgados > 0) {
           Logger.log(`   ✅ ${resultadoPurga.purgados} item(ns) apagado(s) do DB`);
           houveMudancas = true;
         } else {
@@ -4487,6 +4495,11 @@ function sincronizarDados() {
         if (u.cancelado) return;
         dbSheet.getRange(u.linha, 1, 1, u.dados.length).setValues([u.dados]);
         Logger.log(`   ✅ Linha ${u.linha}: ${u.de} → ${u.para} | ID: ${u.id}`);
+        // Faturamento por marcação entra no histórico só depois de gravado (desmarcado no meio → cancelado)
+        if (u.exigeMarcacao) {
+          _registrarDecisao_('FATURADO', _usuarioDaMarcacao_(u.dados[MARCAR_FATURAR_USUARIO_COL]),
+            'marcado pelo usuário + saiu da origem (sincronização)', u.dados, `status anterior: ${u.de}`);
+        }
       });
     }
 
@@ -4897,6 +4910,11 @@ function _modoAtivo_() {
 
 // Linhas da aba de auditoria acumuladas na execução; gravadas de uma vez por _gravarAuditoria_().
 let _auditoriaBuffer_ = [];
+// Linhas do Historico_Decisoes acumuladas na execução; gravadas de uma vez por _gravarDecisoes_().
+let _decisoesBuffer_ = [];
+// true enquanto a execução já segura a trava do documento (confirmarSaidaFonte): _anexarNaAba_
+// não tenta pegar a mesma trava de novo.
+let _travaDocumentoObtida_ = false;
 
 function _auditar_(tipo, id, detalhe) {
   _auditoriaBuffer_.push([
@@ -4905,24 +4923,136 @@ function _auditar_(tipo, id, detalhe) {
   ]);
 }
 
-/** Grava o buffer de auditoria (uma escrita) e mantém só as últimas AUDITORIA_MAX_LINHAS linhas. */
+/**
+ * Acrescenta linhas no fim de uma aba (criada com o cabeçalho se não existir) sem que duas gravações
+ * simultâneas — o sync e um usuário respondendo o aviso — escrevam na mesma linha: getLastRow +
+ * setValues sob a trava do documento. Sem a trava em 20 s, grava linha a linha com appendRow, que é
+ * atômica. aposGravar(sh) só roda com a trava. Erro sobe para quem chamou.
+ */
+function _anexarNaAba_(nome, cabecalho, linhas, aoCriar, aposGravar) {
+  if (!linhas || linhas.length === 0) return;
+  let lock = null;
+  let travado = _travaDocumentoObtida_;
+  if (!travado) {
+    try {
+      lock = LockService.getDocumentLock();
+      travado = !!lock && lock.tryLock(20000);
+    } catch (e) {
+      travado = false;
+    }
+  }
+  try {
+    const ss = getSpreadsheet_();
+    let sh = ss.getSheetByName(nome);
+    if (!sh) {
+      sh = ss.insertSheet(nome);
+      sh.getRange(1, 1, 1, cabecalho.length).setValues([cabecalho]).setFontWeight('bold');
+      sh.setFrozenRows(1);
+      if (aoCriar) aoCriar(sh);
+    }
+    if (travado) {
+      sh.getRange(sh.getLastRow() + 1, 1, linhas.length, cabecalho.length).setValues(linhas);
+      if (aposGravar) aposGravar(sh);
+    } else {
+      Logger.log(`⚠️ ${nome}: sem a trava do documento — gravando linha a linha`);
+      linhas.forEach(l => sh.appendRow(l));
+    }
+  } finally {
+    if (lock && travado) { try { lock.releaseLock(); } catch (_) {} }
+  }
+}
+
+/**
+ * Grava o buffer do histórico e o da auditoria (uma escrita cada); a auditoria mantém só as últimas
+ * AUDITORIA_MAX_LINHAS linhas.
+ */
 function _gravarAuditoria_() {
+  _gravarDecisoes_();
   if (_auditoriaBuffer_.length === 0) return;
   const linhas = _auditoriaBuffer_;
   _auditoriaBuffer_ = [];
   try {
-    const ss = getSpreadsheet_();
-    let sh = ss.getSheetByName(AUDITORIA_SHEET_NAME);
-    if (!sh) {
-      sh = ss.insertSheet(AUDITORIA_SHEET_NAME);
-      sh.getRange(1, 1, 1, 5).setValues([['DATA_HORA', 'MODO', 'TIPO', 'ID', 'DETALHE']]).setFontWeight('bold');
-      sh.setFrozenRows(1);
-    }
-    sh.getRange(sh.getLastRow() + 1, 1, linhas.length, 5).setValues(linhas);
-    const excesso = (sh.getLastRow() - 1) - AUDITORIA_MAX_LINHAS;
-    if (excesso > 0) sh.deleteRows(2, excesso);
+    _anexarNaAba_(AUDITORIA_SHEET_NAME, ['DATA_HORA', 'MODO', 'TIPO', 'ID', 'DETALHE'], linhas, null, sh => {
+      const excesso = (sh.getLastRow() - 1) - AUDITORIA_MAX_LINHAS;
+      if (excesso > 0) sh.deleteRows(2, excesso);
+    });
   } catch (e) {
     Logger.log(`⚠️ _gravarAuditoria_: ${e.message}`);
+  }
+}
+
+/**
+ * Registra no Historico_Decisoes uma decisão ou a cópia de uma linha que a limpeza vai apagar.
+ * Só acumula em memória: a gravação é uma escrita por execução (_gravarDecisoes_, também chamada
+ * por _gravarAuditoria_). row = linha do Relatorio_DB (A…Z) no momento do evento.
+ */
+function _registrarDecisao_(evento, usuario, origem, row, detalhe) {
+  const r = row || [];
+  const v = i => (r[i] === null || r[i] === undefined) ? '' : r[i];
+  _decisoesBuffer_.push([
+    new Date(), String(evento), String(usuario || '').trim() || 'não informado', String(origem || ''),
+    String(v(ID_COL)).trim(), v(CLIENTE_COL), v(DB_PEDIDO_COL), v(DB_OC_COL), v(DB_MARFIM_COL),
+    _descBase_(v(DB_DESC_COL)), v(DB_TAM_COL), v(DB_LOTE_COL), v(DB_QTD_COL), v(LOTE_EMISSAO_COL),
+    String(detalhe === undefined || detalhe === null ? '' : detalhe).slice(0, 45000)
+  ]);
+}
+
+/**
+ * Grava o buffer do Historico_Decisoes. true = gravou (ou não havia nada). Se falhar, o conteúdo vai
+ * para a auditoria (HISTORICO_FALHOU): a decisão do usuário continua valendo (coluna Z) e a limpeza,
+ * que depende desta cópia, não apaga nada na rodada.
+ */
+function _gravarDecisoes_() {
+  if (_decisoesBuffer_.length === 0) return true;
+  const linhas = _decisoesBuffer_;
+  _decisoesBuffer_ = [];
+  try {
+    _anexarNaAba_(HISTORICO_SHEET_NAME, HISTORICO_HEADERS, linhas, sh => {
+      try {
+        sh.protect().setDescription('Histórico permanente de decisões — gravado pelo sistema, não editar')
+          .setWarningOnly(true);
+      } catch (e) {
+        Logger.log(`⚠️ Proteção da aba ${HISTORICO_SHEET_NAME}: ${e.message}`);
+      }
+    });
+    return true;
+  } catch (e) {
+    Logger.log(`❌ _gravarDecisoes_: ${e.message}`);
+    _auditar_('HISTORICO_FALHOU', '', `${linhas.length} registro(s) não gravado(s) (${e.message}): ` +
+      linhas.map(l => [l[1], l[2], l[4], l[5], l[6], l[7], l[10], l[11]].join(' / ')).join(' ; '));
+    return false;
+  }
+}
+
+/** Coluna V ({"BAIXA1":"EVELINE"}) → "EVELINE (BAIXA1)". Texto que não é JSON volta como está. */
+function _usuarioDaMarcacao_(valor) {
+  const s = String(valor === null || valor === undefined ? '' : valor).trim();
+  if (!s || s.charAt(0) !== '{') return s;
+  try {
+    const o = JSON.parse(s);
+    const partes = Object.keys(o || {}).map(k => `${String(o[k]).trim()} (${k})`);
+    return partes.length ? partes.join(', ') : s;
+  } catch (e) {
+    return s;
+  }
+}
+
+/** Nome registrado na linha: quem respondeu o aviso (coluna Z) ou, senão, quem marcou (coluna V). */
+function _quemDecidiu_(row) {
+  const c = _lerConferencia_(row);
+  if (c && c.tipo !== 'PENDENTE') {
+    const quem = String(c.texto.split('|')[1] || '').trim();
+    if (quem) return _usuarioDaMarcacao_(quem);
+  }
+  return _usuarioDaMarcacao_(row[MARCAR_FATURAR_USUARIO_COL]);
+}
+
+/** Conta Google de quem rodou uma ferramenta de menu ('menu' quando o Google não informa). */
+function _contaAtual_() {
+  try {
+    return Session.getActiveUser().getEmail() || 'menu';
+  } catch (e) {
+    return 'menu';
   }
 }
 
@@ -5020,6 +5150,13 @@ function _registrarLimpezaFaturadosFeitaHoje_() {
 function limparFaturadosAgoraMenu() {
   const ui = SpreadsheetApp.getUi();
   const resultado = purgarItensFinalizados();
+  if (resultado.adiada) {
+    ui.alert('⚠️ Limpeza adiada',
+      `Não foi possível copiar as linhas para a aba "${HISTORICO_SHEET_NAME}" — nada foi apagado.\n` +
+      `Detalhe na aba ${AUDITORIA_SHEET_NAME} (HISTORICO_FALHOU). Tente de novo em alguns minutos.`,
+      ui.ButtonSet.OK);
+    return;
+  }
   if (resultado.purgados > 0) limparCache();
   const regra = _modoAtivo_()
     ? 'todos os itens Faturado e Excluído (modo ATIVO)'
@@ -5243,6 +5380,24 @@ function purgarItensFinalizados() {
     Logger.log(`ℹ️ purgarItensFinalizados: nada para apagar (${ativo ? 'ATIVO' : `SIMULACAO, ${DIAS_RETENCAO} dias`}).`);
     _gravarAuditoria_();
     return { purgados: 0 };
+  }
+
+  // Cópia de cada linha no Historico_Decisoes ANTES de apagar (quem marcou, quem respondeu o aviso,
+  // FAT-xxx). Se a cópia falhar, nada é apagado nesta rodada — nunca apaga sem cópia.
+  const origemLimpeza = ativo ? 'limpeza diária' : `limpeza (regra de ${DIAS_RETENCAO} dias)`;
+  linhasParaDeletar.slice().reverse().forEach(linha => {
+    const row = dados[linha - 2];
+    const ds = row[dataStatusCol] instanceof Date ? Utilities.formatDate(row[dataStatusCol], TZ, 'dd/MM/yyyy HH:mm') : '';
+    _registrarDecisao_('APAGADO_NA_LIMPEZA', _quemDecidiu_(row) || 'sem nome na linha', origemLimpeza, row,
+      `status ${String(row[statusCol] || '').trim()}${ds ? ' desde ' + ds : ''}; ` +
+      `coluna Z: ${String(row[DB_CONFERENCIA_SAIDA_COL] || '').trim() || '(vazia)'}; ` +
+      `marcado por: ${_usuarioDaMarcacao_(row[MARCAR_FATURAR_USUARIO_COL]) || '(ninguém)'}`);
+  });
+  if (!_gravarDecisoes_()) {
+    _auditar_('LIMPEZA_ADIADA', '', `${linhasParaDeletar.length} linha(s) NÃO apagada(s): falha ao copiar para ${HISTORICO_SHEET_NAME}`);
+    _gravarAuditoria_();
+    Logger.log(`⚠️ purgarItensFinalizados: cópia para ${HISTORICO_SHEET_NAME} falhou — nada apagado, tenta de novo na próxima execução.`);
+    return { purgados: 0, adiada: true };
   }
 
   // Apaga em blocos de linhas contíguas, de baixo para cima — poucas chamadas deleteRows em vez
@@ -6662,7 +6817,7 @@ function getItensForOrdCompra(ordCompraId) {
 // marcarFaturado() foi removida: nenhuma tela a chamava, mas por ser pública podia ser chamada
 // do navegador e gravava "Faturado" sem usuário — violava a regra 1.1.3 do CLAUDE.md.
 
-function excluirItem(uniqueId, planilhaLinha, _skipCache) {
+function excluirItem(uniqueId, planilhaLinha, _skipCache, usuario) {
   try {
     const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     if (!sheet) throw new Error("Aba DB não encontrada");
@@ -6677,9 +6832,12 @@ function excluirItem(uniqueId, planilhaLinha, _skipCache) {
       throw new Error("Coluna 'Status' não encontrada");
     }
 
+    const antes = sheet.getRange(linhaNum, 1, 1, headers.length).getValues()[0]; // para o histórico
     sheet.getRange(linhaNum, statusCol + 1).setValue("Excluido");
     sheet.getRange(linhaNum, DATA_STATUS_COL + 1).setValue(new Date()); // Q: data do status
-    if (!_skipCache) limparCache();
+    _registrarDecisao_('EXCLUIDO', usuario, 'tela: excluir itens', antes,
+      `status anterior: ${String(antes[statusCol] || '').trim() || '(vazio)'}`);
+    if (!_skipCache) { limparCache(); _gravarAuditoria_(); }
     Logger.log(`🗑️ ${uniqueId || 'sem-id'} → Excluido (linha ${linhaNum})`);
     return { success: true, id: uniqueId || null, linha: linhaNum };
   } catch (e) {
@@ -6714,16 +6872,17 @@ function finalizarItem(uniqueId, planilhaLinha, _skipCache) {
   }
 }
 
-function excluirMultiplosItens(items) {
+function excluirMultiplosItens(items, usuario) {
   let ok = 0, fail = 0;
   const results = [];
   (items || []).forEach(it => {
     const linha = (it && it.planilhaLinha != null) ? it.planilhaLinha : (it ? it.linha : null);
     const id = (it && (it.uniqueId || it.id)) || null;
-    const r = excluirItem(id, linha, true); // _skipCache=true: limpa uma só vez ao final
+    const r = excluirItem(id, linha, true, usuario); // _skipCache=true: limpa uma só vez ao final
     results.push(r);
     r.success ? ok++ : fail++;
   });
+  _gravarAuditoria_(); // histórico das exclusões numa escrita só
   if (ok > 0) limparCache();
   return { success: fail === 0, processados: ok, falhas: fail, results };
 }
@@ -6770,6 +6929,7 @@ function confirmarSaidaFonte(uniqueId, planilhaLinha, decisao, usuario) {
     // Serializa respostas simultâneas ao mesmo aviso (a trava do script fica com o sync).
     lock = LockService.getDocumentLock();
     if (lock && !lock.tryLock(10000)) throw new Error('Outra resposta está sendo gravada — tente de novo.');
+    _travaDocumentoObtida_ = !!lock;
 
     const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     if (!sheet) throw new Error('Aba DB não encontrada');
@@ -6801,6 +6961,7 @@ function confirmarSaidaFonte(uniqueId, planilhaLinha, decisao, usuario) {
     SpreadsheetApp.flush();
     limparCache();
     _auditar_(`CONFERENCIA_${dec}`, uniqueId, `usuário=${quem} linha=${linhaNum}`);
+    _registrarDecisao_(dec, quem, 'aviso de conferência (tela)', row, `${detalhe} — pendência: ${conf.texto}`);
     _gravarAuditoria_();
     Logger.log(`🧾 confirmarSaidaFonte: ID="${uniqueId}" → ${dec} por ${quem}`);
     return { success: true, id: uniqueId, decisao: dec, linha: linhaNum };
@@ -6808,6 +6969,7 @@ function confirmarSaidaFonte(uniqueId, planilhaLinha, decisao, usuario) {
     Logger.log(`❌ confirmarSaidaFonte: ${e.message}`);
     return { success: false, error: e.message, id: uniqueId || null };
   } finally {
+    _travaDocumentoObtida_ = false;
     if (lock) { try { lock.releaseLock(); } catch (_) {} }
   }
 }
@@ -6897,12 +7059,15 @@ function repararFaturadosSemUsuario() {
       .concat(comGemea.map(x => linhaDiag(x, 'DECISÃO MANUAL (gêmea aberta)')));
     aba.getRange(aba.getLastRow() + 1, 1, diag.length, 12).setValues(diag);
 
+    const conta = _contaAtual_();
     reabrir.forEach(x => {
       sheet.getRange(x.linha, STATUS_COL + 1).setValue('Ativo');
       sheet.getRange(x.linha, DATA_STATUS_COL + 1).setValue('');
       sheet.getRange(x.linha, DB_CONFERENCIA_SAIDA_COL + 1)
         .setValue(_textoConferencia_('PENDENTE', 'reparo', 'faturado sem usuário pela regra antiga'));
       _auditar_('REPARO_REABERTO', T(x.row[ID_COL]), `linha ${x.linha}: Faturado sem usuário → Ativo + PENDENTE`);
+      _registrarDecisao_('REABERTO', conta, 'menu 🩹 Reparar faturados sem usuário', x.row,
+        'Faturado sem usuário → Ativo + PENDENTE (volta para o aviso da tela)');
     });
     comGemea.forEach(x => _auditar_('REPARO_MANUAL', T(x.row[ID_COL]), `linha ${x.linha}: tem gêmea aberta — ver aba Reparo_Faturados`));
 
