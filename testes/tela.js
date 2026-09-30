@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Tela (index.html) no Chromium, com google.script.run simulado e dados gerados pelo próprio Código.gs:
 // aviso de conferência (abre sozinho para TOTAL, respostas, erros, "Responder depois", pendência nova,
-// selo no item) e usuário PARCIAL sem aviso. Sem Playwright/Chromium no ambiente → pulado (não falha).
+// selo no item), exclusão de inativos com o login e usuário PARCIAL sem aviso. Sem Playwright/Chromium no ambiente → pulado (não falha).
 //   node testes/tela.js [--dados <pasta>] [--capturas]   (capturas vão para testes/saida/)
 const fs = require('fs');
 const os = require('os');
@@ -53,6 +53,7 @@ function gerarPayload() {
     autenticarLogin: u => ({ success: true, nivel: u === 'BIA' ? 'PARCIAL' : 'TOTAL', tempoSessao: 15 }),
     obterNivelUsuario: u => ({ success: true, nivel: u === 'BIA' ? 'PARCIAL' : 'TOTAL', tempoSessao: 15 }),
     fetchAllDataUnified: () => JSON.parse(JSON.stringify(window.__payload)),
+    excluirMultiplosItens: items => ({ success: true, processados: items.length, falhas: 0, results: [] }),
     confirmarSaidaFonte: (id, linha, dec) => {
       if (id === window.__falharId) return { success: false, error: 'Este item não está mais pendente (já foi respondido ou voltou à origem). Atualize a tela.' };
       window.__payload.pendentesSaida = window.__payload.pendentesSaida.filter(p => p.uniqueId !== id);
@@ -148,6 +149,13 @@ function gerarPayload() {
         } else {
           rel.pular('nenhum selo visível na primeira página de OCs');
         }
+        await page.evaluate(() => {
+          document.getElementById('deleteAllModal').dataset.items = JSON.stringify([{ uniqueId: 'ID-INATIVO-TESTE', linha: 5, info: 'teste' }]);
+          confirmExcluirNaoMarcados();
+        });
+        await page.waitForTimeout(300);
+        const ex = (await chamadas('excluirMultiplosItens')).pop();
+        rel.check('excluir inativos envia o login (histórico de decisões)', ex && ex[1][1] === usuario, JSON.stringify(ex && ex[1]));
         if (capturas) {
           await page.setViewportSize({ width: 390, height: 800 });
           await page.waitForTimeout(200);

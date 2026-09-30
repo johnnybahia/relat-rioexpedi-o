@@ -94,6 +94,11 @@ function auditoria(env, tipo) {
   const sh = aba(env, 'Auditoria_Sincronizacao');
   return sh ? sh.data.slice(1).filter(a => !tipo || a[2] === tipo) : [];
 }
+/** Linhas do Historico_Decisoes: [DATA_HORA, EVENTO, USUARIO, ORIGEM, ID_UNICO, CLIENTE, PEDIDO, OC, …, DETALHE]. */
+function historico(env, evento) {
+  const sh = aba(env, 'Historico_Decisoes');
+  return sh ? sh.data.slice(1).filter(h => !evento || h[1] === evento) : [];
+}
 const statusFinal = s => ['Faturado', 'Finalizado', 'Excluido'].includes(T(s));
 const conferencia = r => T(r[25]).split('|')[0].toUpperCase();
 // Faturado sem prova de usuário: col V vazia e col Z sem "FATURADO|<alguém>|…"
@@ -169,6 +174,6 @@ function relatorio(titulo) {
 module.exports = {
   PASTA_DADOS, BASE_PADRAO, USUARIO_TESTE, acharCsv, lerBase, basesDoRepositorio, pastaDaLinhaDeComando,
   montar, sincronizar, imp, ped, db, T, dbPorId, idPedidosPorLote, linhaOrigemPorLote, alterarDb, registrarBaixa,
-  auditoria, statusFinal, conferencia, faturadoSemUsuario, resumoLinha, gruposDeIrmas, linhasSozinhas, baseDoIdConfere,
+  auditoria, historico, statusFinal, conferencia, faturadoSemUsuario, resumoLinha, gruposDeIrmas, linhasSozinhas, baseDoIdConfere,
   relatorio
 };

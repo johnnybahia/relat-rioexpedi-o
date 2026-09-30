@@ -24,9 +24,19 @@ function cenario(titulo, achar, preparar, conferir) {
     if (!alvo) { rel.pular('a base não tem a situação necessária'); continue; }
     const fsuAntes = contarFsu(env);
     const extra = preparar(env, alvo) || {};
+    const fatAntes = new Set(L.db(env).slice(1).filter(r => L.T(r[14]) === 'Faturado').map(r => L.T(r[0])));
+    const histAntes = L.historico(env).length;
     L.sincronizar(env);
     conferir(env, modo, alvo, extra);
     rel.check('nenhum Faturado sem usuário novo', contarFsu(env) <= fsuAntes, `antes ${fsuAntes}, depois ${contarFsu(env)}`);
+    // Historico_Decisoes: todo Faturado novo registrado com o usuário; nada registrado que não aconteceu
+    const novosFat = L.db(env).slice(1).filter(r => L.T(r[14]) === 'Faturado' && !fatAntes.has(L.T(r[0]))).map(r => L.T(r[0]));
+    const histFat = L.historico(env).slice(histAntes).filter(h => h[1] === 'FATURADO');
+    const comUsuario = new Set(histFat.filter(h => L.T(h[2]) && h[2] !== 'não informado').map(h => L.T(h[4])));
+    rel.check('histórico: todo Faturado novo registrado com o usuário', novosFat.every(id => comUsuario.has(id)),
+      `sem registro: ${novosFat.filter(id => !comUsuario.has(id)).join(', ')}`);
+    rel.check('histórico: nenhum faturamento registrado que não aconteceu',
+      histFat.every(h => { const r = L.dbPorId(env, L.T(h[4])); return r && L.T(r[14]) === 'Faturado'; }));
   }
 }
 const aud = (env, tipo) => L.auditoria(env, tipo);

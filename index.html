@@ -2824,8 +2824,6 @@ ALL_OCS_ITEMS = itemsObj;
                     hideDeleteAllModal();
                     showSuccessModal(`${result.processados} item(ns) excluído(s) com sucesso!`);
                     updateStats();
-                    updateInactiveRowsList();
-                    updateInactiveCount();
                     reorderCards();
                 } else {
                     showError('Erro ao excluir itens: ' + (result.error || 'Erro desconhecido'));
@@ -2836,7 +2834,7 @@ ALL_OCS_ITEMS = itemsObj;
                 showError('Falha ao excluir itens: ' + error.message);
                 $loader.classList.add('hidden');
             })
-            .excluirMultiplosItens(items);
+            .excluirMultiplosItens(items, (_getSessaoLocal() || {}).usuario || ''); // login vai para o Historico_Decisoes
     }
 
     function handleBaixa(item) {
