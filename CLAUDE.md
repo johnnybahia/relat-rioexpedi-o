@@ -983,3 +983,7 @@ todos detectados.
 alarme), fuso/horário real, limites de 6 min e cota diária, gatilhos, concorrência real do LockService nem o
 sandbox do HtmlService. Mudança feita direto no editor do Apps Script não passa por nenhum teste. O modo SIMULACAO
 em produção (15.19) continua sendo a segunda rede.
+**Fora da base (não testado):** as abas `LOTE DILLY` e `original` não entram na base (`montar` cria só
+DADOS_IMPORTADOS, PEDIDOS, Relatorio_DB, CONFIGURAÇÕES, CADASTRO e Baixas_Historico **vazia**) — a troca de CÓD. OS
+pelo lote Dilly (FIFO), a SEQUENCIA/POSICAO_FONTE e o histórico real de baixas não são exercitados; os cenários
+criam baixas sintéticas. Mudança nessas partes exige estender `lib.acharCsv`/`montar` e o anonimizador primeiro.
