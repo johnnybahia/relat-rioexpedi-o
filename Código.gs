@@ -1560,6 +1560,11 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       linhasIncompletas.map(x => x.linha - FONTE_DATA_START_ROW)
     );
 
+    // CONFIGURAÇÕES!B4: ATIVO usa o planejador de linhas-irmãs e só recupera ID de item aberto;
+    // SIMULACAO mantém o casamento antigo e registra na auditoria o que mudaria.
+    const modoAtivo = _modoAtivo_();
+    Logger.log(`⚙️ Identidade de linhas-irmãs: ${modoAtivo ? 'ATIVO (planejador)' : 'SIMULACAO (casamento antigo + auditoria)'}`);
+
     // PASSO 2: Ler aba PEDIDOS (atual com IDs)
     const pedidosSheet = getSpreadsheet_().getSheetByName(FONTE_SHEET_NAME);
     if (!pedidosSheet) {
@@ -1583,6 +1588,11 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // Índice para resgatar linhas cuja versão na fonte veio quebrada (ver PASSO 1.5).
     // Chave = impressão digital SEM o CLIENTE; wrappers compartilhados com pedidosMap.
     const pedidosResgateMap = new Map();
+
+    // Todas as linhas de PEDIDOS com CARTELA (os mesmos wrappers dos mapas acima) e os seus IDs —
+    // entrada do planejador de linhas-irmãs.
+    const todosWrappers = [];
+    const idsWrappersPedidos = new Set();
 
     // Sequências (oc|seq) já atribuídas — em PEDIDOS (col V) ou no Relatorio_DB (col Y).
     // Slots usados nunca são reatribuídos a outro item (sequência é fixa para sempre).
@@ -1620,6 +1630,8 @@ function sincronizarPedidosComFonte(forcarExecucao) {
           usado: false
         };
         pedidosMap.get(impressao).push(wrapper);
+        todosWrappers.push(wrapper);
+        if (String(id || '').trim()) idsWrappersPedidos.add(String(id).trim());
 
         // DILLY: indexa o MESMO wrapper também pela fingerprint sem OS (flag "usado" compartilhada)
         const _wCliente_ = String(row[CLIENTE_COL] || '').trim();
@@ -1678,12 +1690,16 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // para o mesmo idFinal. Ver seção 15.13 do CLAUDE.md.
     const idsAssignadosNestaRodada = new Set();
     const dbFingerprintMap = new Map(); // fingerprint → [id, ...] (array FIFO — suporta itens 100% idênticos)
+    // Mesma coisa só com itens ABERTOS — modo ATIVO: linha nova nunca herda o ID de um item
+    // Faturado/Finalizado/Excluido (ficaria escondida sob o status final — 15.16, risco latente).
+    const dbFingerprintMapAbertos = new Map();
     const dbCodigoFixoMap  = new Map(); // id → codigoFixo (reutilizar UUID já gravado no DB)
+    const dbEstadoPorId    = new Map(); // id → {final, pendente, marcado, qtd, status} — critério do planejador
     const dbSheetRef = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     if (dbSheetRef && dbSheetRef.getLastRow() >= 2) {
       const numDbRows = dbSheetRef.getLastRow() - 1;
-      // Lê até a coluna Y (SEQUENCIA, índice 24) — inclui CÓDIGO_FIXO em S (18) e SEQUENCIA em Y (24)
-      const dbReadCols = Math.min(DB_SEQUENCIA_COL + 1, dbSheetRef.getMaxColumns());
+      // Lê até a coluna Z (CONFERENCIA_SAIDA) — inclui CÓDIGO_FIXO em S (18) e SEQUENCIA em Y (24)
+      const dbReadCols = Math.min(DB_CONFERENCIA_SAIDA_COL + 1, dbSheetRef.getMaxColumns());
       const dbRange = dbSheetRef.getRange(2, 1, numDbRows, dbReadCols).getValues();
       dbRange.forEach(dbRow => {
         // Sequência já fixada no DB (col Y) conta como usada na sua OC — cobre itens
@@ -1696,20 +1712,51 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         const dbId = String(dbRow[0] || '').trim();
         if (dbId) {
           idsUsados.add(dbId);
+          const dbStatus = String(dbRow[STATUS_COL] || '').trim();
+          const dbFinal  = _statusFinal_(dbStatus);
           const fp = _criarImpressaoDigital_(dbRow, true);
           if (fp) {
             // Array FIFO por fingerprint — para itens 100% idênticos cada um tem seu próprio slot.
             // shift() consome um ID por vez, garantindo que cada item da fonte recupere um ID distinto.
             if (!dbFingerprintMap.has(fp)) dbFingerprintMap.set(fp, []);
             dbFingerprintMap.get(fp).push(dbId);
+            if (!dbFinal) {
+              if (!dbFingerprintMapAbertos.has(fp)) dbFingerprintMapAbertos.set(fp, []);
+              dbFingerprintMapAbertos.get(fp).push(dbId);
+            }
           }
           const cf = String(dbRow[DB_CODIGO_FIXO_COL] || '').trim();
           if (cf) dbCodigoFixoMap.set(dbId, cf); // UUID fixo já gravado no DB para este item
+          const conf = _lerConferencia_(dbRow);
+          dbEstadoPorId.set(dbId, {
+            final:    dbFinal,
+            pendente: !!conf && (conf.tipo === 'PENDENTE' || conf.tipo === 'ABERTO'),
+            marcado:  String(dbRow[MARCAR_FATURAR_COL] || '').trim().toUpperCase() === 'SIM',
+            qtd:      Number(dbRow[DB_QTD_COL] || 0) || 0,
+            status:   dbStatus
+          });
         }
       });
       Logger.log(`🔒 ${idsUsados.size} IDs do Relatorio_DB carregados (colisões + recuperação)`);
-      Logger.log(`🔑 ${dbFingerprintMap.size} fingerprints do DB indexadas para recuperação de ID`);
+      Logger.log(`🔑 ${dbFingerprintMap.size} fingerprints do DB indexadas para recuperação de ID (${dbFingerprintMapAbertos.size} com item aberto)`);
     }
+
+    // Recuperação de ID pelo Relatorio_DB quando a linha não tem vaga em PEDIDOS.
+    // SIMULACAO: comportamento antigo (qualquer status, primeiro da fila).
+    // ATIVO: só itens abertos, e nunca um ID que ainda pertence a uma linha de PEDIDOS — essa
+    // linha ou já casou nesta rodada ou saiu da origem e precisa ser tratada como saída.
+    const _recuperarIdDoDb_ = (fp) => {
+      if (!modoAtivo) {
+        const lista = dbFingerprintMap.get(fp);
+        return (lista && lista.length > 0) ? lista.shift() : null;
+      }
+      const lista = dbFingerprintMapAbertos.get(fp);
+      while (lista && lista.length > 0) {
+        const cand = lista.shift();
+        if (!idsWrappersPedidos.has(cand) && !idsAssignadosNestaRodada.has(cand)) return cand;
+      }
+      return null;
+    };
 
     // PASSO 2.5: Ler aba "original" para determinar a sequência correta de itens dentro de cada OC.
     // Chave: "OC|DESC|TAM|QTD|DATA" → índice global da linha (usado para ordenar itens no HTML).
@@ -1789,6 +1836,19 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       Logger.log(`⚠️ Erro ao ler "${LOTE_DILLY_SHEET_NAME}": ${e.message}`);
     }
 
+    // PASSO 2.7: PLANEJADOR DE LINHAS-IRMÃS (ver o bloco antes de _planejarCasamentoIrmas_).
+    // Linhas quebradas (PASSO 1.5) reservam a sua vaga primeiro, pela chave de resgate.
+    const reservaResgate    = new Map(); // índice da fonte → vaga de PEDIDOS preservada
+    const reservadosResgate = new Set();
+    idxIncompletos.forEach(i => {
+      const slots = pedidosResgateMap.get(_chaveResgateFonte_(fonteData[i]));
+      const slot  = slots ? slots.find(m => !reservadosResgate.has(m) && String(m.id || '').trim()) : null;
+      if (slot) { reservadosResgate.add(slot); reservaResgate.set(i, slot); }
+    });
+    const planoIrmas = _planejarCasamentoIrmas_(fonteData, idxIncompletos, todosWrappers, reservadosResgate, dbEstadoPorId);
+    Logger.log(`🧩 Planejador de irmãs: ${planoIrmas.plano.size} linha(s) com vaga em PEDIDOS (${planoIrmas.porBase.size} pela base do ID)`);
+    const resultadoReal = new Map(); // SIMULACAO: índice da fonte → {id, via} do casamento antigo
+
     fonteData.forEach((fonteRow, idx) => {
       const cartela = fonteRow[0]; // Em DADOS_IMPORTADOS, CARTELA é coluna B (índice 0, lido a partir de B)
 
@@ -1804,15 +1864,13 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       // CLIENTE e a reemitimos intacta — mesmo ID, mesmo UUID, mesmos dados — até a fonte
       // voltar completa.
       if (idxIncompletos.has(idx)) {
-        const _iTam_  = String(fonteRow[7] || '').trim();
-        const _iProd_ = _chaveProduto_(fonteRow[5], fonteRow[6], _iTam_, String(fonteRow[1] || '').trim());
-        const _iKey_  = [
-          String(fonteRow[3] || '').trim(), _iProd_, _iTam_,
-          String(fonteRow[8] || '').trim(), String(fonteRow[10] || '').trim(),
-          _normalizarData_(fonteRow[11])
-        ].join('|');
-        const _iSlots_ = pedidosResgateMap.get(_iKey_);
-        const _iSlot_  = _iSlots_ ? _iSlots_.find(m => !m.usado && String(m.id || '').trim()) : null;
+        let _iSlot_;
+        if (modoAtivo) {
+          _iSlot_ = reservaResgate.get(idx) || null; // reservada antes do planejador
+        } else {
+          const _iSlots_ = pedidosResgateMap.get(_chaveResgateFonte_(fonteRow));
+          _iSlot_ = _iSlots_ ? _iSlots_.find(m => !m.usado && String(m.id || '').trim()) : null;
+        }
         if (_iSlot_) {
           _iSlot_.usado = true;
           const _iLinha_ = _iSlot_.row.slice(0, 22);
@@ -1832,14 +1890,18 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       // Cria impressão digital da linha fonte (offset 0 porque não tem coluna ID)
       const impressao = _criarImpressaoDigitalFromRow_(fonteRow, 0);
 
-      // Procura match em PEDIDOS
-      const matches = pedidosMap.get(impressao);
-
       let idFinal = null;
       let timestampFinal = null;
       let isNovo = false;
       let codigoFixo = ''; // UUID fixo por item — gerado uma vez, preservado para sempre
       let matchEscolhido = null; // declarado no escopo externo para uso na resolução de posicaoFonte
+      let viaFinal = '';         // SIMULACAO: de onde veio o ID (comparação com o planejador)
+
+      // Procura match em PEDIDOS
+      // ATIVO: a vaga já foi escolhida pelo planejador de linhas-irmãs (PASSO 2.7).
+      // SIMULACAO: casamento antigo, guloso, abaixo.
+      const matches = modoAtivo ? null : pedidosMap.get(impressao);
+      if (modoAtivo) matchEscolhido = planoIrmas.plano.get(idx) || null;
 
       // Seleciona um slot ainda NÃO usado do fingerprint padrão (com OS), se existir.
       // Se há múltiplos candidatos com a mesma fingerprint (mesmo produto, QTDs diferentes),
@@ -1870,18 +1932,25 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         // gerar um novo — evita que itens existentes ganhem novos IDs.
         const idExistente = String(matchEscolhido.id || '').trim();
         if (!idExistente) {
-          const _fpList1_ = dbFingerprintMap.get(impressao);
-          const idRecuperado = (_fpList1_ && _fpList1_.length > 0) ? _fpList1_.shift() : null;
+          const idRecuperado = _recuperarIdDoDb_(impressao);
           if (idRecuperado) {
             Logger.log(`   🔄 ID recuperado do DB para item sem ID em PEDIDOS: "${idRecuperado}"`);
             idFinal = idRecuperado;
             timestampFinal = matchEscolhido.timestamp || new Date();
+            viaFinal = 'db';
           } else {
             isNovo = true; // nunca esteve no DB: gerar novo ID normalmente
           }
         } else {
           idFinal = idExistente;
           timestampFinal = matchEscolhido.timestamp;
+          viaFinal = 'pedidos';
+          if (modoAtivo && planoIrmas.porBase.has(idx)) {
+            const descAntiga = _descBase_(matchEscolhido.row[DESC_COL]);
+            Logger.log(`   🧬 DESCRIÇÃO mudou na origem — ID mantido pela base do ID: "${idFinal}"`);
+            _auditar_('ID_POR_BASE', idFinal,
+              `linha ${idx + FONTE_DATA_START_ROW}: DESCRIÇÃO "${descAntiga}" → "${_descBase_(fonteRow[6])}"; ID, UUID e histórico mantidos`);
+          }
         }
 
         if (!isNovo) {
@@ -1906,9 +1975,12 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         // as linhas-irmãs do grupo disputavam esse único slot; as perdedoras ganhavam
         // ID + UUID novos A CADA sync, e o Relatorio_DB acumulava uma duplicata por ciclo.
         // DILLY: tenta fingerprint sem OS — em PEDIDOS o OS foi substituído pelo Lote (≠ OS original).
+        //
+        // ATIVO: o planejador já considerou as vagas Dilly sem OS e a base do ID — daqui em diante
+        // só resta recuperar do DB (item aberto) ou gerar ID novo.
         const _fonteClienteStr_ = String(fonteRow[1] || '').trim();
         let _dillyMatchResolvido_ = false;
-        if (_fonteClienteStr_.toUpperCase().includes('DILLY') && pedidosDillyMap.size > 0) {
+        if (!modoAtivo && _fonteClienteStr_.toUpperCase().includes('DILLY') && pedidosDillyMap.size > 0) {
           const _dTam_    = String(fonteRow[7] || '').trim();
           const _dProd_ = _chaveProduto_(fonteRow[5], fonteRow[6], _dTam_, _fonteClienteStr_);
           const _dillyFpSemOS_ = `${_fonteClienteStr_}|${String(fonteRow[3] || '').trim()}|${_dProd_}|${_dTam_}|${String(fonteRow[8] || '').trim()}|${_normalizarData_(fonteRow[11])}`;
@@ -1941,6 +2013,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
                 timestampFinal = _dillySlot_.timestamp || new Date();
                 itensAtualizados++;
                 _dillyMatchResolvido_ = true;
+                viaFinal = 'dilly';
                 Logger.log(`   🔷 DILLY: ID reutilizado via FP sem OS: "${idFinal}"`);
               } else {
                 isNovo = true;
@@ -1951,14 +2024,14 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         if (!_dillyMatchResolvido_) {
           // Tenta recuperar ID do DB pela fingerprint antes de gerar novo.
           // shift() consome o primeiro slot disponível — cada item idêntico pega seu próprio ID.
-          const _fpList2_ = dbFingerprintMap.get(impressao);
-          const idRecuperado = (_fpList2_ && _fpList2_.length > 0) ? _fpList2_.shift() : null;
+          const idRecuperado = _recuperarIdDoDb_(impressao);
           if (idRecuperado) {
             Logger.log(`   🔄 ID recuperado do DB (sem match em PEDIDOS): "${idRecuperado}"`);
             idFinal = idRecuperado;
             timestampFinal = new Date();
             itensAtualizados++;
             isNovo = false; // slot Dilly com ID vazio pode ter setado isNovo=true — o ID recuperado prevalece
+            viaFinal = 'db';
           } else {
             isNovo = true;
           }
@@ -1967,34 +2040,22 @@ function sincronizarPedidosComFonte(forcarExecucao) {
 
       // Se é novo item, gera ID e timestamp
       if (isNovo) {
-        // Gera ID usando lógica existente (concatenação + sufixo)
-        const dataReceb = fonteRow[11]; // Coluna L em DADOS_IMPORTADOS = DATA RECEB. (índice 11)
-        const dataFormatada = dataReceb instanceof Date ?
-          Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd') :
-          String(dataReceb || '').trim();
+        // Gera ID usando lógica existente (concatenação + sufixo).
+        // FIX: CARTELA e DESCRIÇÃO ficam fora do ID base — a origem corrige esses campos.
+        const idBase = _idBaseFonte_(fonteRow);
 
-        // FIX: CARTELA (fonteRow[0]) e DESCRIÇÃO (fonteRow[6]) removidos do ID base.
-        // Ambos são campos mutáveis - podem ser atualizados pelo sistema de origem.
-        // O ID usa apenas campos estáveis que identificam o pedido de forma permanente.
-        const idBase = "" +
-          String(fonteRow[1] || '').trim() +  // CLIENTE
-          String(fonteRow[2] || '').trim() +  // CÓD. FILIAL
-          String(fonteRow[3] || '').trim() +  // PEDIDO
-          String(fonteRow[5] || '').trim() +  // CÓD. MARFIM
-          String(fonteRow[7] || '').trim() +  // TAMANHO
-          String(fonteRow[8] || '').trim() +  // ORD. COMPRA
-          String(fonteRow[10] || '').trim() + // CÓD. OS
-          dataFormatada;                       // DATA RECEBIMENTO (col M)
-
-        // Gera sufixo único
+        // Gera sufixo único. ATIVO: também pula IDs de linhas de PEDIDOS que ainda não chegaram
+        // ao DB — senão um item novo podia pegar o ID que outra linha vai reaproveitar mais adiante
+        // nesta mesma rodada (colisão → renomeação -DUP e UUID trocado).
         let sufixo = 1;
-        while (idsUsados.has(idBase + "-" + sufixo)) {
+        while (idsUsados.has(idBase + "-" + sufixo) || (modoAtivo && idsWrappersPedidos.has(idBase + "-" + sufixo))) {
           sufixo++;
         }
 
         idFinal = idBase + "-" + sufixo;
         timestampFinal = new Date();
         novosItens++;
+        viaFinal = 'novo';
       }
 
       // GUARDA ANTI-DUPLICATA: garante que nenhuma outra linha da fonte, NESTA MESMA rodada,
@@ -2018,6 +2079,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
 
       idsAssignadosNestaRodada.add(idFinal);
       idsUsados.add(idFinal);
+      if (!modoAtivo) resultadoReal.set(idx, { id: idFinal, via: viaFinal });
 
       // Resolve CÓDIGO_FIXO: reutiliza o que já existe (PEDIDOS ou DB), senão gera novo UUID
       if (!codigoFixo) {
@@ -2153,6 +2215,32 @@ function sincronizarPedidosComFonte(forcarExecucao) {
       novasPedidosData.push(novaLinha);
     });
 
+    // SIMULACAO: compara o casamento antigo com o que o planejador de irmãs faria.
+    if (!modoAtivo) {
+      const difs = [];
+      resultadoReal.forEach((real, idx) => {
+        const w = planoIrmas.plano.get(idx);
+        const idPlano = w ? String(w.id || '').trim() : '';
+        if (w && !idPlano) return; // PEDIDOS sem ID: as duas lógicas recuperam do DB — não comparável
+        const f = fonteData[idx];
+        const desc = `linha ${idx + FONTE_DATA_START_ROW} (${String(f[1] || '').trim()} · pedido ${String(f[3] || '').trim()} · ` +
+                     `OC ${String(f[8] || '').trim()} · ${String(f[7] || '').trim()} · LOTE ${String(f[23] || '').trim() || '-'} · QTD ${f[9]})`;
+        if (idPlano) {
+          if (real.id === idPlano) return;
+          difs.push({ id: real.id, detalhe: `${desc}: hoje "${real.id}" (${real.via}) → ATIVO "${idPlano}"` +
+                                               (planoIrmas.porBase.has(idx) ? ' (pela base do ID: DESCRIÇÃO mudou)' : '') });
+        } else if (real.via === 'pedidos' || real.via === 'dilly') {
+          difs.push({ id: real.id, detalhe: `${desc}: hoje reaproveita "${real.id}" (${real.via}) → ATIVO: sem vaga em PEDIDOS (recupera item aberto do DB ou gera ID novo)` });
+        } else if (real.via === 'db') {
+          const est = dbEstadoPorId.get(real.id);
+          if (est && est.final) {
+            difs.push({ id: real.id, detalhe: `${desc}: hoje herda o ID de um item ${est.status} (a linha viva fica escondida) → ATIVO não herda` });
+          }
+        }
+      });
+      _registrarDiferencasIdentidade_(difs, props);
+    }
+
     // PASSO 4: Escrever dados em PEDIDOS
     if (novasPedidosData.length > 0) {
       // Limpa dados antigos
@@ -2269,6 +2357,248 @@ function _criarImpressaoDigitalFromRow_(row, offset) {
   const produto = _chaveProduto_(row[5 + offset], row[6 + offset], tam, cliente);
 
   return `${cliente}|${pedido}|${produto}|${tam}|${oc}|${os}|${dataStr}`;
+}
+
+// ─── PLANEJADOR DE LINHAS-IRMÃS (CLAUDE.md 15.16 e 17.4) ─────────────────────────
+//
+// Linhas-irmãs têm a mesma impressão digital (CÓD. OS vazio ou "0"). O casamento antigo era
+// guloso, linha a linha na ordem de DADOS_IMPORTADOS, com desempate só pela QTD: quando a origem
+// incluía, tirava ou editava uma irmã, IDs e UUIDs migravam entre lotes (incidente de 28/09/2026).
+// O planejador decide as vagas de cada grupo de uma vez, antes do laço principal:
+//   1º linha que não mudou (todas as colunas da origem iguais, menos o PRAZO) fica com o seu ID;
+//   2º as que mudaram disputam o resto por: menos colunas diferentes → LOTE → CÓD. OS (Dilly) →
+//      QTD mais próxima (da QTD anterior ou da QTD do DB depois das baixas) → estado no DB
+//      (aberto e intocado antes de zerado/marcado; finalizado por último) → ordem;
+//   3º reserva sem DESCRIÇÃO: linha que ficou sem vaga reaproveita o ID de uma linha de PEDIDOS
+//      que sobrou com a mesma base de ID (cliente, filial, pedido, CÓD. MARFIM, tamanho, OC, OS e
+//      data) — é a mesma linha com a DESCRIÇÃO corrigida na origem. Nunca herda item finalizado.
+// Só decide com CONFIGURAÇÕES!B4 = ATIVO; em SIMULACAO roda apenas para registrar na auditoria
+// onde o resultado seria diferente do casamento antigo.
+
+/** Texto comparável entre abas: número escrito como texto ("0101", 101) vira o mesmo valor. */
+function _textoComparavel_(v) {
+  const s = String(v === null || v === undefined ? '' : v).trim();
+  if (s !== '' && /^-?\d+(?:[.,]\d+)?$/.test(s)) return String(Number(s.replace(',', '.')));
+  return s;
+}
+
+/** Data comparável entre abas: Date, número serial do Sheets ou texto "dd/mm/aaaa". */
+function _dataComparavel_(v) {
+  const s = _normalizarData_(v);
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  return m ? m[3] + ('0' + m[2]).slice(-2) + ('0' + m[1]).slice(-2) : s;
+}
+
+/** Colunas que separam linhas-irmãs, lidas de DADOS_IMPORTADOS (a partir da col B). */
+function _camposIrmaFonte_(f) {
+  const cliente = String(f[1] || '').trim();
+  const tam     = String(f[7] || '').trim();
+  return {
+    cartela: _textoComparavel_(f[0]),
+    filial:  _textoComparavel_(f[2]),
+    codcli:  _textoComparavel_(_normalizarMarfimDilly_(String(f[4] !== null && f[4] !== undefined ? f[4] : ''), tam, cliente)),
+    marfim:  _textoComparavel_(_normalizarMarfimDilly_(String(f[5] || '').trim(), tam, cliente)),
+    desc:    _descBase_(f[6]),
+    qtd:     Number(f[9] || 0) || 0,
+    os:      _textoComparavel_(f[10]),
+    dtent:   _dataComparavel_(f[12]),
+    infox:   _textoComparavel_(f[22]),
+    lote:    _textoComparavel_(f[23])
+  };
+}
+
+/** As mesmas colunas, lidas de uma linha de PEDIDOS (já normalizada para Dilly). */
+function _camposIrmaPedidos_(p) {
+  return {
+    cartela: _textoComparavel_(p[CARTELA_COL]),
+    filial:  _textoComparavel_(p[3]),
+    codcli:  _textoComparavel_(p[CODCLI_COL]),
+    marfim:  _textoComparavel_(p[MARFIM_COL]),
+    desc:    _descBase_(p[DESC_COL]),
+    qtd:     Number(p[QTD_COL] || 0) || 0,
+    os:      _textoComparavel_(p[OS_COL]),
+    dtent:   _dataComparavel_(p[DTENT_COL]),
+    infox:   _textoComparavel_(p[PEDIDOS_COLX_COL]),
+    lote:    _textoComparavel_(p[PEDIDOS_LOTE_COL])
+  };
+}
+
+// QTD e CÓD. OS são tratados à parte em _custoIrma_ (QTD pode bater com o DB; OS só pesa em Dilly).
+const _CAMPOS_IRMA_ = ['cartela', 'filial', 'codcli', 'marfim', 'desc', 'dtent', 'infox', 'lote'];
+
+/**
+ * Grupo de irmãs de uma linha: impressão digital padrão; Dilly usa a impressão sem CÓD. OS
+ * (em PEDIDOS o OS da Dilly é trocado pelo Lote da aba LOTE DILLY — ver 15.11).
+ */
+function _chaveGrupoIrmaFonte_(f) {
+  const cliente = String(f[1] || '').trim();
+  if (!cliente.toUpperCase().includes('DILLY')) return 'P|' + _criarImpressaoDigitalFromRow_(f, 0);
+  const tam  = String(f[7] || '').trim();
+  const prod = _chaveProduto_(f[5], f[6], tam, cliente);
+  return `D|${cliente}|${String(f[3] || '').trim()}|${prod}|${tam}|${String(f[8] || '').trim()}|${_normalizarData_(f[11])}`;
+}
+
+function _chaveGrupoIrmaPedidos_(row) {
+  const cliente = String(row[CLIENTE_COL] || '').trim();
+  if (!cliente.toUpperCase().includes('DILLY')) return 'P|' + _criarImpressaoDigitalFromRow_(row, 1);
+  const tam  = String(row[TAM_COL] || '').trim();
+  const prod = _chaveProduto_(row[MARFIM_COL], row[DESC_COL], tam, cliente);
+  return `D|${cliente}|${String(row[PEDIDO_COL] || '').trim()}|${prod}|${tam}|${String(row[OC_COL] || '').trim()}|${_normalizarData_(row[DTREC_COL])}`;
+}
+
+/** Base do ID (sem o sufixo numérico) de uma linha de DADOS_IMPORTADOS — mesma fórmula da geração de ID. */
+function _idBaseFonte_(f) {
+  const dataReceb = f[11]; // DATA RECEB.
+  const dataFormatada = dataReceb instanceof Date
+    ? Utilities.formatDate(dataReceb, TZ, 'yyyyMMdd')
+    : String(dataReceb || '').trim();
+  // CARTELA e DESCRIÇÃO ficam fora: são campos que a origem corrige.
+  return String(f[1] || '').trim() +  // CLIENTE
+         String(f[2] || '').trim() +  // CÓD. FILIAL
+         String(f[3] || '').trim() +  // PEDIDO
+         String(f[5] || '').trim() +  // CÓD. MARFIM
+         String(f[7] || '').trim() +  // TAMANHO
+         String(f[8] || '').trim() +  // ORD. COMPRA
+         String(f[10] || '').trim() + // CÓD. OS
+         dataFormatada;               // DATA RECEB.
+}
+
+/** Chave de resgate de linha quebrada da fonte: impressão digital sem o CLIENTE (ver PASSO 1.5). */
+function _chaveResgateFonte_(f) {
+  const tam  = String(f[7] || '').trim();
+  const prod = _chaveProduto_(f[5], f[6], tam, String(f[1] || '').trim());
+  return [
+    String(f[3] || '').trim(), prod, tam,
+    String(f[8] || '').trim(), String(f[10] || '').trim(),
+    _normalizarData_(f[11])
+  ].join('|');
+}
+
+/** 0 = aberto e intocado · 1 = ainda não está no DB · 2 = zerado, marcado ou já sinalizado · 3 = finalizado */
+function _estadoIrmaDb_(est) {
+  if (!est) return 1;
+  if (est.final) return 3;
+  if (est.pendente || est.marcado || est.qtd <= 0) return 2;
+  return 0;
+}
+
+/** Custo de casar a linha da fonte `l` com a vaga `w` de PEDIDOS — menor é melhor (comparação campo a campo). */
+function _custoIrma_(l, w, est) {
+  const cf = l.c, cw = w._camposIrma;
+  let dif = 0;
+  _CAMPOS_IRMA_.forEach(k => { if (cf[k] !== cw[k]) dif++; });
+  const qtdIgual = cf.qtd === cw.qtd;
+  // Depois de uma baixa a origem costuma reduzir a QTD para o saldo — a QTD do DB também identifica.
+  const qtdDb = (est && !est.final && est.qtd > 0) ? est.qtd : null;
+  if (!qtdIgual && qtdDb !== cf.qtd) dif++;
+  const exato   = dif === 0 && qtdIgual;
+  const lote    = (cf.lote && cw.lote) ? (cf.lote === cw.lote ? 0 : 2) : 1;
+  const os      = (l.dilly && cf.os !== cw.os) ? 1 : 0;
+  const difQtd  = Math.min(Math.abs(cf.qtd - cw.qtd), qtdDb !== null ? Math.abs(cf.qtd - qtdDb) : Infinity);
+  return [exato ? 0 : 1 + dif, lote, os, difQtd, _estadoIrmaDb_(est), w.linhaOriginal, l.idx];
+}
+
+function _compararCustoIrma_(a, b) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+/**
+ * Decide qual linha de PEDIDOS (vaga) cada linha de DADOS_IMPORTADOS reaproveita. Não mexe na
+ * flag `usado` dos wrappers (usa um Set próprio) — pode rodar ao lado do casamento antigo.
+ * @param {Array[]} fonteData linhas de DADOS_IMPORTADOS (a partir da col B)
+ * @param {Set<number>} idxIgnorar linhas quebradas (tratadas pelo resgate)
+ * @param {Object[]} wrappers linhas de PEDIDOS com CARTELA (mesmos objetos de pedidosMap)
+ * @param {Set<Object>} reservados vagas já tomadas pelo resgate de linhas quebradas
+ * @param {Map<string,Object>} dbEstadoPorId ID → {final, pendente, marcado, qtd, status}
+ * @returns {{plano: Map<number,Object>, porBase: Set<number>}} índice da fonte → vaga; porBase = casadas pela base do ID
+ */
+function _planejarCasamentoIrmas_(fonteData, idxIgnorar, wrappers, reservados, dbEstadoPorId) {
+  const plano   = new Map();
+  const porBase = new Set();
+  const usados  = new Set(reservados);
+  const estadoDe = w => dbEstadoPorId.get(String(w.id || '').trim());
+
+  const linhasPorGrupo = new Map();
+  fonteData.forEach((f, idx) => {
+    if (!String(f[0] || '').trim() || idxIgnorar.has(idx)) return; // sem CARTELA: ruído
+    const chave = _chaveGrupoIrmaFonte_(f);
+    if (!linhasPorGrupo.has(chave)) linhasPorGrupo.set(chave, []);
+    linhasPorGrupo.get(chave).push({ idx: idx, f: f, c: _camposIrmaFonte_(f), dilly: chave.charAt(0) === 'D' });
+  });
+
+  const vagasPorGrupo = new Map();
+  wrappers.forEach(w => {
+    if (!w._camposIrma) w._camposIrma = _camposIrmaPedidos_(w.row);
+    if (usados.has(w)) return;
+    const chave = _chaveGrupoIrmaPedidos_(w.row);
+    if (!vagasPorGrupo.has(chave)) vagasPorGrupo.set(chave, []);
+    vagasPorGrupo.get(chave).push(w);
+  });
+
+  // Todos os pares linha×vaga do grupo, do mais parecido para o menos; cada um fica com o melhor
+  // par ainda livre. Linhas iguais à versão anterior têm custo 0 e são casadas antes de qualquer outra.
+  const casar = (linhas, vagas, viaBase) => {
+    const pares = [];
+    linhas.forEach(l => {
+      if (plano.has(l.idx)) return;
+      vagas.forEach(w => { if (!usados.has(w)) pares.push({ l: l, w: w, custo: _custoIrma_(l, w, estadoDe(w)) }); });
+    });
+    pares.sort((a, b) => _compararCustoIrma_(a.custo, b.custo));
+    pares.forEach(p => {
+      if (plano.has(p.l.idx) || usados.has(p.w)) return;
+      plano.set(p.l.idx, p.w);
+      usados.add(p.w);
+      if (viaBase) porBase.add(p.l.idx);
+    });
+  };
+
+  linhasPorGrupo.forEach((linhas, chave) => {
+    const vagas = vagasPorGrupo.get(chave);
+    if (vagas) casar(linhas, vagas, false);
+  });
+
+  // Reserva sem DESCRIÇÃO: sobras de PEDIDOS agrupadas pela base do próprio ID.
+  const sobrasPorBase = new Map();
+  wrappers.forEach(w => {
+    const id = String(w.id || '').trim();
+    if (!id || usados.has(w)) return;
+    const est = estadoDe(w);
+    if (est && est.final) return; // nunca herda o ID de um item finalizado
+    const base = id.replace(/-\d+(?:-DUP\d+)?$/, '');
+    if (!sobrasPorBase.has(base)) sobrasPorBase.set(base, []);
+    sobrasPorBase.get(base).push(w);
+  });
+  if (sobrasPorBase.size > 0) {
+    const semVagaPorBase = new Map();
+    linhasPorGrupo.forEach(linhas => linhas.forEach(l => {
+      if (plano.has(l.idx)) return;
+      const base = _idBaseFonte_(l.f);
+      if (!sobrasPorBase.has(base)) return;
+      if (!semVagaPorBase.has(base)) semVagaPorBase.set(base, []);
+      semVagaPorBase.get(base).push(l);
+    }));
+    semVagaPorBase.forEach((linhas, base) => casar(linhas, sobrasPorBase.get(base), true));
+  }
+
+  return { plano: plano, porBase: porBase };
+}
+
+/**
+ * SIMULACAO: grava em Auditoria_Sincronizacao as linhas em que o planejador de irmãs daria outro ID.
+ * O mesmo conjunto de diferenças não é regravado a cada rodada (hash em ULTIMA_DIF_IDENTIDADE).
+ */
+function _registrarDiferencasIdentidade_(difs, props) {
+  if (difs.length === 0) { props.deleteProperty('ULTIMA_DIF_IDENTIDADE'); return; }
+  Logger.log(`   🧪 SIMULAÇÃO de identidade: ${difs.length} linha(s) teriam outro resultado com CONFIGURAÇÕES!B4 = ATIVO`);
+  const texto = difs.map(d => d.detalhe).sort().join('\n');
+  const hash  = Utilities.base64Encode(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, texto, Utilities.Charset.UTF_8));
+  if (props.getProperty('ULTIMA_DIF_IDENTIDADE') === hash) return;
+  props.setProperty('ULTIMA_DIF_IDENTIDADE', hash);
+  const LIMITE = 200;
+  difs.slice(0, LIMITE).forEach(d => _auditar_('IDENTIDADE_SIMULADA', d.id, d.detalhe));
+  if (difs.length > LIMITE) _auditar_('IDENTIDADE_SIMULADA', '', `+${difs.length - LIMITE} diferença(s) não listada(s)`);
 }
 
 // ─── CONTROLE DE PAUSA ───────────────────────────────────────────────────────
@@ -3026,6 +3356,10 @@ function sincronizarDados() {
     // largura real da aba, então sem o cabeçalho a coluna poderia ficar de fora.
     _garantirHeadersRelatorio_DB_();
 
+    // CONFIGURAÇÕES!B4 = ATIVO: item finalizado não captura linha de PEDIDOS nem bloqueia item
+    // novo, e irmãs são escolhidas por LOTE/QTD. SIMULACAO: regra antiga + auditoria.
+    const modoAtivo = _modoAtivo_();
+
     // 1) LER PEDIDOS (usa IDs que estão na planilha)
     Logger.log("\n📖 1. LENDO PEDIDOS");
     const allFonte = fonteSheet.getDataRange().getValues();
@@ -3384,10 +3718,31 @@ function sincronizarDados() {
     // itens iguais na mesma OC. Era um Set, que só responde "alguma foi?"; quem decide quantas
     // linhas novas podem entrar sem duplicar é a CONTAGEM: com N linhas idênticas no DB, uma
     // correspondida não pode liberar as outras N-1.
-    const consumedFingerprintsCount = new Map();
-    const _consumirFingerprint_ = (fp) => {
+    // Duas contagens: `todos` (regra antiga, qualquer status) e `abertos` (modo ATIVO — item
+    // finalizado não segura vaga). Linha PENDENTE/ABERTO não entra em nenhuma: já se sabe que
+    // saiu da origem, então não bloqueia a linha nova (senão ela nunca seria listada).
+    const consumoVagas = { todos: new Map(), abertos: new Map() };
+    const _consumirFingerprint_ = (dbRow) => {
+      if (_saidaJaTratada_(dbRow)) return;
+      const fp = _criarImpressaoDigital_(dbRow, true);
       if (!fp) return;
-      consumedFingerprintsCount.set(fp, (consumedFingerprintsCount.get(fp) || 0) + 1);
+      consumoVagas.todos.set(fp, (consumoVagas.todos.get(fp) || 0) + 1);
+      if (!_statusFinal_(dbRow[STATUS_COL])) consumoVagas.abertos.set(fp, (consumoVagas.abertos.get(fp) || 0) + 1);
+    };
+    // Vagas por impressão digital: linhas do DB com aquela fingerprint que nenhum match consumiu.
+    const _montarVagasFp_ = (soAbertos) => {
+      const vagas = new Map();
+      for (const [, dbItem] of dbMap.entries()) {
+        if (_saidaJaTratada_(dbItem.row)) continue;
+        if (soAbertos && _statusFinal_(dbItem.row[STATUS_COL])) continue;
+        const fpDb = _criarImpressaoDigital_(dbItem.row, true);
+        if (fpDb) vagas.set(fpDb, (vagas.get(fpDb) || 0) + 1);
+      }
+      (soAbertos ? consumoVagas.abertos : consumoVagas.todos).forEach((qtd, fpDb) => {
+        const v = vagas.get(fpDb);
+        if (v !== undefined) vagas.set(fpDb, Math.max(0, v - qtd));
+      });
+      return vagas;
     };
 
     // Precarrega IDs com histórico de baixas para detectar itens parcializados removidos
@@ -3407,6 +3762,40 @@ function sincronizarDados() {
     // Usado para detectar quando a fonte atualizou QTD → reset do ciclo de faturamento.
     const qtdBaselineCicloMap = _buildQtdOriginalCache_();
     Logger.log(`   ${Object.keys(qtdBaselineCicloMap).length} baselines de ciclo carregados`);
+
+    /**
+     * Escolhe, entre vagas livres de PEDIDOS, a que corresponde à linha do DB: LOTE igual →
+     * QTD igual (a do DB ou a do início do ciclo de baixas) → QTD mais próxima → ordem.
+     * estrito (troca de OC): se LOTE e QTD não apontarem uma única vaga, só move um item ainda
+     * intocado (aberto, QTD>0, sem marcação) — item zerado ou marcado provavelmente saiu da origem
+     * e não deve passar o seu estado para uma linha nova.
+     */
+    const _escolherVagaIrma_ = (dbRow, id, vagas, estrito) => {
+      if (!vagas || vagas.length === 0) return null;
+      if (vagas.length === 1) return vagas[0];
+      let cands = vagas;
+      const lote = String(dbRow[DB_LOTE_COL] || '').trim();
+      if (lote) {
+        const porLote = cands.filter(v => String(v.row[PEDIDOS_LOTE_COL] || '').trim() === lote);
+        if (porLote.length === 1) return porLote[0];
+        if (porLote.length > 1) cands = porLote;
+      }
+      const qtdDb = Number(dbRow[DB_QTD_COL] || 0) || 0;
+      const refs = [qtdDb];
+      if (qtdBaselineCicloMap[id] !== undefined) refs.push(Number(qtdBaselineCicloMap[id]) || 0);
+      const porQtd = cands.filter(v => refs.includes(Number(v.row[QTD_COL] || 0) || 0));
+      if (porQtd.length === 1) return porQtd[0];
+      if (porQtd.length > 1) cands = porQtd;
+      if (estrito) {
+        const intocado = !_statusFinal_(dbRow[STATUS_COL]) && qtdDb > 0
+          && String(dbRow[MARCAR_FATURAR_COL] || '').trim().toUpperCase() !== 'SIM';
+        if (!intocado) return null;
+      }
+      return cands.reduce((best, v) =>
+        Math.abs((Number(v.row[QTD_COL] || 0) || 0) - qtdDb) < Math.abs((Number(best.row[QTD_COL] || 0) || 0) - qtdDb) ? v : best,
+        cands[0]);
+    };
+    const _resumoVaga_ = (v) => `ID="${v.id}" OC="${v.row[OC_COL]}" LOTE="${v.row[PEDIDOS_LOTE_COL] || ''}" QTD=${v.row[QTD_COL]}`;
 
     // Itens que sofreram reset nesta sync — precisam ter MARCAR_FATURAR_USUARIO (col V) limpo separadamente,
     // pois novaLinha só cobre 21 colunas (A-U) e não alcança a col V.
@@ -3582,7 +3971,7 @@ function sincronizarDados() {
         const fpFonteId = _criarImpressaoDigital_(fonteRow);
         const fpListId = fonteImpressoes.get(fpFonteId);
         if (fpListId) { const fi = fpListId.find(i => i.id === id); if (fi) fi.usado = true; }
-        _consumirFingerprint_(_criarImpressaoDigital_(dbItem.row, true)); // libera fingerprint para novos itens idênticos legítimos
+        _consumirFingerprint_(dbItem.row); // libera fingerprint para novos itens idênticos legítimos
         _consumirIdentidade_(dbItem.row);
 
       } else {
@@ -3642,7 +4031,7 @@ function sincronizarDados() {
           const fpFonte = _criarImpressaoDigital_(fonteRow);
           const fpList = fonteImpressoes.get(fpFonte);
           if (fpList) { const fi = fpList.find(i => i.id === novoId); if (fi) fi.usado = true; }
-          _consumirFingerprint_(_criarImpressaoDigital_(dbItem.row, true));
+          _consumirFingerprint_(dbItem.row);
           _consumirIdentidade_(dbItem.row);
 
         } else {
@@ -3658,20 +4047,40 @@ function sincronizarDados() {
     // de qualquer tentativa por fingerprint rodar, eliminando a corrida que fabricava duplicatas.
     for (let [id, dbItem] of pendentes) {
       const statusAtual = dbItem.row[STATUS_COL];
+      // Item já Faturado/Finalizado não reivindica linha de PEDIDOS por impressão digital nem por
+      // troca de OC: a linha livre é um item novo (ou uma irmã viva) e ficaria escondida sob o
+      // status final (15.16, risco latente). Modo ATIVO; em SIMULACAO só é registrado.
+      const ehFinal = statusAtual === "Faturado" || statusAtual === "Finalizado";
 
       // TERCEIRA TENTATIVA: Buscar por IMPRESSÃO DIGITAL (fallback para itens sem UUID ou UUID ausente)
       const impressaoDB = _criarImpressaoDigital_(dbItem.row, true); // row do Relatorio_DB
       // FIX Bug 2: era fonteImpressoes.get() (sobrescrevia duplicatas); agora encontra primeiro slot livre.
       const fonteItens = fonteImpressoes.get(impressaoDB);
-      let fonteItem = fonteItens ? fonteItens.find(i => !i.usado) : null;
+      const livresFp = fonteItens ? fonteItens.filter(i => !i.usado) : [];
+      let fonteItem = null;
+      if (modoAtivo) {
+        // Entre irmãs livres, a de mesmo LOTE/QTD — não a primeira da lista.
+        if (!ehFinal) fonteItem = _escolherVagaIrma_(dbItem.row, id, livresFp, false);
+      } else {
+        fonteItem = livresFp[0] || null;
+        if (fonteItem && ehFinal) {
+          _auditar_('FINALIZADO_CAPTURA_SIMULADO', id, `item ${statusAtual} assume a linha livre de PEDIDOS ${_resumoVaga_(fonteItem)} por impressão digital; com ATIVO ela entraria como item aberto`);
+        } else if (fonteItem && livresFp.length > 1) {
+          const alt = _escolherVagaIrma_(dbItem.row, id, livresFp, false);
+          if (alt !== fonteItem) {
+            _auditar_('VAGA_IRMA_SIMULADA', id, `hoje assume ${_resumoVaga_(fonteItem)}; com ATIVO assumiria ${_resumoVaga_(alt)}`);
+          }
+        }
+      }
       let migrouDeOc = false;
 
       // QUARTA TENTATIVA: o item pode ter sido MOVIDO para outra ORD. COMPRA.
       // ID, CÓDIGO_FIXO e impressão digital padrão embutem a OC, então todos falham
       // nesse caso e o item seria contado como "saiu do PEDIDOS" (marcado Faturado)
       // enquanto a linha da nova OC entrava como item novo — duplicando o item no HTML.
-      // Só aceita quando há exatamente UM candidato livre.
-      if (!fonteItem) {
+      // Com um candidato livre, aceita. Com mais de um: modo ATIVO desempata por LOTE → QTD
+      // (_escolherVagaIrma_ estrito); SIMULACAO mantém "não aplicada" e registra o que faria.
+      if (!fonteItem && !(modoAtivo && ehFinal)) {
         const impressaoSemOcDB = _criarImpressaoDigitalSemOC_(dbItem.row, true);
         const livresSemOc = impressaoSemOcDB
           ? (fonteImpressoesSemOC.get(impressaoSemOcDB) || []).filter(f => !f.usado)
@@ -3679,8 +4088,21 @@ function sincronizarDados() {
         if (livresSemOc.length === 1) {
           fonteItem = livresSemOc[0];
           migrouDeOc = true;
+          if (!modoAtivo && ehFinal) {
+            _auditar_('FINALIZADO_CAPTURA_SIMULADO', id, `item ${statusAtual} assume a linha livre de PEDIDOS ${_resumoVaga_(fonteItem)} por troca de OC; com ATIVO ela entraria como item aberto`);
+          }
         } else if (livresSemOc.length > 1) {
-          Logger.log(`   ⚠️ Troca de OC ambígua (${livresSemOc.length} candidatos em PEDIDOS) para ID="${id}" — não aplicada`);
+          const escolhida = ehFinal ? null : _escolherVagaIrma_(dbItem.row, id, livresSemOc, true);
+          if (modoAtivo && escolhida) {
+            fonteItem = escolhida;
+            migrouDeOc = true;
+            _auditar_('TROCA_OC_DESEMPATE', id, `${livresSemOc.length} candidatas; escolhida ${_resumoVaga_(escolhida)}`);
+          } else {
+            Logger.log(`   ⚠️ Troca de OC ambígua (${livresSemOc.length} candidatos em PEDIDOS) para ID="${id}" — não aplicada`);
+            if (!modoAtivo && escolhida) {
+              _auditar_('TROCA_OC_SIMULADA', id, `${livresSemOc.length} candidatas; com ATIVO assumiria ${_resumoVaga_(escolhida)}`);
+            }
+          }
         }
       }
 
@@ -3738,7 +4160,7 @@ function sincronizarDados() {
         // permitindo que outros DB-items com a mesma fingerprint ainda encontrem seus slots.
         fonteMap.delete(novoId);
         linhasCasadas.add(dbItem.linha);
-        _consumirFingerprint_(impressaoDB); // libera fingerprint para novos itens idênticos legítimos
+        _consumirFingerprint_(dbItem.row); // libera fingerprint para novos itens idênticos legítimos
         _consumirIdentidade_(dbItem.row);
 
       } else {
@@ -3883,15 +4305,11 @@ function sincronizarDados() {
     // correspondida para o Set liberar a fingerprint inteira e todas as linhas novas com
     // aquela chave entrarem. Contando as vagas, N linhas no DB bloqueiam exatamente N
     // inserções — nem mais (item novo legítimo passa) nem menos (cópia é barrada).
-    const fpVagasNovos = new Map();
-    for (const [, dbItem] of dbMap.entries()) {
-      const fpDb = _criarImpressaoDigital_(dbItem.row, true);
-      if (fpDb) fpVagasNovos.set(fpDb, (fpVagasNovos.get(fpDb) || 0) + 1);
-    }
-    consumedFingerprintsCount.forEach((qtd, fpDb) => {
-      const vagas = fpVagasNovos.get(fpDb);
-      if (vagas !== undefined) fpVagasNovos.set(fpDb, Math.max(0, vagas - qtd));
-    });
+    // ATIVO: item Faturado/Finalizado/Excluido não segura vaga — uma irmã nova com a mesma
+    // impressão digital de um lote já faturado era barrada até a limpeza apagar o faturado.
+    // SIMULACAO: regra antiga; `fpVagasNovosAtivo` só mede quantas linhas o ATIVO listaria.
+    const fpVagasNovos      = _montarVagasFp_(modoAtivo);
+    const fpVagasNovosAtivo = modoAtivo ? null : _montarVagasFp_(true);
 
     for (let [id, fonteRow] of fonteMap.entries()) {
       // Proteção extra: verifica por impressão digital mesmo que o ID seja "novo".
@@ -3904,6 +4322,11 @@ function sincronizarDados() {
       if ((fpVagasNovos.get(impressaoFonte) || 0) > 0) {
         const existente = dbImpressoes.get(impressaoFonte) || { id: '' };
         fpVagasNovos.set(impressaoFonte, fpVagasNovos.get(impressaoFonte) - 1); // consome a vaga
+        if (fpVagasNovosAtivo) {
+          const vAtivo = fpVagasNovosAtivo.get(impressaoFonte) || 0;
+          if (vAtivo > 0) fpVagasNovosAtivo.set(impressaoFonte, vAtivo - 1);
+          else _auditar_('NOVO_BARRADO_SIMULADO', id, `linha de PEDIDOS barrada só por item finalizado com a mesma impressão digital (OC="${fonteRow[OC_COL]}" LOTE="${fonteRow[PEDIDOS_LOTE_COL] || ''}" QTD=${fonteRow[QTD_COL]}); com ATIVO seria listada`);
+        }
         Logger.log(`   ⚠️ DUPLICATA EVITADA POR FINGERPRINT: ID="${id}" já existe no DB como ID="${existente.id}" - ignorado`);
         duplicatasDebug.push([
           new Date(), 'Fingerprint idêntica ao DB', id, existente.id,
@@ -3976,17 +4399,10 @@ function sincronizarDados() {
     // (matched por ID ou por fingerprint na fase anterior). Cada "slot" disponível representa
     // uma vaga de duplicata no DB que já está coberta. Itens com fingerprint além dessas vagas
     // são novos legítimos (ex: segunda unidade idêntica na mesma OC).
-    const fpDisponiveisDB = new Map(); // fingerprint → quantidade de itens NÃO consumidos no DB
-    for (const [, dbItem] of dbMap.entries()) {
-      const fp = _criarImpressaoDigital_(dbItem.row, true);
-      if (fp) fpDisponiveisDB.set(fp, (fpDisponiveisDB.get(fp) || 0) + 1);
-    }
     // Desconta por CONTAGEM, não por presença: com 3 linhas idênticas no DB e 2 correspondidas,
     // resta 1 vaga. O teste antigo (por presença, não por contagem) zerava as 3 de uma vez.
-    consumedFingerprintsCount.forEach((qtd, fp) => {
-      const vagas = fpDisponiveisDB.get(fp);
-      if (vagas !== undefined) fpDisponiveisDB.set(fp, Math.max(0, vagas - qtd));
-    });
+    // Mesma regra de status de fpVagasNovos (ATIVO: item finalizado não segura vaga).
+    const fpDisponiveisDB = _montarVagasFp_(modoAtivo); // fingerprint → itens NÃO consumidos no DB
 
     novos.forEach(item => {
       const id = String(item[ID_COL]).trim();
@@ -4522,6 +4938,12 @@ function _linhaComLargura_(row, n) {
   const copia = [...row];
   while (copia.length < n) copia.push('');
   return copia;
+}
+
+/** Status que encerram o item no Relatorio_DB. */
+function _statusFinal_(status) {
+  const s = String(status || '').trim();
+  return s === 'Faturado' || s === 'Finalizado' || s === 'Excluido';
 }
 
 /** Monta o texto da coluna Z: TIPO|quem|dd/MM/yyyy HH:mm|detalhe */
