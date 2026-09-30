@@ -155,6 +155,28 @@
     .modal-btn-cancel { background-color: #e5e7eb; color: #374151; }
     .modal-btn-cancel:hover { background-color: #d1d5db; }
 
+    /* === CONFERÊNCIA: itens que saíram da origem sem marcação (coluna Z = PENDENTE) === */
+    #conferenciaSaidaModal { z-index: 2500; }
+    .pendentes-saida-pill { display: none; margin-top: 0.25rem; background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; border-radius: 9999px; padding: 2px 10px; font-size: 0.75rem; font-weight: 700; cursor: pointer; }
+    .pendentes-saida-pill.visivel { display: inline-block; }
+    .conf-card { border: 1px solid #fde68a; border-left: 4px solid #f59e0b; border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 0.75rem; background: #fffbeb; }
+    .conf-card h4 { margin: 0 0 0.35rem 0; font-size: 0.95rem; color: #1f2937; }
+    .conf-dados { font-size: 0.8rem; color: #374151; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.15rem 0.75rem; }
+    .conf-gemeo { margin-top: 0.4rem; font-size: 0.8rem; color: #9a3412; background: #ffedd5; border-radius: 0.375rem; padding: 0.3rem 0.5rem; }
+    .conf-acoes { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+    .conf-acoes button { padding: 0.45rem 0.85rem; border: none; border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; color: white; }
+    .conf-acoes button:disabled { opacity: 0.5; cursor: wait; }
+    .conf-acoes .conf-faturado { background: #16a34a; }
+    .conf-acoes .conf-cancelado { background: #dc2626; }
+    .conf-acoes .conf-aberto { background: #2563eb; }
+    .conf-acoes .conf-duplicata { background: #7c3aed; }
+    .conf-erro { display: none; margin-top: 0.4rem; font-size: 0.8rem; color: #b91c1c; }
+    .badge-conferir { display: inline-block; background: #f59e0b; color: #1c1917; font-size: 0.62rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; cursor: pointer; white-space: nowrap; }
+    .badge-conferido { display: inline-block; background: #e5e7eb; color: #374151; font-size: 0.62rem; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; white-space: nowrap; }
+    body.acesso-parcial .pendentes-saida-pill,
+    body.acesso-parcial #conferenciaSaidaModal { display: none !important; }
+    body.acesso-parcial .badge-conferir { pointer-events: none; cursor: default; }
+
     /* === MODAL FILTRO DE USUÁRIOS PARA FATURAMENTO === */
     #filtroUsuarioFaturModal { z-index: 3000; }
     #filtroUsuarioFaturModal .modal-content { max-width: 480px; }
@@ -356,6 +378,7 @@
       <div class="header-meta">
         <div id="updated-at">Carregando...</div>
         <div id="stats"></div>
+        <button type="button" id="pendentes-saida-pill" class="pendentes-saida-pill" onclick="abrirConferenciaSaida()" title="Itens que saíram da planilha de origem sem ninguém marcar para faturar"></button>
       </div>
       <div id="userInfoBar" class="user-info" style="display:none;">
         <span>👤</span>
@@ -859,6 +882,25 @@
     </div>
   </div>
 
+  <!-- Modal de Conferência: itens que saíram da origem sem marcação (coluna Z = PENDENTE) -->
+  <div id="conferenciaSaidaModal" class="modal-overlay hidden">
+    <div class="modal-content" style="max-width: 760px; max-height: 90vh;">
+      <div class="modal-header warning">
+        <h2>⏸️ Itens que saíram da origem sem marcação</h2>
+      </div>
+      <div class="modal-body">
+        <p style="margin: 0 0 0.75rem 0; color: #374151; font-size: 0.9rem;">
+          Estes itens não estão mais na planilha de origem e ninguém os marcou para faturar.
+          O sistema não fatura sozinho: confirme o que aconteceu com cada um. Enquanto ninguém responder, o item continua aberto.
+        </p>
+        <div id="conferencia-saida-lista"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="conferencia-saida-depois-btn" class="modal-btn modal-btn-cancel">Responder depois</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal de Etiquetas em Lote -->
   <div id="loteModal" class="modal-overlay hidden">
     <div class="modal-content" style="max-width: 820px; max-height: 90vh; overflow-y: auto;">
@@ -1217,6 +1259,9 @@
       if (_loginCheckTimer) { clearInterval(_loginCheckTimer); _loginCheckTimer = null; }
       if (_loginTimerInterval) { clearInterval(_loginTimerInterval); _loginTimerInterval = null; }
       _ocultarUserInfo();
+      // Próximo login (outro usuário ou sessão expirada) vê o aviso de conferência desde o início
+      fecharConferenciaSaida();
+      _pendentesSaidaApresentados.clear();
       document.getElementById('loginModal').classList.remove('hidden');
       document.getElementById('loginExpirouMsg').style.display = expirou ? 'block' : 'none';
       document.getElementById('loginErro').style.display = 'none';
@@ -1911,6 +1956,9 @@ ALL_OCS_ITEMS = itemsObj;
                         showAlertaDuplicidade(response.alertaDuplicatas);
                     }
 
+                    // Itens que saíram da origem sem marcação: contador + aviso de conferência
+                    atualizarPendentesSaida(response.pendentesSaida || []);
+
                     // Construir autocomplete
                     buildAutocompleteData();
 
@@ -2283,7 +2331,7 @@ ALL_OCS_ITEMS = itemsObj;
                 bodyHtml += `
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
                         <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
-                        <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}</td>
+                        <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}${_seloConferenciaSaida(item)}</td>
                         <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
                         <td class="nowrap">${fmtInt(qtdOriginal)}</td>
                         <td class="nowrap qtd-aberta">${fmtInt(qtdAberta)}</td>
@@ -2501,6 +2549,9 @@ ALL_OCS_ITEMS = itemsObj;
         if (alerta.uuidsRepetidos)   partes.push(`${alerta.uuidsRepetidos} código fixo repetido(s)`);
         if (alerta.orfasRedundantes) partes.push(`${alerta.orfasRedundantes} linha(s) sem correspondência no PEDIDOS`);
         if (alerta.orfasSemFonte)    partes.push(`${alerta.orfasSemFonte} item(ns) que já saíram da origem e continuam em aberto`);
+        if (alerta.faturadosSemUsuario)   partes.push(`${alerta.faturadosSemUsuario} item(ns) Faturado sem usuário registrado`);
+        if (alerta.lotesSuspeitos)        partes.push(`${alerta.lotesSuspeitos} lote(s) aberto(s) que também aparecem como Faturado sem usuário`);
+        if (alerta.ativosZeradosComSaldo) partes.push(`${alerta.ativosZeradosComSaldo} item(ns) zerado(s) no sistema com saldo na origem`);
         if (partes.length === 0) return;
 
         const exemplos = (alerta.exemplos || []).map(e =>
@@ -2508,11 +2559,184 @@ ALL_OCS_ITEMS = itemsObj;
         ).join('');
         $avisosBanner.innerHTML = `
             <div class="avisos-banner-header">
-                🚨 Duplicidade detectada no banco: ${partes.join(' · ')} — avise o responsável antes de faturar esses itens
+                🚨 Inconsistência no banco de dados: ${partes.join(' · ')} — avise o responsável antes de faturar esses itens
                 <button class="avisos-banner-dismiss" onclick="this.closest('#avisos-banner').classList.add('hidden')" title="Dispensar">✕</button>
             </div>
             ${exemplos ? `<ul>${exemplos}</ul>` : ''}`;
         $avisosBanner.classList.remove('hidden');
+    }
+
+    // ==== CONFERÊNCIA DE SAÍDA DA ORIGEM (coluna Z = PENDENTE) ====
+    // O sync não fatura item que saiu da origem sem marcação (regra 1.1.3 do CLAUDE.md): marca a
+    // coluna Z como PENDENTE e o item aparece aqui para um usuário de acesso TOTAL decidir.
+    // A janela abre sozinha depois do login e sempre que surgir item novo; "Responder depois" fecha.
+    let PENDENTES_SAIDA = [];
+    const _pendentesSaidaApresentados = new Set(); // IDs já mostrados desde que a tela abriu
+    let _confSaidaEmAndamento = 0;
+    let _confSaidaRecargaTimer = null;
+    const $conferenciaSaidaModal = document.getElementById('conferenciaSaidaModal');
+    const $conferenciaSaidaLista = document.getElementById('conferencia-saida-lista');
+    const $pendentesSaidaPill = document.getElementById('pendentes-saida-pill');
+
+    const _MOTIVOS_SAIDA = {
+        produto_ausente: 'o produto não aparece mais neste pedido na origem',
+        linha_excedente: 'a origem tem menos linhas deste produto do que o sistema',
+        menu: 'sinalizado pelo menu da planilha',
+        'faturado sem usuário pela regra antiga': 'tinha sido faturado sozinho pela regra antiga, sem usuário'
+    };
+    function _textoMotivoSaida(motivo) {
+        const m = String(motivo || '');
+        const base = m.split(' / ')[0].trim();
+        const extra = m.indexOf('com baixa registrada') >= 0 ? ' (com baixa registrada)' : '';
+        return (_MOTIVOS_SAIDA[base] || base || '—') + extra;
+    }
+
+    function _atualizarPillPendentesSaida() {
+        if (!$pendentesSaidaPill) return;
+        const n = PENDENTES_SAIDA.length;
+        $pendentesSaidaPill.textContent = `⏸️ ${n} ${n === 1 ? 'item saiu' : 'itens saíram'} da origem sem marcação — conferir`;
+        $pendentesSaidaPill.classList.toggle('visivel', n > 0);
+    }
+
+    function _outroModalAberto() {
+        const login = document.getElementById('loginModal');
+        if (login && !login.classList.contains('hidden')) return true;
+        return [...document.querySelectorAll('.modal-overlay:not(.hidden)')].some(m => m !== $conferenciaSaidaModal);
+    }
+
+    function atualizarPendentesSaida(lista) {
+        PENDENTES_SAIDA = Array.isArray(lista) ? lista : [];
+        _atualizarPillPendentesSaida();
+        const aberto = $conferenciaSaidaModal && !$conferenciaSaidaModal.classList.contains('hidden');
+        if (aberto) {
+            if (_confSaidaEmAndamento === 0) _renderConferenciaSaida();
+            if (PENDENTES_SAIDA.length === 0) fecharConferenciaSaida();
+            return;
+        }
+        // Abre sozinho só para quem pode responder e só quando há item ainda não apresentado.
+        if (window.ACCESS_NIVEL !== 'TOTAL') return;
+        const novos = PENDENTES_SAIDA.filter(p => !_pendentesSaidaApresentados.has(p.uniqueId));
+        if (novos.length > 0 && !_outroModalAberto()) abrirConferenciaSaida();
+    }
+
+    function abrirConferenciaSaida() {
+        if (!$conferenciaSaidaModal || window.ACCESS_NIVEL === 'PARCIAL') return;
+        PENDENTES_SAIDA.forEach(p => _pendentesSaidaApresentados.add(p.uniqueId));
+        _renderConferenciaSaida();
+        $conferenciaSaidaModal.classList.remove('hidden');
+    }
+
+    function fecharConferenciaSaida() {
+        if ($conferenciaSaidaModal) $conferenciaSaidaModal.classList.add('hidden');
+    }
+
+    function _renderConferenciaSaida() {
+        if (!$conferenciaSaidaLista) return;
+        if (PENDENTES_SAIDA.length === 0) {
+            $conferenciaSaidaLista.innerHTML = '<p style="color:#065f46; font-weight:600;">✅ Nenhum item aguardando conferência.</p>';
+            return;
+        }
+        const e = _escapeHtml;
+        $conferenciaSaidaLista.innerHTML = PENDENTES_SAIDA.map(p => {
+            const qtdAb = Number(p.qtdAberta || 0);
+            const qtdOrig = Number(p.qtdOriginal || 0);
+            const baixas = qtdOrig > qtdAb ? `${fmtInt(qtdOrig - qtdAb)} já baixado(s)` : 'sem baixa registrada';
+            const gemeo = p.gemeo
+                ? `<div class="conf-gemeo">⚠️ Outra linha aberta deste pedido tem o mesmo LOTE (OC ${e(p.gemeo.oc)}, QTD ${fmtInt(p.gemeo.qtdAberta)}): provável duplicata.</div>`
+                : '';
+            return `<div class="conf-card" data-id="${e(p.uniqueId)}">
+                <h4>${e(p.cliente)} · Pedido ${e(p.pedido)} · OC ${e(p.oc)}</h4>
+                <div class="conf-dados">
+                    <span><b>Descrição:</b> ${e(p.descricao)}</span>
+                    <span><b>Tamanho:</b> ${e(p.tamanho)}</span>
+                    <span><b>Lote:</b> ${e(p.lote || '—')}</span>
+                    <span><b>Qtd. aberta:</b> ${fmtInt(qtdAb)} (${baixas})</span>
+                    <span><b>Saiu da origem em:</b> ${e(p.saiuEm || '—')}</span>
+                    <span><b>Motivo:</b> ${e(_textoMotivoSaida(p.motivo))}</span>
+                </div>
+                ${gemeo}
+                <div class="conf-acoes">
+                    <button type="button" class="conf-faturado" data-decisao="FATURADO" title="A NF deste item foi emitida">✅ Faturado</button>
+                    <button type="button" class="conf-cancelado" data-decisao="CANCELADO" title="O pedido deste item foi cancelado">✖ Cancelado</button>
+                    <button type="button" class="conf-aberto" data-decisao="ABERTO" title="O item continua em aberto — não perguntar de novo">↩ Continua aberto</button>
+                    ${p.gemeo ? '<button type="button" class="conf-duplicata" data-decisao="DUPLICATA" title="Esta linha repete a outra linha aberta com o mesmo LOTE">⧉ Duplicata</button>' : ''}
+                </div>
+                <div class="conf-erro"></div>
+            </div>`;
+        }).join('');
+    }
+
+    function _responderConferenciaSaida($card, decisao) {
+        const uniqueId = $card.getAttribute('data-id');
+        const p = PENDENTES_SAIDA.find(x => x.uniqueId === uniqueId);
+        if (!p) return;
+        const resumo = `${p.cliente} · Pedido ${p.pedido} · OC ${p.oc}\n${p.descricao} ${p.tamanho} · Lote ${p.lote || '—'} · QTD ${fmtInt(p.qtdAberta)}`;
+        const perguntas = {
+            FATURADO:  `Confirmar que a NF deste item foi EMITIDA?\n\n${resumo}\n\nO item passa para FATURADO em seu nome.`,
+            CANCELADO: `Confirmar que este item foi CANCELADO?\n\n${resumo}\n\nO item passa para EXCLUÍDO e sai da lista na próxima limpeza.`,
+            DUPLICATA: `Confirmar que esta linha é DUPLICATA da outra linha aberta com o mesmo LOTE?\n\n${resumo}\n\nEsta linha passa para EXCLUÍDO; a outra continua aberta.`
+        };
+        if (perguntas[decisao] && !confirm(perguntas[decisao])) return;
+
+        const sessao = _getSessaoLocal();
+        const usuario = sessao && sessao.usuario ? sessao.usuario : '';
+        const botoes = $card.querySelectorAll('button');
+        const $erro = $card.querySelector('.conf-erro');
+        botoes.forEach(b => { b.disabled = true; });
+        $erro.style.display = 'none';
+        _confSaidaEmAndamento++;
+
+        google.script.run
+            .withSuccessHandler(r => {
+                _confSaidaEmAndamento--;
+                if (r && r.success) {
+                    PENDENTES_SAIDA = PENDENTES_SAIDA.filter(x => x.uniqueId !== uniqueId);
+                    $card.remove();
+                    _atualizarPillPendentesSaida();
+                    if (PENDENTES_SAIDA.length === 0) fecharConferenciaSaida();
+                    // Uma recarga para várias respostas seguidas
+                    clearTimeout(_confSaidaRecargaTimer);
+                    _confSaidaRecargaTimer = setTimeout(() => carregarListaOcs(true, true), 2100);
+                } else {
+                    const msg = (r && r.error) ? r.error : 'Não foi possível gravar a resposta.';
+                    $erro.textContent = '⚠️ ' + msg;
+                    $erro.style.display = 'block';
+                    // Já respondido por outro usuário (ou voltou à origem): não reabilita os botões
+                    if (!/não está mais pendente/i.test(msg)) botoes.forEach(b => { b.disabled = false; });
+                }
+            })
+            .withFailureHandler(err => {
+                _confSaidaEmAndamento--;
+                $erro.textContent = '⚠️ Falha de conexão: ' + (err && err.message ? err.message : err);
+                $erro.style.display = 'block';
+                botoes.forEach(b => { b.disabled = false; });
+            })
+            .confirmarSaidaFonte(uniqueId, p.planilhaLinha, decisao, usuario);
+    }
+
+    if ($conferenciaSaidaLista) {
+        $conferenciaSaidaLista.addEventListener('click', ev => {
+            const btn = ev.target.closest('button[data-decisao]');
+            if (!btn || btn.disabled) return;
+            const $card = btn.closest('.conf-card');
+            if ($card) _responderConferenciaSaida($card, btn.getAttribute('data-decisao'));
+        });
+    }
+    const $confSaidaDepoisBtn = document.getElementById('conferencia-saida-depois-btn');
+    if ($confSaidaDepoisBtn) $confSaidaDepoisBtn.addEventListener('click', fecharConferenciaSaida);
+
+    /** Selo do item na tabela conforme a coluna Z (CONFERENCIA_SAIDA). */
+    function _seloConferenciaSaida(item) {
+        const z = String(item.CONFERENCIA_SAIDA || '');
+        const tipo = z.split('|')[0].trim().toUpperCase();
+        if (tipo === 'PENDENTE') {
+            return ' <span class="badge-conferir" onclick="abrirConferenciaSaida()" title="Saiu da planilha de origem sem marcação — clique para conferir">⏸️ SAIU DA ORIGEM — CONFERIR</span>';
+        }
+        if (tipo === 'ABERTO') {
+            const partes = z.split('|');
+            return ` <span class="badge-conferido" title="Conferido por ${_escapeHtml(partes[1] || '')} em ${_escapeHtml(partes[2] || '')}: continua aberto">✔ conferido</span>`;
+        }
+        return '';
     }
 
     // ==== MODAIS ====
