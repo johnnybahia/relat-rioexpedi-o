@@ -8,6 +8,11 @@
 > (estado da implantação e ideias descartadas).
 >
 > **Modo do sistema — `CONFIGURAÇÕES!B4`:** `SIMULACAO` (padrão) ou `ATIVO`. Ver 15.19 para o que cada modo liga.
+>
+> **Testes obrigatórios (seção 18):** toda mudança em `Código.gs`/`index.html` passa por `node testes/rodar_todos.js`
+> antes do commit — o hook do Claude (`.claude/settings.json`) bloqueia o commit se falhar e o GitHub Actions roda de
+> novo em todo push. Todo bug corrigido ganha um cenário. **O repositório é PÚBLICO:** nunca commitar CSV real
+> (clientes, pedidos, usuários) — CSV novo do usuário roda com `--dados` e só entra no Git anonimizado.
 
 ---
 
@@ -19,8 +24,12 @@ Fluxo principal: **Fonte externa → DADOS_IMPORTADOS → PEDIDOS → Relatorio_
 Arquivos do projeto:
 - `Código.gs` — todo o backend (~7600 linhas, único arquivo GAS)
 - `index.html` — frontend servido via `HtmlService` (~6350 linhas)
-- `RELATÓRIO DE PEDIDOS EXPEDIÇÃO CEARÁ - *.csv` — snapshots **antigos** das abas; não refletem o estado atual.
-  Para diagnosticar dados, pedir ao usuário um export novo de DADOS_IMPORTADOS, PEDIDOS e Relatorio_DB.
+- `testes/` — simulação local do sistema (seção 18): simulador do Apps Script, cenários, base fictícia em
+  `testes/dados/base/` (export de 28/09 anonimizado). `.claude/settings.json` (hook de commit) e
+  `.github/workflows/testes.yml` (CI) rodam a bateria.
+- Os snapshots CSV antigos (`RELATÓRIO DE PEDIDOS EXPEDIÇÃO CEARÁ - *.csv`) foram apagados em 30/09/2026 por conterem
+  dados reais num repositório público — continuam no histórico do Git; só tornar o repositório privado os protege.
+  Para diagnosticar dados, pedir ao usuário um export novo de DADOS_IMPORTADOS, PEDIDOS e Relatorio_DB (seção 18).
 - `executa1.py`, `OC_482500*.PDF` — extrator avulso de PDFs de pedidos que envia a outro web app;
   não faz parte deste sistema (o backend não tem `doPost`).
 
@@ -492,6 +501,11 @@ confirmarSaidaFonte(id, linha, decisao, usuario) // resposta ao aviso: FATURADO 
 - Contador `#pendentes-saida-pill` no cabeçalho; selo "⏸️ SAIU DA ORIGEM — CONFERIR" na descrição do item
   (clicável) e "✔ conferido" para `ABERTO`. Nível PARCIAL não vê janela nem contador (o servidor também recusa).
 - O usuário enviado é o login da sessão (aba CADASTRO), não o perfil BAIXA1…BAIXA5.
+- **Quem decidiu fica registrado** na col Z (`FATURADO|ANA|30/09/2026 08:52|confirmado no aviso…`, idem ABERTO,
+  CANCELADO, DUPLICATA) e na auditoria (`CONFERENCIA_*`, com data/hora). Limites: a limpeza em ATIVO apaga a linha
+  Faturado/Excluido (e a col Z junto); a auditoria guarda só as últimas 5.000 linhas; col Z `ABERTO` é apagada se o
+  item volta à origem; o nome vem da sessão do navegador — o servidor só confere que existe com nível TOTAL na
+  CADASTRO (não há token de sessão), então é atribuição, não prova forte.
 
 ### Fluxo de marcação para faturamento (checkbox)
 ```
@@ -845,7 +859,7 @@ Outros tipos na auditoria: `PENDENTE`, `PENDENCIA_RESOLVIDA`, `FATURADO_POR_MARC
 **Como validar o modo novo antes de ligar:** com B4 = SIMULACAO, olhar `Auditoria_Sincronizacao` por 3–5 dias
 úteis. Cada `IDENTIDADE_SIMULADA` mostra a linha da origem, o ID de hoje e o que o ATIVO daria — conferir alguns
 pelo LOTE. Ligar ATIVO só com `faturadosSemUsuario` = 0 na sentinela (depois do reparo) e sem diferença
-inexplicável. Teste local (Node + mock do Apps Script, 12 cenários + dados de 28/09) passou nos dois modos.
+inexplicável. A bateria de simulação (`testes/`, seção 18) cobre os dois modos.
 
 ---
 
@@ -865,6 +879,8 @@ Antes de qualquer alteração no código, verificar:
 7. **Apaga linhas?** → Ações de usuário usam número de linha — conferir o ID com `_resolverLinhaDoItem_` (15.17)
 8. **Muda identidade ou limpeza?** → Colocar atrás de `_modoAtivo_()` com auditoria no modo SIMULACAO (15.19) e
    rodar os cenários de teste (linhas-irmãs, DESCRIÇÃO corrigida, troca de OC, lote novo ao lado de faturado)
+9. **Testes verdes?** → `node testes/rodar_todos.js` antes de todo commit de código (o hook bloqueia se falhar);
+   bug corrigido → cenário novo em `testes/cenarios.js` que falha sem a correção e passa com ela (seção 18)
 
 **Funções com maior superfície de impacto** (cuidado máximo):
 - `sincronizarDados()` — toca todos os itens do DB
@@ -913,7 +929,8 @@ irmãs 100% idênticas — o dano fica contido a um aviso, nunca a um faturament
 
 **Pendências conhecidas:** decisão manual dos 9 pares do incidente; `corrigirFaturadosComSaldoAberto()` segue no
 menu (reverte todo Faturado com QTD>0 para Ativo sem pendência — não usar; o sync depois os manda para o aviso);
-a página não é responsiva no celular (tabelas largas; o aviso é).
+a página não é responsiva no celular (tabelas largas; o aviso é); repositório público com dados reais no histórico
+(CSVs antigos) e nos PDFs `OC_482500*.PDF` — decisão do usuário tornar privado.
 
 ### Ideias já avaliadas e DESCARTADAS (não repropor sem fato novo)
 - Gravar código único na planilha de origem — proibido (1.1.4).
@@ -926,3 +943,43 @@ a página não é responsiva no celular (tabelas largas; o aviso é).
 - Reativar o sistema de alertas antigo (PropertiesService + senha) — desligado em `ce75202`; substituído pelo aviso da seção 14.
 - `corrigirFaturadosComSaldoAberto()` como correção dos 20 — tira o registro sem pedir decisão; usar o reparo (menu 🩹).
 - Só esconder os faturados na tela e apagar à noite mantendo 15 dias — o usuário quer apagar tudo diariamente (1.1.5).
+
+---
+
+## 18. TESTES — SIMULAÇÃO LOCAL (obrigatório a cada mudança)
+
+O sistema roda inteiro em Node com um simulador do Apps Script (`testes/gasmock.js`: planilha em memória,
+Utilities, Properties, Lock, Cache). Cada teste monta as abas a partir de 3 CSV (DADOS_IMPORTADOS, PEDIDOS,
+Relatorio_DB), roda o `Código.gs` de verdade e confere o resultado nos dois modos (SIMULACAO e ATIVO).
+
+| Arquivo | O que confere |
+|---|---|
+| `testes/dados_reais.js` | Em cada base: 2ª rodada do sync com a mesma origem não muda nada; nenhum Faturado sem usuário; nenhum ID/UUID repetido novo; base padrão: 1ª rodada não troca ID |
+| `testes/cenarios.js` | 12 situações do dia a dia: irmã marcada sai (incidente 28/09), DESCRIÇÃO corrigida (1 linha e grupo inteiro), lote novo ao lado de faturado, saída com/sem marcação, importação truncada, faturamento parcial entre irmãs, pendência que volta, reordenação, lote novo no grupo, troca de OC |
+| `testes/funcoes.js` | Sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos |
+| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; PARCIAL não vê. Sem Playwright → pulado |
+| `testes/rodar_todos.js` | Roda tudo; placar; código 1 se falhar (~1 min) |
+
+**Quando rodar:** antes de todo commit que mexa em `Código.gs`, `index.html` ou `testes/`. O hook
+`.claude/settings.json` (`testes/hook_commit.js`) roda sozinho antes de `git commit` e bloqueia se falhar; o GitHub
+Actions (`.github/workflows/testes.yml`) roda de novo em todo push/PR (inclusive upload pelo site).
+
+**CSV novo do usuário (ele manda exports para cada situação nova):**
+1. Rodar sem subir nada: `node testes/rodar_todos.js --dados <pasta_do_upload>` (acha os arquivos pelo nome da
+   aba; se houver vários, usa o mais recente). Serve para ver o que o código atual faz com os dados dele.
+2. Reproduzir o problema num cenário em `testes/cenarios.js` (falha antes da correção, passa depois).
+3. Anonimizar e guardar como base de regressão:
+   `node testes/anonimizar.js <pasta_do_upload> testes/dados/<aaaa-mm-dd>-<assunto>` — o script aborta se sobrar
+   qualquer valor real. `dados_reais.js` passa a rodar nessa base para sempre; um cenário pode usá-la com `--dados`.
+4. Commitar código + cenário + base anonimizada. **Nunca** commitar o CSV real (repositório público);
+   `testes/dados_locais/` está no `.gitignore` para guardar exports reais durante a sessão.
+
+**Teste de mutação** (prova que a bateria pega defeitos): `CODIGO_GS=<cópia alterada do .gs>` e
+`INDEX_HTML=<cópia alterada do .html>` fazem os testes rodarem contra uma cópia com defeito proposital. Em 30/09:
+faturar sem usuário, planejador ignorando LOTE/QTD, limpeza apagando faturado sem usuário e aviso que não abre —
+todos detectados.
+
+**Limites do simulador:** não reproduz tipos de célula além do que o CSV mostra (número × texto já causou um falso
+alarme), fuso/horário real, limites de 6 min e cota diária, gatilhos, concorrência real do LockService nem o
+sandbox do HtmlService. Mudança feita direto no editor do Apps Script não passa por nenhum teste. O modo SIMULACAO
+em produção (15.19) continua sendo a segunda rede.
