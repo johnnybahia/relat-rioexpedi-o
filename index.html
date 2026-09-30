@@ -5172,6 +5172,7 @@ ALL_OCS_ITEMS = itemsObj;
                 // Registra o lote na planilha de forma assíncrona (fire-and-forget)
                 const itensData = itensMarcados.map(item => ({
                     planilhaLinha: item.planilhaLinha,
+                    uniqueId: item.uniqueId,
                     loteId: idLote
                 }));
                 google.script.run

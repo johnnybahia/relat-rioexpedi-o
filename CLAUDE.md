@@ -38,7 +38,8 @@ aba `RELATÓRIO GERAL DA PRODUÇÃO1` (constantes `SOURCE_ID`/`SOURCE_SHEET` em 
 4. **A planilha de origem não pode ser alterada** (nenhuma coluna nova, nenhum código gravado nela).
    Portanto não existe identificador fixo por linha vindo da origem — ver 15.16.
 5. **Limpeza diária:** todo dia útil, no horário da célula B2 da aba `CONFIGURAÇÕES`, apagar **todos** os
-   `Faturado` do Relatorio_DB. **Sem histórico de 15 dias.**
+   `Faturado` e `Excluido` do Relatorio_DB. **Sem histórico de 15 dias.** `Finalizado` **não** é apagado
+   (em 28/09 não havia nenhum: o botão "Finalizar" existe no código da tela, mas `handleFinalizar` nunca é chamado).
    ⚠️ Em 28/09/2026 o código ainda apaga só os com 15+ dias (`DIAS_RETENCAO`) — ver 15.18.
 6. **Acionadores em produção:** `processoImportacao` a cada **15 min**; `processoAutomaticoCompleto` a cada
    **1 h**. O instalador do código cria 5 min e desfaz isso — ver seção 13.
@@ -108,6 +109,9 @@ aba `RELATÓRIO GERAL DA PRODUÇÃO1` (constantes `SOURCE_ID`/`SOURCE_SHEET` em 
 12 M  DT. ENTREGA
 13 N  PRAZO
 14 O  Status               ← Ativo | Inativo | Faturado | Finalizado | Excluido
+                            Item zerado aguardando faturar = `Ativo` com QTD 0 (marcado ou não) — NÃO é Finalizado.
+                            `Finalizado` só vem da ação manual `finalizarItem` (:5892); a tela não exibe o
+                            botão (`handleFinalizar` nunca é chamado). O sync trata Finalizado como Faturado.
 15 P  MARCAR_FATURAR       ← "SIM" | "" — marcação para emissão de NF
 16 Q  DATA_STATUS          (data da última mudança de status)
 17 R  POSICAO_FONTE
@@ -739,7 +743,8 @@ primeira execução. Tratar antes (seção 17, item 10).
   `CONFIGURAÇÕES!B2` (padrão 11); apaga `Faturado/Finalizado/Excluido` com `DATA_STATUS` de 15+ dias
   (`DIAS_RETENCAO`, fixo no código), linha a linha (`deleteRow` em loop); item sem DATA_STATUS nunca é apagado.
   Menu "🧹 Limpar Faturados agora" roda na hora. Em 28/09 nada tinha sido apagado (faturado mais antigo: 18/09).
-- **Como deve ser (1.1.5):** apagar **todos** os faturados no horário de B2, sem idade mínima — plano, seção 17.
+- **Como deve ser (1.1.5):** apagar **todos** os `Faturado` e `Excluido` no horário de B2, sem idade mínima;
+  `Finalizado` fica — plano, seção 17.
 - A célula A3 da aba é texto fixo gravado na criação — não controla nada.
 
 ---
@@ -796,9 +801,11 @@ Objetivo: cumprir 1.1.3 (nenhum `Faturado` sem usuário) e 1.1.5 (limpeza diári
    colunas do usuário (P, V, W, Z) antes de gravar.
 6. **Conferência do ID** em baixa, estorno e edição de baixa, marcar, excluir e finalizar: se a linha não pertence
    mais àquele ID, procurar pelo ID; se não achar, pedir para recarregar a tela.
-7. **Limpeza diária (1.1.5):** no horário de B2, dias úteis, apagar todos os `Faturado` (assumido também
-   `Finalizado`/`Excluido` — confirmar com o usuário); nessa execução, limpar **antes** do sync; apagar em blocos
+7. **Limpeza diária (1.1.5):** no horário de B2, dias úteis, apagar todos os `Faturado` e `Excluido` (confirmado
+   pelo usuário; `Finalizado` não é apagado); nessa execução, limpar **antes** do sync; apagar em blocos
    contíguos de baixo para cima (`deleteRows`); remover `DIAS_RETENCAO`; reescrever o texto da A3.
+   Consequência: "Cancelado" e "Duplicata" do aviso (→ `Excluido`) só podem ser desfeitos até a limpeza
+   seguinte; depois disso, se a linha voltar à origem, entra como item novo, sem histórico.
 8. **Sentinela, novos alertas:** `Faturado` sem usuário (deve ser sempre 0); mesmo LOTE numa linha ativa e noutra
    faturada ou pendente; `Ativo` com QTD 0 no DB e >0 em PEDIDOS.
 9. **Modo simulação antes de ativar:** 3–5 dias úteis gravando numa aba de auditoria o que a lógica nova faria
