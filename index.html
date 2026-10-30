@@ -177,6 +177,30 @@
     body.acesso-parcial #conferenciaSaidaModal { display: none !important; }
     body.acesso-parcial .badge-conferir { pointer-events: none; cursor: default; }
 
+    /* === ALERTA: item com CARTELA = NÃO marcado para faturar (confirmação obrigatória) === */
+    #cartelaModal { z-index: 3500; }
+    #cartelaModal .modal-content { max-width: 560px; max-height: 92vh; border-top: 6px solid #dc2626; }
+    #cartelaModal .modal-content.tremer { animation: cartelaTremer 0.3s; }
+    @keyframes cartelaTremer { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+    #cartelaModal .modal-header { background: #fef2f2; border-bottom-color: #fca5a5; }
+    #cartelaModal .modal-header h2 { color: #991b1b; font-size: 1.15rem; }
+    #cartelaModal .modal-header p { margin: 0.25rem 0 0; font-size: 0.8rem; color: #7f1d1d; }
+    .cartela-item { border: 1px solid #e5e7eb; border-left: 4px solid #dc2626; border-radius: 0.5rem; background: #fafafa; padding: 0.7rem 0.8rem; margin-bottom: 0.9rem; }
+    .cartela-item h4 { margin: 0 0 0.35rem; font-size: 0.92rem; }
+    .cartela-dados { display: grid; grid-template-columns: 1fr 1fr; gap: 0.15rem 0.75rem; font-size: 0.8rem; color: #374151; }
+    .cartela-nao { background: #fee2e2; color: #991b1b; font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+    .cartela-risco { background: #fff7ed; border: 1px solid #fdba74; border-radius: 0.5rem; padding: 0.6rem 0.75rem; font-size: 0.85rem; color: #9a3412; margin-bottom: 0.9rem; }
+    .cartela-campo label { display: block; font-weight: 600; font-size: 0.82rem; margin-bottom: 0.25rem; color: #374151; }
+    .cartela-campo input { width: 100%; padding: 0.6rem 0.7rem; border: 2px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; font-family: inherit; }
+    .cartela-campo input:focus { outline: none; border-color: #dc2626; }
+    .cartela-dica { font-size: 0.72rem; color: #6b7280; margin-top: 0.2rem; }
+    .cartela-ciente { display: flex; gap: 0.55rem; align-items: flex-start; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 0.5rem; padding: 0.6rem 0.7rem; font-size: 0.82rem; cursor: pointer; margin-top: 0.75rem; }
+    .cartela-ciente input { margin-top: 2px; width: 17px; height: 17px; accent-color: #dc2626; flex-shrink: 0; }
+    .cartela-registro { font-size: 0.72rem; color: #6b7280; margin-top: 0.75rem; }
+    #cartela-confirmar-btn { background: #dc2626; color: white; }
+    #cartela-confirmar-btn:hover:not(:disabled) { background: #b91c1c; }
+    #cartela-confirmar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
     /* === MODAL FILTRO DE USUÁRIOS PARA FATURAMENTO === */
     #filtroUsuarioFaturModal { z-index: 3000; }
     #filtroUsuarioFaturModal .modal-content { max-width: 480px; }
@@ -897,6 +921,40 @@
       </div>
       <div class="modal-footer">
         <button id="conferencia-saida-depois-btn" class="modal-btn modal-btn-cancel">Responder depois</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: item com CARTELA = NÃO — não fecha por ESC nem por clique fora; só Confirmar ou Cancelar -->
+  <div id="cartelaModal" class="modal-overlay hidden">
+    <div class="modal-content" id="cartela-caixa" role="alertdialog" aria-modal="true" aria-labelledby="cartela-titulo">
+      <div class="modal-header">
+        <h2 id="cartela-titulo">⚠️ Item SEM CARTELA — confirmação obrigatória</h2>
+        <p>Não é possível marcar para faturar sem concluir esta etapa.</p>
+      </div>
+      <div class="modal-body">
+        <div class="cartela-item">
+          <h4 id="cartela-item-desc"></h4>
+          <div class="cartela-dados" id="cartela-item-dados"></div>
+        </div>
+        <div class="cartela-risco">
+          <b>Risco de devolução pelo cliente.</b> Faturar sem cartela pode gerar devolução da mercadoria.
+          Confirme com a <b>supervisão</b> antes de prosseguir.
+        </div>
+        <div class="cartela-campo">
+          <label for="cartela-supervisor">Nome do supervisor que autorizou</label>
+          <input type="text" id="cartela-supervisor" autocomplete="off" maxlength="60" placeholder="nome completo">
+          <div class="cartela-dica">Fica registrado como declaração do usuário (sem validação de senha).</div>
+        </div>
+        <label class="cartela-ciente">
+          <input type="checkbox" id="cartela-ciente">
+          <span>Confirmo que a supervisão autorizou faturar <b>sem cartela</b> e estou ciente do <b>risco de devolução pelo cliente</b>.</span>
+        </label>
+        <div class="cartela-registro">🗂️ Fica registrado de forma permanente (usuário, supervisor, item, data e hora) no <b>Historico_Decisoes</b> para consulta futura.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-cancel" id="cartela-cancelar-btn">Cancelar (não marcar)</button>
+        <button class="modal-btn" id="cartela-confirmar-btn" disabled>Confirmar e marcar para faturar</button>
       </div>
     </div>
   </div>
@@ -2326,7 +2384,7 @@ ALL_OCS_ITEMS = itemsObj;
                 const inlineStyle = corUsuario
                     ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"`
                     : _osCorPalette ? `style="background-color:${_osCorPalette.bg}; border-left:4px solid ${_osCorPalette.border};"` : '';
-                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-qtd-original="${qtdOriginal}" data-item-tamanho="${item.TAMANHO || 'N/A'}" ${usuarioQueMarkou ? `data-marcado-por="${_escapeHtml(usuarioQueMarkou)}"` : ''}>`;
+                bodyHtml += `<tr id="${itemId}" class="${itemStatusClass} ${classeMarcado}" ${inlineStyle} data-unique-id="${item.uniqueId}" data-linha="${item.planilhaLinha}" data-oc="${ocInfo.ordCompra}" data-item-desc="${item.DESCRIÇÃO || 'N/A'}" data-item-qtd="${item['QTD. ABERTA'] || 0}" data-item-qtd-original="${qtdOriginal}" data-item-tamanho="${item.TAMANHO || 'N/A'}" data-item-cartela="${_escapeHtml(String(item.CARTELA ?? ''))}" data-item-pedido="${_escapeHtml(String(item.PEDIDO ?? ''))}" data-item-cliente="${_escapeHtml(String(ocInfo.cliente ?? item.CLIENTE ?? ''))}" ${usuarioQueMarkou ? `data-marcado-por="${_escapeHtml(usuarioQueMarkou)}"` : ''}>`;
 
                 bodyHtml += `
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
@@ -2941,12 +2999,24 @@ ALL_OCS_ITEMS = itemsObj;
         }
 
         const row = document.getElementById(`item-linha-${linha}`);
+
+        // CARTELA = NÃO: alerta obrigatório com supervisão antes de qualquer outra pergunta (baixa etc.)
+        if (row && _cartelaEhNao(row.dataset.itemCartela)) {
+            abrirModalSemCartela(row,
+                (aut) => _fluxoMarcarFaturar(uniqueId, linha, row, usuarioAtual, perfilAtual, aut),
+                () => { const cb = row.querySelector('.checkbox-faturar'); if (cb) cb.checked = false; });
+            return;
+        }
+        _fluxoMarcarFaturar(uniqueId, linha, row, usuarioAtual, perfilAtual, null);
+    }
+
+    function _fluxoMarcarFaturar(uniqueId, linha, row, usuarioAtual, perfilAtual, aut) {
         const qtdAberta = row ? Number(row.dataset.itemQtd || 0) : 0;
         const qtdOriginal = row ? Number(row.dataset.itemQtdOriginal || 0) : 0;
 
         // Sem quantidade aberta — marca direto, nada a baixar
         if (qtdAberta <= 0) {
-            _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual);
+            _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual, aut);
             return;
         }
 
@@ -2956,9 +3026,9 @@ ALL_OCS_ITEMS = itemsObj;
                 `Baixa parcial registrada — saldo atual: ${fmtInt(qtdAberta)} unidades.\n\nOK → Faturar completo (zera saldo)\nCancelar → Manter saldo parcial`
             );
             if (faturarCompleto) {
-                _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual);
+                _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual, aut);
             } else {
-                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual);
+                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual, aut);
             }
             return;
         }
@@ -2970,10 +3040,10 @@ ALL_OCS_ITEMS = itemsObj;
             return;
         }
 
-        _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual);
+        _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual, aut);
     }
 
-    function _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfil) {
+    function _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfil, aut) {
         const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
         if (checkbox) checkbox.disabled = true;
 
@@ -2990,7 +3060,7 @@ ALL_OCS_ITEMS = itemsObj;
                     if (qtdAbertaCell) qtdAbertaCell.textContent = fmtInt(0);
                 }
                 if (checkbox) checkbox.disabled = false;
-                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfil);
+                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfil, aut);
             })
             .withFailureHandler(error => {
                 showError('Falha ao aplicar baixa: ' + error.message);
@@ -2999,7 +3069,7 @@ ALL_OCS_ITEMS = itemsObj;
             .aplicarBaixa(uniqueId, linha, qtdAberta, usuarioAtual);
     }
 
-    function _executarMarcarFaturar(uniqueId, linha, marcar, usuarioAtual, perfil) {
+    function _executarMarcarFaturar(uniqueId, linha, marcar, usuarioAtual, perfil, aut) {
         google.script.run
             .withSuccessHandler(result => {
                 console.log('✓ Resultado da marcação:', result);
@@ -3054,8 +3124,83 @@ ALL_OCS_ITEMS = itemsObj;
                 const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
                 if (checkbox) checkbox.checked = !marcar;
             })
-            .marcarParaFaturar(uniqueId, linha, marcar, usuarioAtual, perfil || 'BAIXA1');
+            .marcarParaFaturar(uniqueId, linha, marcar, usuarioAtual, perfil || 'BAIXA1', aut || null);
     }
+
+    // ==== ALERTA: ITEM SEM CARTELA (CARTELA = NÃO) ====
+    // Não fecha por ESC nem por clique fora. Saídas: Confirmar (supervisor + ciência) ou Cancelar (desmarca).
+    const $cartelaModal = document.getElementById('cartelaModal');
+    const $cartelaCaixa = document.getElementById('cartela-caixa');
+    const $cartelaSupervisor = document.getElementById('cartela-supervisor');
+    const $cartelaCiente = document.getElementById('cartela-ciente');
+    const $cartelaConfirmar = document.getElementById('cartela-confirmar-btn');
+    const $cartelaCancelar = document.getElementById('cartela-cancelar-btn');
+    let _cartelaCallbacks = null;
+
+    function _cartelaEhNao(valor) {
+        return String(valor == null ? '' : valor).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase() === 'NAO';
+    }
+
+    function _cartelaValido() {
+        return $cartelaSupervisor.value.trim().length >= 3 && $cartelaCiente.checked;
+    }
+
+    function _cartelaTremer() {
+        $cartelaCaixa.classList.remove('tremer');
+        void $cartelaCaixa.offsetWidth;
+        $cartelaCaixa.classList.add('tremer');
+    }
+
+    function abrirModalSemCartela(row, aoConfirmar, aoCancelar) {
+        _cartelaCallbacks = { aoConfirmar, aoCancelar };
+        const d = row.dataset;
+        document.getElementById('cartela-item-desc').textContent = d.itemDesc || 'N/A';
+        const dados = [
+            ['Cliente', d.itemCliente], ['Pedido', d.itemPedido], ['OC', d.oc], ['Tamanho', d.itemTamanho],
+            ['Qtd. a faturar', fmtInt(Number(d.itemQtd || 0))]
+        ];
+        document.getElementById('cartela-item-dados').innerHTML =
+            dados.map(([k, v]) => `<span><b>${k}:</b> ${_escapeHtml(String(v || 'N/A'))}</span>`).join('') +
+            '<span><b>Cartela:</b> <span class="cartela-nao">NÃO</span></span>';
+        $cartelaSupervisor.value = '';
+        $cartelaCiente.checked = false;
+        $cartelaConfirmar.disabled = true;
+        $cartelaModal.classList.remove('hidden');
+        $cartelaSupervisor.focus();
+    }
+
+    function _fecharModalSemCartela() {
+        $cartelaModal.classList.add('hidden');
+    }
+
+    $cartelaSupervisor.addEventListener('input', () => { $cartelaConfirmar.disabled = !_cartelaValido(); });
+    $cartelaCiente.addEventListener('change', () => { $cartelaConfirmar.disabled = !_cartelaValido(); });
+    $cartelaModal.addEventListener('click', (e) => { if (e.target === $cartelaModal) _cartelaTremer(); });
+    $cartelaCancelar.addEventListener('click', () => {
+        const cb = _cartelaCallbacks; _cartelaCallbacks = null;
+        _fecharModalSemCartela();
+        if (cb && cb.aoCancelar) cb.aoCancelar();
+    });
+    $cartelaConfirmar.addEventListener('click', () => {
+        if (!_cartelaValido()) { _cartelaTremer(); return; }
+        const cb = _cartelaCallbacks; _cartelaCallbacks = null;
+        const aut = { supervisor: $cartelaSupervisor.value.trim().replace(/\s+/g, ' '), ciente: true };
+        _fecharModalSemCartela();
+        if (cb && cb.aoConfirmar) cb.aoConfirmar(aut);
+    });
+    // Captura: ESC não chega a nenhum outro atalho; Tab fica preso dentro do modal.
+    document.addEventListener('keydown', (e) => {
+        if ($cartelaModal.classList.contains('hidden')) return;
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); _cartelaTremer(); return; }
+        if (e.key === 'Tab') {
+            const foco = [...$cartelaModal.querySelectorAll('input, button')].filter(el => !el.disabled);
+            if (foco.length === 0) return;
+            const primeiro = foco[0], ultimo = foco[foco.length - 1];
+            if (e.shiftKey && document.activeElement === primeiro) { e.preventDefault(); ultimo.focus(); }
+            else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primeiro.focus(); }
+            else if (!$cartelaModal.contains(document.activeElement)) { e.preventDefault(); primeiro.focus(); }
+        }
+    }, true);
 
     // ==== MODAL DE BAIXA PARCIAL ====
 
@@ -3425,6 +3570,7 @@ ALL_OCS_ITEMS = itemsObj;
             !$warningModal.classList.contains('hidden') ||
             !$deleteAllModal.classList.contains('hidden') ||
             !$successModal.classList.contains('hidden') ||
+            !document.getElementById('cartelaModal').classList.contains('hidden') ||
             e.target.tagName === 'INPUT' ||
             e.target.tagName === 'SELECT') return;
 
@@ -5410,6 +5556,29 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     // Passo 2: monta e abre a janela de impressão
+    // "SUPERVISOR|USUARIO|dd/MM/yyyy HH:mm" (coluna AA do perfil) → { supervisor, data } ou null
+    function _liberacaoSemCartela(item) {
+        const partes = String(item.LIBERADO_SEM_CARTELA || '').split('|');
+        const supervisor = (partes[0] || '').trim();
+        return supervisor ? { supervisor, data: (partes[2] || '').trim() } : null;
+    }
+
+    function _linhaSemCartelaRelatorio(item) {
+        const lib = _liberacaoSemCartela(item);
+        return lib
+            ? `<span class="sc-linha">Liberado sem cartela — supervisão: ${_escapeHtml(lib.supervisor)}${lib.data ? ' · ' + _escapeHtml(lib.data) : ''}</span>`
+            : '<span class="sc-linha">Sem cartela — autorização da supervisão NÃO registrada</span>';
+    }
+
+    function _avisoSemCartelaRelatorio(itens) {
+        const sem = itens.filter(i => i.SEM_CARTELA);
+        if (sem.length === 0) return '';
+        const semAut = sem.filter(i => !_liberacaoSemCartela(i)).length;
+        const aut = sem.length - semAut;
+        return `<div class="aviso-sc">⚠️ ${sem.length} ITEM(NS) SEM CARTELA — ${aut} liberado(s) pela supervisão` +
+            `${semAut > 0 ? `, ${semAut} SEM autorização registrada` : ''} (linhas em vermelho). Risco de devolução pelo cliente.</div>`;
+    }
+
     function _gerarRelatorioFaturamentoPDF(itensMarcados, usuarioLogado, usuariosFiltro, loteId) {
         const usuarioLogadoEsc = _escapeHtml(usuarioLogado);
         const filtroTextoEsc   = _escapeHtml(
@@ -5471,6 +5640,10 @@ ALL_OCS_ITEMS = itemsObj;
                 .reemissao { background: #fef9c3 !important; }
                 .reemissao td { color: #78350f; }
                 .badge-reemissao { font-size: 9px; font-weight: 700; background: #f59e0b; color: #1c1917; border-radius: 4px; padding: 1px 5px; margin-left: 4px; vertical-align: middle; }
+                .aviso-sc { margin: 8px 0; border: 2px solid #dc2626; background: #fef2f2; color: #991b1b; border-radius: 6px; padding: 7px 10px; font-size: 12px; font-weight: 700; text-align: center; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                tr.sem-cartela td { background: #fee2e2 !important; color: #7f1d1d; font-weight: 600; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .badge-sc { font-size: 9px; font-weight: 700; background: #dc2626; color: white; border-radius: 4px; padding: 1px 5px; margin-left: 4px; vertical-align: middle; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .sc-linha { display: block; font-size: 9px; font-weight: 600; color: #991b1b; margin-top: 2px; }
                 @media print {
                     @page { size: A4 landscape; margin: 0.8cm; }
                     body { margin: 0; padding: 0; }
@@ -5489,6 +5662,7 @@ ALL_OCS_ITEMS = itemsObj;
                 ${usuarioLogadoEsc ? `&nbsp;|&nbsp; Gerado por: <span class="info-usuario">${usuarioLogadoEsc}</span>` : ''}
                 <br><span class="info-filtro">Usuários: ${filtroTextoEsc}</span>
             </div>
+            ${_avisoSemCartelaRelatorio(itensMarcados)}
         `;
 
         gruposOrdenados.forEach(infoX => {
@@ -5537,7 +5711,8 @@ ALL_OCS_ITEMS = itemsObj;
                     const loteAnt     = (item.LOTE_EMISSAO || '').trim();
                     // Item reemitido: estava em lote anterior e o usuário optou por incluí-lo novamente
                     const isReemissao = loteAnt && loteAnt !== loteId;
-                    const rowClass    = isReemissao ? 'reemissao' : 'highlight';
+                    const semCartela  = !!item.SEM_CARTELA;
+                    const rowClass    = semCartela ? 'sem-cartela' : (isReemissao ? 'reemissao' : 'highlight');
                     const badgeReemit = isReemissao
                         ? `<span class="badge-reemissao">já em ${_escapeHtml(loteAnt)}</span>`
                         : '';
@@ -5545,9 +5720,9 @@ ALL_OCS_ITEMS = itemsObj;
                     html += `
                         <tr class="${rowClass}">
                             <td style="text-align:center;font-weight:700;">${sequencia}</td>
-                            <td>${item.PEDIDO ?? 'N/A'}${badgeReemit}</td>
+                            <td>${item.PEDIDO ?? 'N/A'}${badgeReemit}${semCartela ? '<span class="badge-sc">SEM CARTELA</span>' : ''}</td>
                             <td>${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
-                            <td>${item.DESCRIÇÃO ?? 'N/A'}</td>
+                            <td>${item.DESCRIÇÃO ?? 'N/A'}${semCartela ? _linhaSemCartelaRelatorio(item) : ''}</td>
                             <td>${item.TAMANHO ?? 'N/A'}</td>
                             <td style="text-align:center;font-weight:700;">${fmtInt(saldo)}</td>
                             <td>${codOS}</td>

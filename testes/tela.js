@@ -30,7 +30,10 @@ function gerarPayload() {
   if (L.db(env).slice(1).some(L.faturadoSemUsuario)) env.ctx.repararFaturadosSemUsuario();
   L.linhasSozinhas(env).slice(0, 3).map(m => m.i).sort((x, y) => y - x).forEach(i => L.imp(env).splice(i, 1));
   L.sincronizar(env);
-  return env.ctx.fetchAllDataUnified(Date.now());
+  const payload = env.ctx.fetchAllDataUnified(Date.now());
+  // Alerta de cartela: o primeiro item de cada OC passa a ter CARTELA = NÃO (a base anonimizada é quase toda OK)
+  (payload.ordCompras || []).forEach(o => { if (o.items && o.items[0]) o.items[0].CARTELA = 'NÃO'; });
+  return payload;
 }
 
 (async () => {
@@ -149,6 +152,92 @@ function gerarPayload() {
         } else {
           rel.pular('nenhum selo visível na primeira página de OCs');
         }
+        // ---- alerta de CARTELA = NÃO ao marcar para faturar ----
+        if (await aberto()) { await page.click('#conferencia-saida-depois-btn'); await page.waitForTimeout(200); }
+        const cartelaAberto = () => page.$eval('#cartelaModal', el => !el.classList.contains('hidden'));
+        const confirmarOff = () => page.$eval('#cartela-confirmar-btn', b => b.disabled);
+        const marcarChamadas = () => chamadas('marcarParaFaturar');
+        const alvoCartela = await page.evaluate(() => {
+          const sem = v => String(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+          const livre = c => !c.checked && !c.disabled;
+          const nao = [...document.querySelectorAll('tr[data-item-cartela] .checkbox-faturar')].find(c => livre(c) && sem(c.closest('tr').dataset.itemCartela) === 'NAO');
+          const ok = [...document.querySelectorAll('tr[data-item-cartela] .checkbox-faturar')].find(c => livre(c) && sem(c.closest('tr').dataset.itemCartela) !== 'NAO');
+          if (nao) nao.dataset.alvoNao = '1';
+          if (ok) ok.dataset.alvoOk = '1';
+          return nao ? { id: nao.closest('tr').dataset.uniqueId, ok: !!ok } : null;
+        });
+        if (!alvoCartela) {
+          rel.pular('nenhum item com CARTELA NÃO e checkbox livre na primeira página de OCs');
+        } else {
+          const clicar = (attr) => page.evaluate(a => document.querySelector(`[data-${a}="1"]`).click(), attr);
+          const n0 = (await marcarChamadas()).length;
+          await clicar('alvo-nao');
+          await page.waitForTimeout(200);
+          rel.check('marcar item com CARTELA NÃO abre o alerta e ainda não chama o servidor', await cartelaAberto() && (await marcarChamadas()).length === n0);
+          rel.check('alerta mostra descrição, cartela NÃO e o risco de devolução',
+            /NÃO/.test(await page.$eval('#cartela-item-dados', el => el.textContent)) && /devolução/.test(await page.$eval('#cartelaModal', el => el.textContent)));
+          await page.keyboard.press('Escape');
+          await page.mouse.click(5, 5);
+          rel.check('ESC e clique fora não fecham o alerta', await cartelaAberto());
+          rel.check('Confirmar começa desabilitado', await confirmarOff());
+          await page.fill('#cartela-supervisor', 'MA');
+          await page.check('#cartela-ciente');
+          rel.check('supervisor com 2 letras mantém Confirmar desabilitado', await confirmarOff());
+          await page.fill('#cartela-supervisor', 'Maria  Souza');
+          rel.check('supervisor + ciência habilita Confirmar', !(await confirmarOff()));
+          await page.uncheck('#cartela-ciente');
+          rel.check('sem a ciência desabilita de novo', await confirmarOff());
+          if (capturas) { await page.check('#cartela-ciente'); await page.screenshot({ path: path.join(capturas, 'cartela.png') }); await page.uncheck('#cartela-ciente'); }
+          await page.click('#cartela-cancelar-btn');
+          await page.waitForTimeout(100);
+          rel.check('Cancelar fecha, desmarca o checkbox e não chama o servidor',
+            !(await cartelaAberto()) && !(await page.$eval('[data-alvo-nao="1"]', c => c.checked)) && (await marcarChamadas()).length === n0);
+          await clicar('alvo-nao');
+          await page.waitForTimeout(100);
+          rel.check('o alerta abre de novo e começa limpo', await cartelaAberto() && (await page.$eval('#cartela-supervisor', i => i.value)) === '' && await confirmarOff());
+          await page.fill('#cartela-supervisor', 'Maria  Souza');
+          await page.check('#cartela-ciente');
+          await page.click('#cartela-confirmar-btn');
+          await page.waitForTimeout(600);
+          const m = (await marcarChamadas()).pop();
+          rel.check('Confirmar envia ao servidor a supervisão (espaços normalizados) e a ciência',
+            m && m[1][0] === alvoCartela.id && m[1][2] === true && m[1][3] === usuario && m[1][5] && m[1][5].supervisor === 'Maria Souza' && m[1][5].ciente === true, JSON.stringify(m && m[1]));
+          rel.check('depois de confirmar o alerta está fechado', !(await cartelaAberto()));
+          if (alvoCartela.ok) {
+            const nOk = (await marcarChamadas()).length;
+            await clicar('alvo-ok');
+            await page.waitForTimeout(500);
+            const mOk = (await marcarChamadas()).slice(nOk).pop();
+            rel.check('item com CARTELA OK marca direto, sem alerta e sem autorização', !(await cartelaAberto()) && mOk && !mOk[1][5], JSON.stringify(mOk && mOk[1]));
+          } else {
+            rel.pular('sem item com CARTELA OK livre na página');
+          }
+        }
+
+        // ---- relatório de faturamento: faixa + linha em vermelho + supervisão ----
+        const relHtml = await page.evaluate(() => {
+          let html = '';
+          const abrir = window.open;
+          window.open = () => ({ document: { write: h => { html = h; }, close() {} }, print() {} });
+          const base = { CLIENTE: 'CLIENTE 01', 'ORD. COMPRA': '16078984', PEDIDO: '143086', 'CÓD. CLIENTE': '1', TAMANHO: '16MM', SALDO: 130,
+            'CÓD. OS': '1', PRAZO: 3, MARCAR_FATURAR_USUARIO: 'ANA', SEQUENCIA: '4', LOTE_EMISSAO: '', INFO_X: 'MARCA' };
+          _gerarRelatorioFaturamentoPDF([
+            Object.assign({}, base, { uniqueId: 'a', 'DESCRIÇÃO': 'ITEM COM CARTELA', SEM_CARTELA: false, LIBERADO_SEM_CARTELA: '' }),
+            Object.assign({}, base, { uniqueId: 'b', 'DESCRIÇÃO': 'ITEM LIBERADO', SEM_CARTELA: true, LIBERADO_SEM_CARTELA: 'MARIA <b>X</b>|ANA|30/10/2026 10:38' }),
+            Object.assign({}, base, { uniqueId: 'c', 'DESCRIÇÃO': 'ITEM LEGADO', SEM_CARTELA: true, LIBERADO_SEM_CARTELA: '' })
+          ], 'ANA', [], 'FAT-001');
+          window.open = abrir;
+          return html;
+        });
+        rel.check('relatório: faixa avisa 2 itens sem cartela (1 liberado, 1 sem autorização registrada)',
+          /2 ITEM\(NS\) SEM CARTELA — 1 liberado\(s\) pela supervisão, 1 SEM autorização registrada/.test(relHtml), relHtml.slice(0, 200));
+        rel.check('relatório: linhas sem cartela em vermelho com selo; item com cartela segue verde',
+          (relHtml.match(/class="sem-cartela"/g) || []).length === 2 && (relHtml.match(/class="highlight"/g) || []).length === 1
+          && (relHtml.match(/>SEM CARTELA</g) || []).length === 2);
+        rel.check('relatório: mostra a supervisão e a data, com HTML escapado',
+          /supervisão: MARIA &lt;b&gt;X&lt;\/b&gt; · 30\/10\/2026 10:38/.test(relHtml) && !/<b>X<\/b>/.test(relHtml));
+        rel.check('relatório: item legado mostra "autorização NÃO registrada"', /autorização da supervisão NÃO registrada/.test(relHtml));
+
         await page.evaluate(() => {
           document.getElementById('deleteAllModal').dataset.items = JSON.stringify([{ uniqueId: 'ID-INATIVO-TESTE', linha: 5, info: 'teste' }]);
           confirmExcluirNaoMarcados();
