@@ -13,6 +13,7 @@ const ETAPAS = [
   ['dados_reais.js', 'invariantes do sync nas bases'],
   ['cenarios.js', '12 cenários de identidade e faturamento'],
   ['funcoes.js', 'reparo, aviso, limpeza e sentinela'],
+  ['cartela.js', 'CARTELA = NÃO: supervisão, registro e relatório'],
   ['tela.js', 'tela no Chromium']
 ];
 

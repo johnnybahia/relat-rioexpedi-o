@@ -116,6 +116,9 @@ const HISTORICO_HEADERS      = ['DATA_HORA', 'EVENTO', 'USUARIO', 'ORIGEM', 'ID_
 // "PENDENTE|data|motivo" = aguardando alguém responder o aviso; "ABERTO|usuário|data" = usuário
 // disse que continua aberto; "FATURADO|…", "CANCELADO|…", "DUPLICATA|…" = registro da decisão.
 const DB_CONFERENCIA_SAIDA_COL = 25;
+// AA (coluna 27) — item com CARTELA = NÃO marcado para faturar com autorização da supervisão.
+// JSON por perfil, como a coluna V: {"BAIXA1":"SUPERVISOR|USUARIO|dd/MM/yyyy HH:mm"}. Some ao desmarcar e no reset de ciclo.
+const DB_LIBERADO_SEM_CARTELA_COL = 26;
 
 // ====== TRAVAS DO AUTO-FATURAMENTO POR SAÍDA DA FONTE ======
 // Um item que some de PEDIDOS e de DADOS_IMPORTADOS saiu do sistema de origem e deve virar
@@ -4570,6 +4573,9 @@ function sincronizarDados() {
       idsParaLimparUsuario.forEach(({ linha }) => {
         dbSheet.getRange(linha, MARCAR_FATURAR_USUARIO_COL + 1).setValue('');
         dbSheet.getRange(linha, LOTE_EMISSAO_COL + 1).setValue('');
+        if (dbSheet.getMaxColumns() > DB_LIBERADO_SEM_CARTELA_COL) {
+          dbSheet.getRange(linha, DB_LIBERADO_SEM_CARTELA_COL + 1).setValue('');
+        }
       });
       Logger.log(`   🧹 MARCAR_FATURAR_USUARIO e LOTE_EMISSAO limpos para ${idsParaLimparUsuario.length} item(ns) com reset de ciclo`);
     }
@@ -5074,6 +5080,24 @@ function _linhaComLargura_(row, n) {
 function _statusFinal_(status) {
   const s = String(status || '').trim();
   return s === 'Faturado' || s === 'Finalizado' || s === 'Excluido';
+}
+
+/** CARTELA = NÃO (aceita "Não", "NAO", " não " etc.). Qualquer outro valor não conta. */
+function _cartelaEhNao_(valor) {
+  return String(valor === null || valor === undefined ? '' : valor)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase() === 'NAO';
+}
+
+/** Coluna AA → { PERFIL: 'SUPERVISOR|USUARIO|data' }. Texto inválido vira {}. */
+function _lerLiberacaoSemCartela_(valor) {
+  const s = String(valor === null || valor === undefined ? '' : valor).trim();
+  if (!s) return {};
+  try {
+    const j = JSON.parse(s);
+    return (j && typeof j === 'object' && !Array.isArray(j)) ? j : {};
+  } catch (e) {
+    return {};
+  }
 }
 
 /** Monta o texto da coluna Z: TIPO|quem|dd/MM/yyyy HH:mm|detalhe */
@@ -6442,7 +6466,8 @@ const RELATORIO_DB_HEADERS = [
   'LOTE_EMISSAO',           // W - lote de emissão do relatório de faturamento (FAT-001, FAT-002…)
   'PERFIL_EMISSAO',         // X - perfil de baixa (BAIXA1…BAIXA5)
   'SEQUENCIA',              // Y - sequência do item dentro da OC conforme aba "original" (fixa)
-  'CONFERENCIA_SAIDA'       // Z - conferência de item que saiu da origem sem marcação (DB_CONFERENCIA_SAIDA_COL)
+  'CONFERENCIA_SAIDA',      // Z - conferência de item que saiu da origem sem marcação (DB_CONFERENCIA_SAIDA_COL)
+  'LIBERADO_SEM_CARTELA'    // AA - supervisão que liberou faturar item com CARTELA = NÃO (DB_LIBERADO_SEM_CARTELA_COL)
 ];
 
 /**
@@ -6588,6 +6613,7 @@ function _rowToItem_(row, displayRow, colMap, rowIndex) {
     PERFIL_EMISSAO:  getDisp('PERFIL_EMISSAO',  ''),
     SEQUENCIA:       getDisp('SEQUENCIA',       ''),
     CONFERENCIA_SAIDA: getDisp('CONFERENCIA_SAIDA', ''),
+    LIBERADO_SEM_CARTELA: getDisp('LIBERADO_SEM_CARTELA', ''),
     // Posição original em DADOS_IMPORTADOS — lida por índice fixo (col R = índice 17 no DB)
     posicaoFonte: (typeof row[DB_POSICAO_FONTE_COL] === 'number' && !isNaN(row[DB_POSICAO_FONTE_COL]))
       ? row[DB_POSICAO_FONTE_COL]
@@ -7089,7 +7115,7 @@ function repararFaturadosSemUsuario() {
 
 // ====== FUNÇÕES PARA MARCAR ITENS PARA FATURAMENTO ======
 
-function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil) {
+function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil, autorizacaoCartela) {
   try {
     const sheet = getSpreadsheet_().getSheetByName(DB_SHEET_NAME);
     const perfilNorm = String(perfil || 'BAIXA1').trim() || 'BAIXA1';
@@ -7097,8 +7123,14 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil) {
     if (!sheet) throw new Error("Aba DB não encontrada");
     const linhaNum = _resolverLinhaDoItem_(sheet, uniqueId, planilhaLinha);
 
-    // Lê cabeçalhos - força leitura de pelo menos 24 colunas (A-X)
-    const numCols = Math.max(sheet.getLastColumn(), 24);
+    // Coluna AA (LIBERADO_SEM_CARTELA) precisa existir fisicamente e ter cabeçalho antes da leitura
+    if (marcar && (sheet.getMaxColumns() <= DB_LIBERADO_SEM_CARTELA_COL
+        || String(sheet.getRange(1, DB_LIBERADO_SEM_CARTELA_COL + 1).getValue() || '').trim() !== 'LIBERADO_SEM_CARTELA')) {
+      _garantirHeadersRelatorio_DB_();
+    }
+
+    // Lê cabeçalhos - força leitura de pelo menos 24 colunas (A-X); AA só se já existir
+    const numCols = Math.min(Math.max(sheet.getLastColumn(), 24), sheet.getMaxColumns());
     const headers = sheet.getRange(1, 1, 1, numCols).getValues()[0];
     const colMap = _getColumnIndexes_(headers);
     let marcarCol = colMap['MARCAR_FATURAR'];
@@ -7125,6 +7157,26 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil) {
 
     // Lê linha atual uma vez (evita múltiplas chamadas de getRange)
     const rowData = sheet.getRange(linhaNum, 1, 1, numCols).getValues()[0];
+    const semCartelaCol = colMap['LIBERADO_SEM_CARTELA'] !== undefined ? colMap['LIBERADO_SEM_CARTELA'] : DB_LIBERADO_SEM_CARTELA_COL;
+    const cartelaCol = colMap['CARTELA'] !== undefined ? colMap['CARTELA'] : CARTELA_COL;
+    const semCartela = marcar && _cartelaEhNao_(rowData[cartelaCol]);
+
+    // Item com CARTELA = NÃO só é marcado com a supervisão identificada e a ciência do risco —
+    // conferido aqui no servidor, a tela sozinha não vale (página antiga, console).
+    let supervisor = '';
+    if (semCartela) {
+      supervisor = String((autorizacaoCartela && autorizacaoCartela.supervisor) || '').replace(/\s+/g, ' ').trim().replace(/\|/g, '/');
+      if (supervisor.length < 3 || !autorizacaoCartela || autorizacaoCartela.ciente !== true) {
+        Logger.log(`🚫 Marcação recusada: ID="${uniqueId}" tem CARTELA NÃO e veio sem autorização da supervisão`);
+        return {
+          success: false,
+          exigeSupervisor: true,
+          error: 'Item com CARTELA = NÃO: informe a supervisão que autorizou e confirme a ciência do risco (recarregue a tela se o aviso não apareceu).',
+          id: uniqueId,
+          linha: linhaNum
+        };
+      }
+    }
     const perfilAtualNoDb = perfilCol !== undefined ? String(rowData[perfilCol] || '').trim() : '';
 
     // Parse PERFIL_EMISSAO como lista (suporta múltiplos perfis separados por vírgula)
@@ -7173,10 +7225,44 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil) {
     const novoUsuarioJson   = perfisList.length > 0 ? JSON.stringify(usuarioJson) : '';
     const novoMarcar        = perfisList.length > 0 ? 'SIM' : '';
 
+    // Coluna AA: autorização por perfil (só existe enquanto o perfil está marcado)
+    const liberacao = _lerLiberacaoSemCartela_(rowData[semCartelaCol]);
+    if (semCartela) {
+      liberacao[perfilNorm] = [supervisor, String(usuario || '').trim().replace(/\|/g, '/'),
+        Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy HH:mm')].join('|');
+    } else {
+      delete liberacao[perfilNorm];
+    }
+    const novaLiberacao = (perfisList.length > 0 && Object.keys(liberacao).length > 0) ? JSON.stringify(liberacao) : '';
+    const valorAnteriorLiberacao = rowData.length > semCartelaCol ? rowData[semCartelaCol] : '';
+
     sheet.getRange(linhaNum, marcarCol + 1).setValue(novoMarcar);
     sheet.getRange(linhaNum, usuarioCol + 1).setValue(novoUsuarioJson);
     if (perfilCol !== undefined) {
       sheet.getRange(linhaNum, perfilCol + 1).setValue(novoPerfilEmissao);
+    }
+    if (semCartela || String(valorAnteriorLiberacao || '').trim() !== '') {
+      sheet.getRange(linhaNum, semCartelaCol + 1).setValue(novaLiberacao);
+    }
+
+    // Registro permanente de quem liberou. Sem o registro a marcação é desfeita (nunca marca sem rastro).
+    if (semCartela) {
+      _registrarDecisao_('FATURAR_SEM_CARTELA', usuario, 'marcação para faturar (tela)', rowData,
+        `Supervisão: ${supervisor} — cartela NÃO — perfil ${perfilNorm} — ciente do risco de devolução pelo cliente`);
+      if (!_gravarDecisoes_()) {
+        sheet.getRange(linhaNum, marcarCol + 1).setValue(rowData[marcarCol]);
+        sheet.getRange(linhaNum, usuarioCol + 1).setValue(rawUsuario);
+        if (perfilCol !== undefined) sheet.getRange(linhaNum, perfilCol + 1).setValue(perfilAtualNoDb);
+        sheet.getRange(linhaNum, semCartelaCol + 1).setValue(valorAnteriorLiberacao);
+        SpreadsheetApp.flush();
+        limparCache();
+        return {
+          success: false,
+          error: 'Não foi possível gravar o registro da liberação sem cartela — o item NÃO foi marcado. Tente de novo.',
+          id: uniqueId,
+          linha: linhaNum
+        };
+      }
     }
 
     // Limpa lote de emissão apenas quando nenhum perfil restar
@@ -7366,7 +7452,8 @@ function obterItensMarcadosParaFaturar(perfil) {
     }
 
     // Força leitura de pelo menos 25 colunas (A-Y) para incluir PERFIL_EMISSAO e SEQUENCIA
-    const lastCol = Math.max(sheet.getLastColumn(), 25);
+    // (AA = LIBERADO_SEM_CARTELA vem junto quando o cabeçalho já existe)
+    const lastCol = Math.min(Math.max(sheet.getLastColumn(), 25), sheet.getMaxColumns());
     Logger.log(`📊 Lendo ${lastCol} colunas (forçado mínimo 25)`);
 
     const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
@@ -7455,6 +7542,9 @@ function obterItensMarcadosParaFaturar(perfil) {
             LOTE:            item.LOTE            || '',
             PERFIL_EMISSAO:  item.PERFIL_EMISSAO  || '',
             SEQUENCIA:       item.SEQUENCIA       || '',
+            SEM_CARTELA:     _cartelaEhNao_(item.CARTELA),
+            // "SUPERVISOR|USUARIO|data" do perfil do relatório; vazio = sem autorização registrada
+            LIBERADO_SEM_CARTELA: String(_lerLiberacaoSemCartela_(item.LIBERADO_SEM_CARTELA)[perfilNorm] || ''),
             SALDO: saldo
           };
 

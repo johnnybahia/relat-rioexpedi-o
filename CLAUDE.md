@@ -67,7 +67,7 @@ aba `RELATÓRIO GERAL DA PRODUÇÃO1` (constantes `SOURCE_ID`/`SOURCE_SHEET` em 
 |---|---|---|
 | `DADOS_IMPORTADOS` | Intermediária com dados da fonte externa | Atualizada via `importarDadosExternos()`. Célula H2 = timestamp (guard de sync) |
 | `PEDIDOS` | Dados sincronizados e enriquecidos | IDs gerados aqui. Col A = ID_UNICO. Dados começam linha 4 |
-| `Relatorio_DB` | Banco de dados final usado pela UI | 26 colunas (A-Z). Cabeçalhos em `RELATORIO_DB_HEADERS`; coluna nova entra sozinha via `_garantirHeadersRelatorio_DB_` (insere colunas físicas se faltar) |
+| `Relatorio_DB` | Banco de dados final usado pela UI | 27 colunas (A-AA). Cabeçalhos em `RELATORIO_DB_HEADERS`; coluna nova entra sozinha via `_garantirHeadersRelatorio_DB_` (insere colunas físicas se faltar) |
 | `CONFIGURAÇÕES` | Configuração editável pelo usuário | B2 = hora (0-23) da limpeza diária, padrão 11. **B4 = modo `SIMULACAO`/`ATIVO`** (vazio → `SIMULACAO`). A3/A4 são texto, regravados pelo código (`_atualizarTextosConfiguracoes_`). **Não existe célula de dias** |
 | `Auditoria_Sincronizacao` | Registro do que o sistema fez ou faria (modo simulação) | DATA_HORA · MODO · TIPO · ID · DETALHE. Criada sozinha; guarda as últimas 5.000 linhas (tipos em 15.19) |
 | `Reparo_Faturados` | Resultado do menu "🩹 Reparar faturados sem usuário" | Append; lista o que voltou para conferência e os pares com gêmea para decisão manual |
@@ -85,7 +85,7 @@ aba `RELATÓRIO GERAL DA PRODUÇÃO1` (constantes `SOURCE_ID`/`SOURCE_SHEET` em 
 
 ```
 0  A  ID_UNICO              ← gerado por sincronizarPedidosComFonte
-1  B  CARTELA               (OK / vazio)
+1  B  CARTELA               (OK / NÃO — linha com CARTELA vazia é ruído e nem entra no sistema). NÃO dispara o alerta de 15.20
 2  C  CLIENTE
 3  D  CÓD. FILIAL           ← esta coluna NÃO existe no Relatorio_DB (gap)
 4  E  PEDIDO
@@ -147,6 +147,9 @@ aba `RELATÓRIO GERAL DA PRODUÇÃO1` (constantes `SOURCE_ID`/`SOURCE_SHEET` em 
                              PENDENTE (saiu da origem sem marcação — aguarda usuário), ABERTO (usuário disse
                              "continua aberto" — não pergunta de novo), FATURADO/CANCELADO/DUPLICATA (decisão
                              registrada). Vazia = nada a conferir. Some sozinha se o item volta à origem.
+26 AA LIBERADO_SEM_CARTELA ← DB_LIBERADO_SEM_CARTELA_COL=26. JSON por perfil, como a col V:
+                             {"BAIXA1":"SUPERVISOR|USUARIO|dd/MM/yyyy HH:mm"}. Só existe para item com CARTELA = NÃO
+                             marcado para faturar (15.20). Some ao desmarcar e no reset de ciclo
 ```
 
 ## 5. COLUNAS — Baixas_Historico
@@ -173,6 +176,7 @@ DATA_STATUS_COL = 16            // col Q
 PEDIDOS_LOTE_COL = DB_LOTE_COL = 20 // col U (LOTE, col Y da fonte)
 DB_SEQUENCIA_COL = 24           // col Y
 DB_CONFERENCIA_SAIDA_COL = 25   // col Z
+DB_LIBERADO_SEM_CARTELA_COL = 26 // col AA
 DIAS_RETENCAO = 15              // só no modo SIMULACAO (regra antiga da limpeza); ATIVO apaga tudo (15.18)
 CONFIG_SHEET_NAME = 'CONFIGURAÇÕES', CONFIG_HORA_LIMPEZA_CELL = 'B2', CONFIG_HORA_LIMPEZA_PADRAO = 11
 CONFIG_MODO_CELL = 'B4', CONFIG_MODO_PADRAO = 'SIMULACAO'   // lido por _modoAtivo_() (cache por execução)
@@ -486,7 +490,7 @@ linha; sem a trava em 20 s, gravam linha a linha com `appendRow` (atômica).
 ### Chamadas ao backend (`google.script.run`)
 ```javascript
 fetchAllDataUnified(cacheBuster)              // carrega todos os dados
-marcarParaFaturar(id, linha, marcar, user)   // marca/desmarca para NF
+marcarParaFaturar(id, linha, marcar, user, perfil, autorizacaoCartela) // marca/desmarca para NF; autorizacaoCartela = {supervisor, ciente:true}, obrigatória se CARTELA = NÃO (15.20)
 aplicarBaixa(id, linha, qtd, user)           // registra baixa parcial
 obterHistoricoSessaoBaixas(id)               // histórico da sessão atual
 estornarBaixa(id, linhaDB, linhaHist, qtd)  // estorna baixa específica
@@ -522,6 +526,7 @@ DESCRIÇÃO (sem `[uuid]`) · TAMANHO · LOTE · QTD. ABERTA · LOTE_EMISSAO (FA
 | `FATURADO` `CANCELADO` `DUPLICATA` `ABERTO` | resposta ao aviso (`confirmarSaidaFonte`) | login da tela |
 | `FATURADO` | sync: marcado + saiu da origem — registrado **depois** de gravado | col V formatada: `EVELINE (BAIXA1)` |
 | `EXCLUIDO` | tela "excluir inativos" (`excluirItem`) | login da tela (`não informado` se a página antiga não enviar) |
+| `FATURAR_SEM_CARTELA` | `marcarParaFaturar`: item com CARTELA = NÃO marcado com a supervisão identificada (15.20) | login da tela; DETALHE = `Supervisão: NOME — cartela NÃO — perfil — ciente do risco de devolução` |
 | `REABERTO` | menu 🩹 reparo | conta Google de quem rodou (`menu` se o Google não informar) |
 | `APAGADO_NA_LIMPEZA` | `purgarItensFinalizados`, **antes** de apagar, nos dois modos | nome da col Z (decisão) ou da col V (marcação); `sem nome na linha` |
 
@@ -551,6 +556,7 @@ handleMarcarFaturar(id, linha, true)
 ### Modais principais
 - `baixaModal` — baixa parcial: mostra histórico + campo para nova entrada
 - `baixaConfirmacaoModal` — após baixa parcial: opção TOTAL (zera) ou PARCIAL (mantém)
+- `cartelaModal` — item com CARTELA = NÃO: abre ao marcar o checkbox (ou Espaço), antes de qualquer pergunta de baixa; não fecha por ESC nem clique fora (15.20)
 - `alertaFaturamentoModal` — desligado desde `ce75202` (06/05/2026): `display:none !important` (15.8)
 - `filtroUsuarioFaturModal` — filtra itens por usuário antes de imprimir
 - `filtroMarcaFaturModal` — filtra por marca/INFO_X antes de imprimir
@@ -871,6 +877,26 @@ faz a irmã marcada/zerada ser a que "saiu" — o dano máximo é um aviso, nunc
   (`ULTIMA_LIMPEZA_FATURADOS_DATA`) — tenta de novo na execução seguinte. Nunca apaga sem cópia.
 - A3/A4 da aba são texto regravado pelo código — não controlam nada.
 
+### 15.20 Item com CARTELA = NÃO marcado para faturar (30/10/2026)
+- **Tela:** `handleMarcarFaturar` → se `data-item-cartela` normalizado (sem acento, maiúscula) é `NAO` abre `#cartelaModal`
+  antes da pergunta de baixa. Só sai por **Confirmar** (nome do supervisor ≥ 3 letras + caixa de ciência) ou **Cancelar**
+  (desmarca o checkbox, nada é gravado). ESC e clique fora só sacodem a caixa; Tab fica preso no modal; o atalho Espaço
+  das linhas fica bloqueado enquanto aberto. A autorização `{supervisor, ciente:true}` segue como 6º argumento por
+  `_fluxoMarcarFaturar` → `_aplicarBaixaTotalEMarcar` → `_executarMarcarFaturar` → `marcarParaFaturar`.
+- **Servidor decide** (a tela não basta): `marcarParaFaturar` lê a CARTELA da própria linha; `NÃO` sem supervisor (≥ 3
+  letras) e `ciente === true` → `{ success:false, exigeSupervisor:true }`, linha intacta. Desmarcar nunca pede nada.
+- **Registro:** grava a col AA (por perfil) e o evento `FATURAR_SEM_CARTELA` no `Historico_Decisoes` (permanente). Se o
+  histórico não gravar, a marcação é **desfeita** e o usuário vê erro — nunca marca sem rastro. Cada nova marcação exige
+  nova confirmação e gera novo registro (inclusive depois de reset de ciclo, que limpa a col AA junto com V e W).
+- **Relatório de faturamento:** `obterItensMarcadosParaFaturar` devolve `SEM_CARTELA` (cartela NÃO) e `LIBERADO_SEM_CARTELA`
+  (`SUPERVISOR|USUARIO|data` do perfil do relatório). O PDF mostra faixa vermelha no topo ("N itens sem cartela — X
+  liberados pela supervisão"), a linha em vermelho com selo `SEM CARTELA` e "Liberado sem cartela — supervisão: NOME · data".
+  Item marcado **antes** desta regra (sem col AA) sai como "autorização da supervisão NÃO registrada".
+- **Limites:** o nome do supervisor é declaração do usuário (sem senha) e o login vem da sessão do navegador — atribuição,
+  não prova forte (seção 14). Valor de CARTELA diferente de `NÃO` (inclusive ausente) não dispara o alerta. Se a origem
+  corrigir a cartela para OK depois, a marcação existente não é revogada; o histórico guarda a cartela do momento.
+- Testes: `testes/cartela.js` (servidor) e a seção "alerta de CARTELA" de `testes/tela.js` (modal + relatório).
+
 ### 15.19 Modo SIMULACAO × ATIVO (`CONFIGURAÇÕES!B4`) e auditoria
 | Muda com B4 | SIMULACAO (padrão) | ATIVO |
 |---|---|---|
@@ -995,8 +1021,9 @@ Relatorio_DB), roda o `Código.gs` de verdade e confere o resultado nos dois mod
 |---|---|
 | `testes/dados_reais.js` | Em cada base: 2ª rodada do sync com a mesma origem não muda nada; nenhum Faturado sem usuário; nenhum ID/UUID repetido novo; base padrão: 1ª rodada não troca ID |
 | `testes/cenarios.js` | 12 situações do dia a dia: irmã marcada sai (incidente 28/09), DESCRIÇÃO corrigida (1 linha e grupo inteiro), lote novo ao lado de faturado, saída com/sem marcação, importação truncada, faturamento parcial entre irmãs, pendência que volta, reordenação, lote novo no grupo, troca de OC. Em todos: nenhum Faturado sem usuário novo e, no `Historico_Decisoes`, todo Faturado novo registrado com o usuário e nenhum faturamento registrado que não aconteceu |
+| `testes/cartela.js` | Item com CARTELA = NÃO: recusa sem supervisor/ciência (incl. "Não", "NAO", espaços), marca com autorização e grava `FATURAR_SEM_CARTELA` + col AA, dois perfis, desmarcar, histórico indisponível → marcação desfeita, reset de ciclo limpa a AA, payload do relatório |
 | `testes/funcoes.js` | Sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos; `Historico_Decisoes`: respostas do aviso, reparo, marcação, desmarcado durante o sync (não registra), exclusão com/sem login, gravação sem a trava (appendRow), cópia de cada linha apagada com o nome, falha na cópia → nada apagado e o processo automático não marca o dia |
-| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê. Sem Playwright → pulado |
+| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê; alerta de CARTELA NÃO (ESC/clique fora não fecham, Confirmar só com supervisor + ciência, Cancelar desmarca, autorização enviada ao servidor) e HTML do relatório de faturamento. Sem Playwright → pulado |
 | `testes/rodar_todos.js` | Roda tudo; placar; código 1 se falhar (~1 min) |
 
 **Quando rodar:** antes de todo commit que mexa em `Código.gs`, `index.html` ou `testes/`. O hook
