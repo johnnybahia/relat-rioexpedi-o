@@ -2389,7 +2389,7 @@ ALL_OCS_ITEMS = itemsObj;
                 bodyHtml += `
                         <td class="nowrap">${item.CARTELA ?? 'N/A'}</td>
                         <td class="nowrap">${item['CÓD. CLIENTE'] ?? 'N/A'}</td>
-                        <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}${_seloConferenciaSaida(item)}</td>
+                        <td class="description-col">${item.DESCRIÇÃO ?? 'N/A'}${item.SEQUENCIA ? ` <span class="seq-na-oc" title="Posição do item na OC (pedido original)" style="font-size:11px;font-weight:700;color:#555;background:#eef1f5;border-radius:4px;padding:1px 5px;white-space:nowrap;">Seq. ${_escapeHtml(String(item.SEQUENCIA))}</span>` : ''}${_seloConferenciaSaida(item)}</td>
                         <td class="nowrap">${item.TAMANHO ?? 'N/A'}</td>
                         <td class="nowrap">${fmtInt(qtdOriginal)}</td>
                         <td class="nowrap qtd-aberta">${fmtInt(qtdAberta)}</td>
@@ -2708,6 +2708,7 @@ ALL_OCS_ITEMS = itemsObj;
                     <span><b>Descrição:</b> ${e(p.descricao)}</span>
                     <span><b>Tamanho:</b> ${e(p.tamanho)}</span>
                     <span><b>Lote:</b> ${e(p.lote || '—')}</span>
+                    ${p.sequencia ? `<span><b>Seq. na OC:</b> ${e(p.sequencia)}</span>` : ''}
                     <span><b>Qtd. aberta:</b> ${fmtInt(qtdAb)} (${baixas})</span>
                     <span><b>Saiu da origem em:</b> ${e(p.saiuEm || '—')}</span>
                     <span><b>Motivo:</b> ${e(_textoMotivoSaida(p.motivo))}</span>

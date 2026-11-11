@@ -923,6 +923,15 @@ inexplicável. A bateria de simulação (`testes/`, seção 18) cobre os dois mo
 
 ---
 
+### 15.21 Sequência do item na OC (SEQUENCIA, col Y) — corrigida em 11/11/2026
+- **Bug:** a aba `original` (IMPORTRANGE de `PEDIDO ATUALIZADO!A3:X5000`, planilha "ATUALIZAR RELATÓRIO DE PEDIDOS") ganhou a coluna "Lote Dilly" e a N virou DIAS (muda todo dia). A chave usava índices fixos: 0 de 2.668 linhas casavam e a sequência nunca foi gravada (2.669 abertos sem número).
+- **Agora:** `_layoutOriginal_` acha as colunas pelo cabeçalho (sem cabeçalho → layout legado); a chave é PEDIDO, CÓD. CLIENTE, MARFIM, DESCRIÇÃO, TAM, OC, QTD, OS, DATA RECEB. (sem lote, sem DIAS).
+- **A `original` é lista viva (encolhe quando itens são faturados):** numerar OC antiga dá número errado e permanente. Só recebem sequência OCs **recebidas a partir de `SEQUENCIA_DATA_CORTE` (11/11/2026)** e que tenham na `original` ao menos tantas linhas quanto em DADOS_IMPORTADOS. OC antiga/incompleta fica **sem número** de propósito (OC 16190548 tem Seq 1..26 só no PDF do pedido).
+- Menu "🔢 Diagnóstico da sequência por OC" (só leitura). Sequência aparece na descrição do item (selo "Seq. N"), no aviso de conferência e no relatório de faturamento.
+- **Não portado do Bahia (pendente):** `BACKUP_SEQUENCIA`/restauração após RESET COMPLETO. No reset a col V de PEDIDOS é mantida (só a col A é limpa), então o risco é menor aqui; avaliar se virar problema. A sequência ainda **não** entra no casamento de linhas-irmãs (`_custoIrma_`).
+
+---
+
 ## 16. SEQUÊNCIA SEGURA PARA MUDANÇAS
 
 Antes de qualquer alteração no código, verificar:
@@ -1021,6 +1030,7 @@ Relatorio_DB), roda o `Código.gs` de verdade e confere o resultado nos dois mod
 |---|---|
 | `testes/dados_reais.js` | Em cada base: 2ª rodada do sync com a mesma origem não muda nada; nenhum Faturado sem usuário; nenhum ID/UUID repetido novo; base padrão: 1ª rodada não troca ID |
 | `testes/cenarios.js` | 12 situações do dia a dia: irmã marcada sai (incidente 28/09), DESCRIÇÃO corrigida (1 linha e grupo inteiro), lote novo ao lado de faturado, saída com/sem marcação, importação truncada, faturamento parcial entre irmãs, pendência que volta, reordenação, lote novo no grupo, troca de OC. Em todos: nenhum Faturado sem usuário novo e, no `Historico_Decisoes`, todo Faturado novo registrado com o usuário e nenhum faturamento registrado que não aconteceu |
+| `testes/sequencia.js` | Sequência por OC: aba `original` no layout atual (cabeçalho, "Lote Dilly", DIAS) e no legado; OC nova e completa → col V/Y = 1..n; OC incompleta ou recebida antes do corte → sem número; 2ª rodada não muda |
 | `testes/cartela.js` | Item com CARTELA = NÃO: recusa sem supervisor/ciência (incl. "Não", "NAO", espaços), marca com autorização e grava `FATURAR_SEM_CARTELA` + col AA, dois perfis, desmarcar, histórico indisponível → marcação desfeita, reset de ciclo limpa a AA, payload do relatório |
 | `testes/funcoes.js` | Sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos; `Historico_Decisoes`: respostas do aviso, reparo, marcação, desmarcado durante o sync (não registra), exclusão com/sem login, gravação sem a trava (appendRow), cópia de cada linha apagada com o nome, falha na cópia → nada apagado e o processo automático não marca o dia |
 | `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê; alerta de CARTELA NÃO (ESC/clique fora não fecham, Confirmar só com supervisor + ciência, Cancelar desmarca, autorização enviada ao servidor) e HTML do relatório de faturamento. Sem Playwright → pulado |

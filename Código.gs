@@ -78,14 +78,17 @@ const ORIG_DATA_COL = 11; // L — Data
 // ====== SEQUÊNCIA DE ITENS POR OC (a partir da data de corte) ======
 const PEDIDOS_SEQ_ORIGINAL_COL  = 21; // V (coluna 22) — sequência do item dentro da OC conforme aba "original" (fixa, nunca recalculada)
 const DB_SEQUENCIA_COL          = 24; // Y (coluna 25) — sequência propagada do PEDIDOS para o Relatorio_DB (fixa)
-// Colunas da aba "original" que IDENTIFICAM cada item (C,D,E,F,G,H,I,J,K,N):
-// C=PEDIDO, D=CÓD. CLIENTE, E=CÓD. MARFIM, F=DESCRIÇÃO, G=TAMANHO, H=ORD. COMPRA, I=QTD, J=CÓD. OS, K=DATA RECEB., N=LOTE
-const ORIG_SEQ_KEY_COLS  = [2, 3, 4, 5, 6, 7, 8, 9, 10, 13];
+// Chave de identificação de um item (aba "original" ↔ DADOS_IMPORTADOS), SEM lote e SEM prazo/DIAS:
+// PEDIDO, CÓD. CLIENTE, CÓD. MARFIM (COD ITEM), DESCRIÇÃO, TAMANHO, OC, QTD, CÓD. OS, DATA RECEB.
+// Na aba "original" as colunas são achadas pelo CABEÇALHO (_layoutOriginal_): o layout mudou (entrou "Lote Dilly"
+// e a coluna N virou DIAS, que muda todo dia) e com índices fixos nenhum item casava (0 de 2.668 em 11/11/2026).
+const ORIG_SEQ_KEY_COLS_LEGADO = [2, 3, 4, 5, 6, 7, 8, 9, 10]; // layout antigo, sem cabeçalho: C,D,E,F,G,H,I,J,K
 // Mesmos campos em DADOS_IMPORTADOS (fonteRow, 0-based a partir da col B):
-// PEDIDO=3, CÓD. CLIENTE=4, MARFIM=5, DESC=6, TAM=7, OC=8, QTD=9, OS=10, DATA RECEB.=11, LOTE=23
-const FONTE_SEQ_KEY_COLS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 23];
-// Apenas itens com DATA RECEB. (data de entrada) a partir desta data recebem sequência
-const SEQUENCIA_DATA_CORTE = new Date(2026, 6, 9); // 09/07/2026
+// PEDIDO=3, CÓD. CLIENTE=4, MARFIM=5, DESC=6, TAM=7, OC=8, QTD=9, OS=10, DATA RECEB.=11
+const FONTE_SEQ_KEY_COLS = [3, 4, 5, 6, 7, 8, 9, 10, 11];
+// Só recebem sequência OCs recebidas a partir desta data. A aba "original" é uma lista VIVA (encolhe quando itens são
+// faturados): numerar OC antiga dá número errado e permanente (ex.: 1, 2, 3 para os itens 10, 13 e 14 da OC).
+const SEQUENCIA_DATA_CORTE = new Date(2026, 10, 11); // 11/11/2026
 
 const DIAS_RETENCAO = 15;      // Idade mínima (dias) para um item Faturado ser purgado.
 // A purga roda em um HORÁRIO FIXO, uma vez por dia — não a toda hora com prazo individual
@@ -187,6 +190,71 @@ function _normSeqVal_(v) {
 }
 
 // Chave de identificação de um item: junção normalizada das colunas indicadas.
+
+/**
+ * Menu: resume a numeração das OCs (só leitura). Mostra quantas OCs da aba "original" são elegíveis, quantos itens
+ * abertos do DB têm sequência e quantos itens elegíveis ainda estão sem número. Não grava nada.
+ */
+function diagnosticarSequencias() {
+  const ui = SpreadsheetApp.getUi();
+  const ss = getSpreadsheet_();
+  const orig = ss.getSheetByName(ORIGINAL_SHEET_NAME);
+  const db = ss.getSheetByName(DB_SHEET_NAME);
+  if (!orig || orig.getLastRow() < 1 || !db || db.getLastRow() < 2) { ui.alert('Sem dados', 'Aba "original" ou Relatorio_DB vazia.', ui.ButtonSet.OK); return; }
+  const od = orig.getRange(1, 1, orig.getLastRow(), Math.max(orig.getLastColumn(), 14)).getValues();
+  const lay = _layoutOriginal_(od);
+  const ocs = new Map();
+  od.forEach((r, i) => {
+    if (i < lay.inicio) return;
+    const oc = _normSeqVal_(r[ORIG_OC_COL]); if (!oc) return;
+    const ms = _dataEntradaMs_(r[lay.data]);
+    const o = ocs.get(oc) || { n: 0, min: Infinity };
+    o.n++; o.min = (ms === null) ? -Infinity : Math.min(o.min, ms); ocs.set(oc, o);
+  });
+  const corte = SEQUENCIA_DATA_CORTE.getTime();
+  const elegiveis = [...ocs.values()].filter(o => o.min >= corte).length;
+  const rows = db.getRange(2, 1, db.getLastRow() - 1, Math.min(DB_SEQUENCIA_COL + 1, db.getMaxColumns())).getValues();
+  let abertos = 0, comSeq = 0, semSeqElegivel = 0;
+  rows.forEach(r => {
+    if (String(r[STATUS_COL] || '').trim() !== 'Ativo') return;
+    abertos++;
+    if (_seqNum_(r[DB_SEQUENCIA_COL])) { comSeq++; return; }
+    const o = ocs.get(_normSeqVal_(r[DB_OC_COL]));
+    if (o && o.min >= corte) semSeqElegivel++;
+  });
+  ui.alert('🔢 Sequência por OC',
+    'Layout da aba "' + ORIGINAL_SHEET_NAME + '": ' + (lay.porCabecalho ? 'lido pelo cabeçalho' : 'LEGADO (cabeçalho não reconhecido)') +
+    '\nOCs na aba: ' + ocs.size + '\nOCs recebidas a partir de ' + _fmtSeqData_(SEQUENCIA_DATA_CORTE) + ': ' + elegiveis +
+    '\nItens abertos no DB: ' + abertos + '\n  com sequência: ' + comSeq + '\n  elegíveis ainda sem sequência: ' + semSeqElegivel +
+    '\n\nOCs recebidas antes do corte ficam sem sequência de propósito (a aba "original" encolhe e daria número errado).', ui.ButtonSet.OK);
+}
+// Sequência numérica válida (> 0) de uma célula, ou 0.
+function _seqNum_(v) {
+  const n = (typeof v === 'number') ? v : Number(String(v === null || v === undefined ? '' : v).trim() || NaN);
+  return (isFinite(n) && n > 0) ? n : 0;
+}
+function _fmtSeqData_(d) { return Utilities.formatDate(d, TZ, 'dd/MM/yyyy'); }
+
+// Normaliza cabeçalho: maiúscula, sem acento, só letras/números ("TAM." → "TAM", "DESCRIÇÃO" → "DESCRICAO").
+function _normCabecalhoSeq_(v) {
+  return String(v === null || v === undefined ? '' : v).trim().toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+
+/**
+ * Acha, pelo cabeçalho (nas 5 primeiras linhas), as colunas da aba "original" que formam a chave de identificação.
+ * Sem cabeçalho reconhecível → layout legado (sem cabeçalho, dados na linha 1).
+ * @returns {{inicio:number, key:number[], data:number, porCabecalho:boolean}} inicio = índice da 1ª linha de dados
+ */
+function _layoutOriginal_(origData) {
+  for (let r = 0; r < Math.min(origData.length, 5); r++) {
+    const h = origData[r].map(_normCabecalhoSeq_);
+    const c = ['PEDIDO', 'COD CLIENTE', 'COD ITEM', 'DESCRICAO', 'TAM', 'OC', 'QTD ABERTA', 'COD OS', 'DT RECEB'].map(n => h.indexOf(n));
+    if (c.every(x => x >= 0)) return { inicio: r + 1, key: c, data: c[8], porCabecalho: true };
+  }
+  return { inicio: 0, key: ORIG_SEQ_KEY_COLS_LEGADO, data: ORIG_SEQ_KEY_COLS_LEGADO[8], porCabecalho: false };
+}
+
 function _chaveSeqOriginal_(row, cols) {
   return cols.map(i => _normSeqVal_(row[i])).join('|');
 }
@@ -1049,6 +1117,7 @@ function onOpen() {
     .addItem('⏸ Pausar sistema (para editar dados)', 'pausarSistema')
     .addItem('▶ Retomar sistema', 'retomarSistema')
     .addSeparator()
+    .addItem('🔢 Diagnóstico da sequência por OC', 'diagnosticarSequencias')
     .addItem('🩹 Reparar faturados sem usuário (voltam para conferência)', 'repararFaturadosSemUsuario')
     .addItem('🔧 Corrigir Faturados com saldo aberto (reverter para Ativo)', 'corrigirFaturadosComSaldoAberto')
     .addItem('🧹 Remover duplicatas órfãs do Relatorio_DB (OC 488457)', 'limparDuplicatasOrfasDB')
@@ -1774,6 +1843,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
     // sua OC, na ordem da planilha. originalSeqFifo: chave de identificação (C,D,E,F,G,H,I,J,K,N)
     // → fila FIFO de slots {oc, seq}; itens 100% idênticos consomem um slot cada, em ordem.
     const originalSeqFifo = new Map();
+    const ocsElegiveisSeq = new Set(); // OCs completas na aba "original" e recebidas a partir de SEQUENCIA_DATA_CORTE
     try {
       const origSheet = getSpreadsheet_().getSheetByName(ORIGINAL_SHEET_NAME);
       if (origSheet && origSheet.getLastRow() >= 1) {
@@ -1787,9 +1857,17 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         }
         const origData = origSheet.getRange(1, 1, origLastRow, origNumCols).getValues();
         const seqContadorOc = {};
+        const layoutOrig = _layoutOriginal_(origData);
+        const origOcInfo = new Map(); // oc → {n, minMs}
         origData.forEach((row, origIdx) => {
+          if (origIdx < layoutOrig.inicio) return; // cabeçalho (IMPORTRANGE começa na linha do título)
           const oc = String(row[ORIG_OC_COL] || '').trim();
           if (!oc) return;
+          const _info_ = origOcInfo.get(_normSeqVal_(oc)) || { n: 0, minMs: Infinity };
+          const _ms_ = _dataEntradaMs_(row[layoutOrig.data]);
+          _info_.n++;
+          _info_.minMs = (_ms_ === null) ? -Infinity : Math.min(_info_.minMs, _ms_);
+          origOcInfo.set(_normSeqVal_(oc), _info_);
           const desc = String(row[ORIG_DESC_COL] || '').trim();
           const tam  = String(row[ORIG_TAM_COL]  || '').trim();
           const qtd  = String(row[ORIG_QTD_COL]  || '').trim();
@@ -1803,10 +1881,22 @@ function sincronizarPedidosComFonte(forcarExecucao) {
 
           // Numera o item dentro da sua OC (ordem da aba "original") e registra o slot
           seqContadorOc[oc] = (seqContadorOc[oc] || 0) + 1;
-          const chaveSeq = _chaveSeqOriginal_(row, ORIG_SEQ_KEY_COLS);
+          const chaveSeq = _chaveSeqOriginal_(row, layoutOrig.key);
           if (!originalSeqFifo.has(chaveSeq)) originalSeqFifo.set(chaveSeq, []);
           originalSeqFifo.get(chaveSeq).push({ oc: oc, seq: seqContadorOc[oc] });
         });
+        // Elegível: OC recebida a partir do corte E com ao menos tantas linhas na aba "original" quanto em
+        // DADOS_IMPORTADOS (se a original tem menos, itens já saíram dela e a posição seria errada).
+        const fonteContaOc = new Map();
+        fonteData.forEach(fr => {
+          if (!String(fr[0] || '').trim()) return;
+          const k = _normSeqVal_(fr[8]);
+          if (k) fonteContaOc.set(k, (fonteContaOc.get(k) || 0) + 1);
+        });
+        origOcInfo.forEach((info, k) => {
+          if (info.minMs >= SEQUENCIA_DATA_CORTE.getTime() && info.n >= (fonteContaOc.get(k) || 0)) ocsElegiveisSeq.add(k);
+        });
+        Logger.log(`🔢 Sequência: ${ocsElegiveisSeq.size} OC(s) elegível(is) de ${origOcInfo.size} na aba "${ORIGINAL_SHEET_NAME}" (layout ${layoutOrig.porCabecalho ? 'por cabeçalho' : 'legado'})`);
         Logger.log(`📐 ${originalPosMap.size} posições mapeadas da aba "${ORIGINAL_SHEET_NAME}"`);
         Logger.log(`🔢 ${originalSeqFifo.size} chaves de sequência indexadas (${Object.keys(seqContadorOc).length} OCs)`);
       } else {
@@ -2140,7 +2230,7 @@ function sincronizarPedidosComFonte(forcarExecucao) {
         const seqExistNum = (typeof seqExist === 'number') ? seqExist : Number(String(seqExist || '').trim() || NaN);
         if (isFinite(seqExistNum) && seqExistNum > 0) seqOriginal = seqExistNum;
       }
-      if (seqOriginal === '' && originalSeqFifo.size > 0) {
+      if (seqOriginal === '' && originalSeqFifo.size > 0 && ocsElegiveisSeq.has(_normSeqVal_(fonteRow[8]))) {
         const entradaMs = _dataEntradaMs_(fonteRow[11]); // M da fonte: DATA RECEB. (data de entrada)
         if (entradaMs !== null && entradaMs >= SEQUENCIA_DATA_CORTE.getTime()) {
           const chaveSeq = _chaveSeqOriginal_(fonteRow, FONTE_SEQ_KEY_COLS);
@@ -6759,6 +6849,7 @@ function fetchAllDataUnified(cacheBuster) {
         descricao: i['DESCRIÇÃO'],
         tamanho: i.TAMANHO,
         lote: lote,
+        sequencia: i.SEQUENCIA || '',
         qtdAberta: i['QTD. ABERTA'],
         qtdOriginal: i['QTD. ORIGINAL'],
         saiuEm: partes[2] || '',
