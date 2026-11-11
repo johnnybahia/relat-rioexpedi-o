@@ -1714,22 +1714,31 @@
     function buildAutocompleteData() {
         autocompleteData = ALL_OCS_INFO.map(oc => ({
             label: `${oc.ordCompra} - ${oc.cliente}`,
-            value: oc.ordCompra
+            value: oc.ordCompra,
+            _norm: _normSearch_(`${oc.ordCompra} - ${oc.cliente}`)
         }));
         console.log(`🔍 Dados de autocomplete construídos: ${autocompleteData.length} itens`);
     }
     
+    let _timerFiltroBusca = null;
+    let _ultimoTermoAplicado = null;
+    function agendarFiltroBusca() {
+        clearTimeout(_timerFiltroBusca);
+        if (_normSearch_($searchOC.value) === _ultimoTermoAplicado) return;
+        _timerFiltroBusca = setTimeout(aplicarFiltros, 250);
+    }
+
     $searchOC.addEventListener('input', (e) => {
         const term = _normSearch_(e.target.value);
         
         if (term.length < 1) {
             hideAutocomplete();
-            aplicarFiltros();
+            agendarFiltroBusca();
             return;
         }
         
         const matches = autocompleteData.filter(item => 
-            _normSearch_(item.label).includes(term)
+            item._norm.includes(term)
         ).slice(0, 10);
         
         if (matches.length > 0) {
@@ -1738,7 +1747,7 @@
             hideAutocomplete();
         }
         
-        aplicarFiltros();
+        agendarFiltroBusca();
     });
     
     $searchOC.addEventListener('keydown', (e) => {
@@ -2068,7 +2077,9 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     function aplicarFiltros() {
+        clearTimeout(_timerFiltroBusca);
         const searchTerm = _normSearch_($searchOC.value);
+        _ultimoTermoAplicado = searchTerm;
         const statusFilter = $filterStatus.value;
         const prazoFilter = $filterPrazo.value;
         const tipoFilter = document.querySelector('input[name="filter-tipo"]:checked')?.value || 'all';
