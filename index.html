@@ -1480,7 +1480,10 @@
     let autocompleteIndex = -1;
 
     // ==== AUTO-REFRESH CONFIGURATION ====
-    const AUTO_REFRESH_INTERVAL = 30000; // 30 segundos
+    // 19/11/2026: era 30 s, mas nunca rodava (ver canAutoRefresh). Cada atualização relê o Relatorio_DB inteiro no
+    // servidor (cacheBuster): 2 min por usuário é o meio-termo entre dado fresco e carga no Apps Script.
+    const AUTO_REFRESH_INTERVAL = 120000; // 2 minutos
+    const ATALHOS_TECLADO_LINHAS = false; // atalhos ↑↓ / Espaço / Esc nas linhas: desligados (ver o handler de teclado)
     const AUTO_REFRESH_TIMEOUT  = 25000; // watchdog: desiste após 25s sem resposta
     let autoRefreshEnabled = true;
     let _arTimeoutId   = null;  // setTimeout do próximo refresh
@@ -3593,8 +3596,12 @@ ALL_OCS_ITEMS = itemsObj;
 
     // Keyboard navigation - ↑↓ entre itens (linhas)
     document.addEventListener('keydown', (e) => {
-        if (!$confirmModal.classList.contains('hidden') ||
-            !$warningModal.classList.contains('hidden') ||
+        // Atalhos de linha (↑↓, Espaço = marcar para faturar, Esc) DESLIGADOS de propósito (19/11/2026). Nunca
+        // funcionaram: esta condição usava $confirmModal/$warningModal, que não existem, e toda tecla dava erro.
+        // Ligar mudaria a tela de todos (Espaço e ↑↓ deixariam de rolar a página) e criaria um jeito de marcar para
+        // faturar com uma tecla depois de clicar numa linha — o tipo de marcação sem querer que se quer evitar.
+        if (!ATALHOS_TECLADO_LINHAS) return;
+        if (_janelaAberta_() ||
             !$deleteAllModal.classList.contains('hidden') ||
             !$successModal.classList.contains('hidden') ||
             !document.getElementById('cartelaModal').classList.contains('hidden') ||
@@ -6074,20 +6081,24 @@ ALL_OCS_ITEMS = itemsObj;
 
     // Verifica se há modais abertos (única condição que bloqueia o refresh)
     function canAutoRefresh() {
-        const $relatorioModal = document.getElementById('relatorioModal');
-        const $nfModal = document.getElementById('nfModal');
-        const hasOpenModal =
-            !$confirmModal.classList.contains('hidden') ||
-            !$warningModal.classList.contains('hidden') ||
-            !$deleteAllModal.classList.contains('hidden') ||
-            !$successModal.classList.contains('hidden') ||
-            !$baixaModal.classList.contains('hidden') ||
-            !$etiquetaModal.classList.contains('hidden') ||
-            ($relatorioModal && !$relatorioModal.classList.contains('hidden')) ||
-            ($nfModal && !$nfModal.classList.contains('hidden')) ||
-            !$relatorioPonteirasModal.classList.contains('hidden');
+        // Qualquer janela aberta (.modal-overlay visível), o carregamento ou alguém digitando adiam o refresh (tenta de
+        // novo em 3 s). Antes a lista começava por $confirmModal/$warningModal, que não existem: a função dava erro na
+        // primeira chamada e a atualização automática morria — a tela só atualizava com F5/Atualizar (19/11/2026).
         const isLoading = !$loader.classList.contains('hidden');
-        return !hasOpenModal && !isLoading;
+        return !_janelaAberta_() && !isLoading && !_digitando_();
+    }
+
+    /** Alguma janela (.modal-overlay) visível? Sem retângulos = display:none (inclusive por !important). */
+    function _janelaAberta_() {
+        return Array.from(document.querySelectorAll('.modal-overlay')).some(m => m.getClientRects().length > 0);
+    }
+
+    /** Foco num campo de texto ou lista: um refresh no meio da digitação atrapalharia. */
+    function _digitando_() {
+        const el = document.activeElement;
+        if (!el) return false;
+        if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable) return true;
+        return el.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(String(el.type || '').toLowerCase());
     }
 
     // Limpa timers pendentes

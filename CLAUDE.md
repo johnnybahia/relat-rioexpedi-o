@@ -568,7 +568,7 @@ handleMarcarFaturar(id, linha, true)
 - `baixaModal` — baixa parcial: mostra histórico + campo para nova entrada
 - `baixaConfirmacaoModal` — após baixa parcial: opção TOTAL (zera) ou PARCIAL (mantém); ao marcar item parcial para
   faturar ganha título próprio e o botão CANCELAR (`showBaixaConfirmacaoModal(msg, onTotal, onParcial, onCancelar, titulo)`)
-- `cartelaModal` — item com CARTELA = NÃO: abre ao marcar o checkbox (ou Espaço), antes de qualquer pergunta de baixa; não fecha por ESC nem clique fora (15.20)
+- `cartelaModal` — item com CARTELA = NÃO: abre ao marcar o checkbox, antes de qualquer pergunta de baixa; não fecha por ESC nem clique fora (15.20). O atalho Espaço das linhas está desligado (15.22)
 - `alertaFaturamentoModal` — desligado desde `ce75202` (06/05/2026): `display:none !important` (15.8)
 - `filtroUsuarioFaturModal` — filtra itens por usuário antes de imprimir
 - `filtroMarcaFaturModal` — filtra por marca/INFO_X antes de imprimir
@@ -973,10 +973,14 @@ inexplicável. A bateria de simulação (`testes/`, seção 18) cobre os dois mo
      saber quem marcou e quando.
   7. Tela: o item só aparece marcado com P = SIM (antes bastava X); marcar item com baixa parcial abre TOTAL / PARCIAL /
      CANCELAR (no `confirm()` antigo o "Cancelar" marcava com o saldo parcial e o texto era igual ao da janela pós-baixa).
-- **Achado e NÃO corrigido (decisão pendente):** `index.html` usa `$confirmModal`/`$warningModal`, que não existem. O
-  handler de teclado (↑↓, Espaço, Esc) e `canAutoRefresh()` lançam `ReferenceError` — o atalho Espaço nunca funcionou e
-  a **atualização automática de 30 s morre na primeira tentativa** (só volta a contar após um recarregamento manual).
-  Corrigir liga um refresh a cada 30 s por usuário (mais leituras do DB quando o cache é limpo): decidir antes.
+- **Atualização automática (corrigida em 19/11, a pedido do usuário):** `index.html` usava `$confirmModal`/`$warningModal`,
+  que não existem — `canAutoRefresh()` lançava `ReferenceError` e a atualização de 30 s **morria na primeira tentativa**
+  (a tela só atualizava com F5/Atualizar, o que favorece agir sobre dado velho). Agora: a cada **2 min**
+  (`AUTO_REFRESH_INTERVAL`; cada refresh relê o DB inteiro no servidor por causa do `cacheBuster`), adiada com qualquer
+  `.modal-overlay` visível (`_janelaAberta_`), com o carregamento ou com alguém digitando (`_digitando_`).
+- **Atalhos de teclado das linhas** (↑↓, Espaço = marcar, Esc): o mesmo erro fazia o handler falhar em toda tecla — **nunca
+  funcionaram**. Ficaram desligados (`ATALHOS_TECLADO_LINHAS = false`): ligar mudaria a rolagem da página (Espaço/↑↓) e
+  criaria um jeito de marcar para faturar com uma tecla depois de clicar numa linha.
 
 ## 16. SEQUÊNCIA SEGURA PARA MUDANÇAS
 
@@ -1081,7 +1085,7 @@ Relatorio_DB), roda o `Código.gs` de verdade e confere o resultado nos dois mod
 | `testes/sequencia.js` | Sequência por OC: aba `original` no layout atual (cabeçalho, "Lote Dilly", DIAS) e no legado; OC nova e completa → col V/Y = 1..n; OC incompleta ou recebida antes do corte → sem número; 2ª rodada não muda |
 | `testes/cartela.js` | Item com CARTELA = NÃO (os itens ganham uma baixa antes de marcar, como na tela): recusa sem supervisor/ciência (incl. "Não", "NAO", espaços), marca com autorização e grava `FATURAR_SEM_CARTELA` + col AA, dois perfis, desmarcar, histórico indisponível → marcação desfeita, reset de ciclo limpa a AA, payload do relatório |
 | `testes/funcoes.js` | Marcação exige baixa no ciclo (recusa, MARCOU/DESMARCOU, SALDO do relatório) e `Utilities.formatDate` uma vez por data no sync (15.22); sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos; `Historico_Decisoes`: respostas do aviso, reparo, marcação, desmarcado durante o sync (não registra), exclusão com/sem login, gravação sem a trava (appendRow), cópia de cada linha apagada com o nome, falha na cópia → nada apagado e o processo automático não marca o dia |
-| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: marcar item parcial (TOTAL / PARCIAL / CANCELAR — cancelar não marca); aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê; alerta de CARTELA NÃO (ESC/clique fora não fecham, Confirmar só com supervisor + ciência, Cancelar desmarca, autorização enviada ao servidor) e HTML do relatório de faturamento. Sem Playwright → pulado |
+| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: marcar item parcial (TOTAL / PARCIAL / CANCELAR — cancelar não marca); atualização automática (sem erro, adia com janela aberta ou digitação, dispara a cada 2 min e busca os dados) e atalhos de teclado desligados; aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê; alerta de CARTELA NÃO (ESC/clique fora não fecham, Confirmar só com supervisor + ciência, Cancelar desmarca, autorização enviada ao servidor) e HTML do relatório de faturamento. Sem Playwright → pulado |
 | `testes/rodar_todos.js` | Roda tudo; placar; código 1 se falhar (~1 min) |
 
 **Quando rodar:** antes de todo commit que mexa em `Código.gs`, `index.html` ou `testes/`. O hook

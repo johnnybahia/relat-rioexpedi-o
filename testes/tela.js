@@ -271,6 +271,38 @@ function gerarPayload() {
         rel.check('a janela depois da baixa continua só com TOTAL e PARCIAL',
           await page.evaluate(() => { const b = document.getElementById('baixa-confirmacao-cancelar-btn'); return !!b && getComputedStyle(b).display === 'none'; }));
         await page.evaluate(() => hideBaixaConfirmacaoModal());
+
+        // ---- atualização automática (antes: canAutoRefresh dava erro — $confirmModal não existe — e o refresh morria) ----
+        const refresh = await page.evaluate(() => {
+          document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
+          $loader.classList.add('hidden');
+          if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+          const out = { intervalo: AUTO_REFRESH_INTERVAL };
+          try { out.livre = canAutoRefresh(); } catch (e) { out.erro = e.message; }
+          document.getElementById('successModal').classList.remove('hidden');
+          try { out.comJanela = canAutoRefresh(); } catch (e) { out.erro = e.message; }
+          document.getElementById('successModal').classList.add('hidden');
+          const busca = document.createElement('input'); document.body.appendChild(busca); busca.focus();
+          try { out.digitando = canAutoRefresh(); } catch (e) { out.erro = e.message; }
+          busca.remove();
+          const st = window.setTimeout, capturados = [];
+          window.setTimeout = (fn, ms, ...a) => { if (ms === AUTO_REFRESH_INTERVAL) { capturados.push(fn); return 0; } return st(fn, ms, ...a); };
+          try { scheduleAutoRefresh(); } finally { window.setTimeout = st; }
+          const antes = window.__calls.filter(c => c[0] === 'fetchAllDataUnified').length;
+          try { capturados.forEach(fn => fn()); } catch (e) { out.erro = e.message; }
+          out.agendou = capturados.length;
+          out.buscou = window.__calls.filter(c => c[0] === 'fetchAllDataUnified').length - antes;
+          return out;
+        });
+        rel.check('atualização automática: sem erro; adia com janela aberta ou com alguém digitando',
+          !refresh.erro && refresh.livre === true && refresh.comJanela === false && refresh.digitando === false, JSON.stringify(refresh));
+        rel.check('atualização automática a cada 2 min dispara e busca os dados no servidor',
+          refresh.intervalo === 120000 && refresh.agendou === 1 && refresh.buscou === 1, JSON.stringify(refresh));
+        await page.waitForTimeout(300);
+        const nMarcarTeclas = (await chamadas('marcarParaFaturar')).length;
+        await page.keyboard.press('ArrowDown'); await page.keyboard.press(' '); await page.keyboard.press('Escape');
+        await page.waitForTimeout(100);
+        rel.check('teclado: atalhos de linha desligados (nenhuma tecla marca para faturar)', (await chamadas('marcarParaFaturar')).length === nMarcarTeclas);
         if (capturas) {
           await page.setViewportSize({ width: 390, height: 800 });
           await page.waitForTimeout(200);
