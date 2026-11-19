@@ -11,7 +11,7 @@ const resumo = args.includes('--resumo');
 const repasse = args.filter(a => a !== '--resumo');
 const ETAPAS = [
   ['dados_reais.js', 'invariantes do sync nas bases'],
-  ['cenarios.js', '12 cenários de identidade e faturamento'],
+  ['cenarios.js', '14 cenários de identidade e faturamento'],
   ['funcoes.js', 'reparo, aviso, limpeza e sentinela'],
   ['sequencia.js', 'sequência por OC: layout da aba original, elegibilidade e propagação'],
   ['cartela.js', 'CARTELA = NÃO: supervisão, registro e relatório'],

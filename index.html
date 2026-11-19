@@ -587,12 +587,13 @@
   <div id="baixaConfirmacaoModal" class="modal-overlay hidden">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>📦 Baixa Registrada</h2>
+        <h2 id="baixa-confirmacao-titulo">📦 Baixa Registrada</h2>
       </div>
       <div class="modal-body">
-        <p id="baixa-confirmacao-msg" class="modal-message" style="text-align:center;"></p>
+        <p id="baixa-confirmacao-msg" class="modal-message" style="text-align:center; white-space:pre-line;"></p>
       </div>
       <div class="modal-footer">
+        <button id="baixa-confirmacao-cancelar-btn" class="modal-btn modal-btn-cancel" style="display:none;">CANCELAR</button>
         <button id="baixa-confirmacao-parcial-btn" class="modal-btn modal-btn-cancel">PARCIAL</button>
         <button id="baixa-confirmacao-total-btn" class="modal-btn modal-btn-confirm">TOTAL</button>
       </div>
@@ -1479,7 +1480,10 @@
     let autocompleteIndex = -1;
 
     // ==== AUTO-REFRESH CONFIGURATION ====
-    const AUTO_REFRESH_INTERVAL = 30000; // 30 segundos
+    // 19/11/2026: era 30 s, mas nunca rodava (ver canAutoRefresh). Cada atualização relê o Relatorio_DB inteiro no
+    // servidor (cacheBuster): 2 min por usuário é o meio-termo entre dado fresco e carga no Apps Script.
+    const AUTO_REFRESH_INTERVAL = 120000; // 2 minutos
+    const ATALHOS_TECLADO_LINHAS = false; // atalhos ↑↓ / Espaço / Esc nas linhas: desligados (ver o handler de teclado)
     const AUTO_REFRESH_TIMEOUT  = 25000; // watchdog: desiste após 25s sem resposta
     let autoRefreshEnabled = true;
     let _arTimeoutId   = null;  // setTimeout do próximo refresh
@@ -1538,9 +1542,13 @@
     const $baixaConfirmacaoParcialBtn = document.getElementById('baixa-confirmacao-parcial-btn');
     let _baixaConfirmacaoCallbacks = null;
 
-    function showBaixaConfirmacaoModal(msg, onTotal, onParcial) {
+    // onCancelar (opcional) mostra o botão CANCELAR — usado ao marcar item parcial para faturar, onde o
+    // "Cancelar" do confirm() antigo marcava mesmo assim (com o saldo parcial).
+    function showBaixaConfirmacaoModal(msg, onTotal, onParcial, onCancelar, titulo) {
         $baixaConfirmacaoMsg.textContent = msg;
-        _baixaConfirmacaoCallbacks = { onTotal, onParcial };
+        _baixaConfirmacaoCallbacks = { onTotal, onParcial, onCancelar };
+        document.getElementById('baixa-confirmacao-titulo').textContent = titulo || '📦 Baixa Registrada';
+        document.getElementById('baixa-confirmacao-cancelar-btn').style.display = onCancelar ? '' : 'none';
         $baixaConfirmacaoModal.classList.remove('hidden');
     }
 
@@ -1559,6 +1567,12 @@
         const cb = _baixaConfirmacaoCallbacks;
         hideBaixaConfirmacaoModal();
         if (cb && cb.onParcial) cb.onParcial();
+    });
+
+    document.getElementById('baixa-confirmacao-cancelar-btn').addEventListener('click', () => {
+        const cb = _baixaConfirmacaoCallbacks;
+        hideBaixaConfirmacaoModal();
+        if (cb && cb.onCancelar) cb.onCancelar();
     });
 
     // Modal de Baixa Parcial
@@ -2377,7 +2391,10 @@ ALL_OCS_ITEMS = itemsObj;
                 const itemId = `item-linha-${item.planilhaLinha}`;
                 const isFaturado = item.Status?.toLowerCase() === 'faturado';
                 const perfisMarcados = String(item.PERFIL_EMISSAO || '').split(',').map(function(p) { return p.trim(); }).filter(Boolean);
-                const isMarcadoFaturar = perfisMarcados.indexOf(_perfilAtual) !== -1;
+                // Marcado = MARCAR_FATURAR (col P) = SIM e o perfil na col X — a mesma regra do relatório.
+                // Só a col X não basta: o reset de ciclo antigo limpava P e deixava X preenchida.
+                const isMarcadoFaturar = String(item.MARCAR_FATURAR || '').trim().toUpperCase() === 'SIM'
+                    && perfisMarcados.indexOf(_perfilAtual) !== -1;
                 let usuarioQueMarkou = '';
                 if (isMarcadoFaturar) {
                     try {
@@ -3032,16 +3049,17 @@ ALL_OCS_ITEMS = itemsObj;
             return;
         }
 
-        // Tem baixa parcial — pergunta se fatura completo ou mantém o parcial
+        // Tem baixa parcial — três saídas reais. Antes era um confirm() em que "Cancelar" marcava com o saldo
+        // parcial (não havia como desistir) e o texto era igual ao da janela que aparece depois da baixa.
         if (qtdAberta < qtdOriginal) {
-            const faturarCompleto = confirm(
-                `Baixa parcial registrada — saldo atual: ${fmtInt(qtdAberta)} unidades.\n\nOK → Faturar completo (zera saldo)\nCancelar → Manter saldo parcial`
+            const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
+            showBaixaConfirmacaoModal(
+                `Baixado neste ciclo: ${fmtInt(qtdOriginal - qtdAberta)} · Saldo em aberto: ${fmtInt(qtdAberta)}\n\nTOTAL → dá baixa também no saldo e fatura tudo\nPARCIAL → fatura só o que já foi baixado\nCANCELAR → não marca`,
+                () => _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual, aut),
+                () => _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual, aut),
+                () => { if (checkbox) checkbox.checked = false; },
+                '🧾 Marcar para faturamento'
             );
-            if (faturarCompleto) {
-                _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual, aut);
-            } else {
-                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual, aut);
-            }
             return;
         }
 
@@ -3578,8 +3596,12 @@ ALL_OCS_ITEMS = itemsObj;
 
     // Keyboard navigation - ↑↓ entre itens (linhas)
     document.addEventListener('keydown', (e) => {
-        if (!$confirmModal.classList.contains('hidden') ||
-            !$warningModal.classList.contains('hidden') ||
+        // Atalhos de linha (↑↓, Espaço = marcar para faturar, Esc) DESLIGADOS de propósito (19/11/2026). Nunca
+        // funcionaram: esta condição usava $confirmModal/$warningModal, que não existem, e toda tecla dava erro.
+        // Ligar mudaria a tela de todos (Espaço e ↑↓ deixariam de rolar a página) e criaria um jeito de marcar para
+        // faturar com uma tecla depois de clicar numa linha — o tipo de marcação sem querer que se quer evitar.
+        if (!ATALHOS_TECLADO_LINHAS) return;
+        if (_janelaAberta_() ||
             !$deleteAllModal.classList.contains('hidden') ||
             !$successModal.classList.contains('hidden') ||
             !document.getElementById('cartelaModal').classList.contains('hidden') ||
@@ -5210,6 +5232,15 @@ ALL_OCS_ITEMS = itemsObj;
 
                 const itensMarcados = result.items || [];
 
+                // Marcados sem baixa desde o último faturamento (ex.: o ERP já faturou e a marcação ficou):
+                // o servidor os deixa fora para não faturar o saldo inteiro. alert() bloqueia: precisa ser lido.
+                const semBaixa = result.semBaixa || [];
+                if (semBaixa.length > 0) {
+                    const lista = semBaixa.slice(0, 15).map(it =>
+                        `• OC ${it['ORD. COMPRA']} · ${it['CÓD. CLIENTE']} · ${it.TAMANHO} · QTD aberta ${fmtInt(it['QTD. ABERTA'])} · ${it.MARCAR_FATURAR_USUARIO || 'sem usuário'}`).join('\n');
+                    alert(`${semBaixa.length} item(ns) marcado(s) SEM BAIXA desde o último faturamento ficaram FORA deste relatório — não há o que faturar neles. Confira e desmarque:\n\n${lista}${semBaixa.length > 15 ? '\n…' : ''}`);
+                }
+
                 // Itens marcados sem usuário: herança de versão antiga — limpa automaticamente
                 const semUsuario = itensMarcados.filter(it => !(it.MARCAR_FATURAR_USUARIO || '').trim());
                 if (semUsuario.length > 0) {
@@ -6050,20 +6081,24 @@ ALL_OCS_ITEMS = itemsObj;
 
     // Verifica se há modais abertos (única condição que bloqueia o refresh)
     function canAutoRefresh() {
-        const $relatorioModal = document.getElementById('relatorioModal');
-        const $nfModal = document.getElementById('nfModal');
-        const hasOpenModal =
-            !$confirmModal.classList.contains('hidden') ||
-            !$warningModal.classList.contains('hidden') ||
-            !$deleteAllModal.classList.contains('hidden') ||
-            !$successModal.classList.contains('hidden') ||
-            !$baixaModal.classList.contains('hidden') ||
-            !$etiquetaModal.classList.contains('hidden') ||
-            ($relatorioModal && !$relatorioModal.classList.contains('hidden')) ||
-            ($nfModal && !$nfModal.classList.contains('hidden')) ||
-            !$relatorioPonteirasModal.classList.contains('hidden');
+        // Qualquer janela aberta (.modal-overlay visível), o carregamento ou alguém digitando adiam o refresh (tenta de
+        // novo em 3 s). Antes a lista começava por $confirmModal/$warningModal, que não existem: a função dava erro na
+        // primeira chamada e a atualização automática morria — a tela só atualizava com F5/Atualizar (19/11/2026).
         const isLoading = !$loader.classList.contains('hidden');
-        return !hasOpenModal && !isLoading;
+        return !_janelaAberta_() && !isLoading && !_digitando_();
+    }
+
+    /** Alguma janela (.modal-overlay) visível? Sem retângulos = display:none (inclusive por !important). */
+    function _janelaAberta_() {
+        return Array.from(document.querySelectorAll('.modal-overlay')).some(m => m.getClientRects().length > 0);
+    }
+
+    /** Foco num campo de texto ou lista: um refresh no meio da digitação atrapalharia. */
+    function _digitando_() {
+        const el = document.activeElement;
+        if (!el) return false;
+        if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable) return true;
+        return el.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(String(el.type || '').toLowerCase());
     }
 
     // Limpa timers pendentes

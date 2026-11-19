@@ -214,4 +214,41 @@ for (const modo of ['SIMULACAO', 'ATIVO']) {
     rel.check('nenhum Ativo apagado', contar(env, 'Ativo') === ativosAntes);
   }
 }
+
+// Marcação exige baixa no ciclo (incidente de 18/11/2026) e custo da formatação de datas no sync
+for (const modo of ['SIMULACAO', 'ATIVO']) {
+  rel.secao(`marcação exige baixa no ciclo; datas no sync [${modo}]`);
+  const env = L.montar(base, modo);
+  const ctx = env.ctx;
+  let chamadas = 0;
+  const fd = ctx.Utilities.formatDate;
+  ctx.Utilities.formatDate = (...a) => { chamadas++; return fd(...a); };
+  L.sincronizar(env);
+  ctx.Utilities.formatDate = fd;
+  const linhas = L.ped(env).length - 3;
+  rel.check(`sync formata cada data uma vez: ${chamadas} chamadas para ${linhas} linhas (em 18/11 eram ~26 mil e a execução estourou)`,
+    chamadas < 200 && chamadas < linhas / 5, `${chamadas} chamadas`);
+
+  const alvo = L.db(env).slice(1).find(r => L.T(r[14]) === 'Ativo' && !L.T(r[15]) && Number(r[9]) >= 3 && L.T(r[1]).toUpperCase() === 'OK');
+  if (!alvo) { rel.pular('base sem item OK aberto com QTD >= 3'); continue; }
+  const id = L.T(alvo[0]), q = Number(alvo[9]);
+  const marcar = m => ctx.marcarParaFaturar(id, L.db(env).findIndex(r => L.T(r[0]) === id) + 1, m, 'ANA', 'BAIXA1');
+  const zerarCaches = () => vm.runInContext('_qtdOriginalCache_ = null; _saldoEfetivoCache_ = null; _ultimaQtdOriginalCache_ = null;', ctx);
+  const r0 = marcar(true);
+  rel.check('recusa marcar QTD aberta sem baixa no ciclo', r0.success === false && r0.semBaixaNoCiclo === true, JSON.stringify(r0));
+  L.registrarBaixa(env, id, 2, q - 2, q);
+  L.alterarDb(env, id, { 9: q - 2 });
+  zerarCaches();
+  const r1 = marcar(true);
+  rel.check('com baixa no ciclo marca e registra MARCOU com o baixado',
+    r1.success === true && L.historico(env, 'MARCOU').some(h => L.T(h[4]) === id && h[2] === 'ANA' && /baixado no ciclo: 2/.test(h[14])), JSON.stringify(r1));
+  const it = ctx.obterItensMarcadosParaFaturar('BAIXA1').items.find(i => i.uniqueId === id);
+  rel.check('relatório: SALDO = o baixado no ciclo (2)', it && it.SALDO === 2, JSON.stringify(it && it.SALDO));
+  marcar(false);
+  rel.check('desmarcar registra DESMARCOU', L.historico(env, 'DESMARCOU').some(h => L.T(h[4]) === id));
+  env.ss.getSheetByName('Baixas_Historico').data.push([id, new Date(), 0, q - 2, q - 2, 'FATURAMENTO', 'CHECKPOINT']);
+  zerarCaches();
+  const r2 = marcar(true);
+  rel.check('recusa depois da NF (último registro = CHECKPOINT): tela desatualizada', r2.success === false && r2.semBaixaNoCiclo === true, JSON.stringify(r2));
+}
 rel.fim();
