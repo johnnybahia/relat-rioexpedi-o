@@ -587,12 +587,13 @@
   <div id="baixaConfirmacaoModal" class="modal-overlay hidden">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>📦 Baixa Registrada</h2>
+        <h2 id="baixa-confirmacao-titulo">📦 Baixa Registrada</h2>
       </div>
       <div class="modal-body">
-        <p id="baixa-confirmacao-msg" class="modal-message" style="text-align:center;"></p>
+        <p id="baixa-confirmacao-msg" class="modal-message" style="text-align:center; white-space:pre-line;"></p>
       </div>
       <div class="modal-footer">
+        <button id="baixa-confirmacao-cancelar-btn" class="modal-btn modal-btn-cancel" style="display:none;">CANCELAR</button>
         <button id="baixa-confirmacao-parcial-btn" class="modal-btn modal-btn-cancel">PARCIAL</button>
         <button id="baixa-confirmacao-total-btn" class="modal-btn modal-btn-confirm">TOTAL</button>
       </div>
@@ -1538,9 +1539,13 @@
     const $baixaConfirmacaoParcialBtn = document.getElementById('baixa-confirmacao-parcial-btn');
     let _baixaConfirmacaoCallbacks = null;
 
-    function showBaixaConfirmacaoModal(msg, onTotal, onParcial) {
+    // onCancelar (opcional) mostra o botão CANCELAR — usado ao marcar item parcial para faturar, onde o
+    // "Cancelar" do confirm() antigo marcava mesmo assim (com o saldo parcial).
+    function showBaixaConfirmacaoModal(msg, onTotal, onParcial, onCancelar, titulo) {
         $baixaConfirmacaoMsg.textContent = msg;
-        _baixaConfirmacaoCallbacks = { onTotal, onParcial };
+        _baixaConfirmacaoCallbacks = { onTotal, onParcial, onCancelar };
+        document.getElementById('baixa-confirmacao-titulo').textContent = titulo || '📦 Baixa Registrada';
+        document.getElementById('baixa-confirmacao-cancelar-btn').style.display = onCancelar ? '' : 'none';
         $baixaConfirmacaoModal.classList.remove('hidden');
     }
 
@@ -1559,6 +1564,12 @@
         const cb = _baixaConfirmacaoCallbacks;
         hideBaixaConfirmacaoModal();
         if (cb && cb.onParcial) cb.onParcial();
+    });
+
+    document.getElementById('baixa-confirmacao-cancelar-btn').addEventListener('click', () => {
+        const cb = _baixaConfirmacaoCallbacks;
+        hideBaixaConfirmacaoModal();
+        if (cb && cb.onCancelar) cb.onCancelar();
     });
 
     // Modal de Baixa Parcial
@@ -2377,7 +2388,10 @@ ALL_OCS_ITEMS = itemsObj;
                 const itemId = `item-linha-${item.planilhaLinha}`;
                 const isFaturado = item.Status?.toLowerCase() === 'faturado';
                 const perfisMarcados = String(item.PERFIL_EMISSAO || '').split(',').map(function(p) { return p.trim(); }).filter(Boolean);
-                const isMarcadoFaturar = perfisMarcados.indexOf(_perfilAtual) !== -1;
+                // Marcado = MARCAR_FATURAR (col P) = SIM e o perfil na col X — a mesma regra do relatório.
+                // Só a col X não basta: o reset de ciclo antigo limpava P e deixava X preenchida.
+                const isMarcadoFaturar = String(item.MARCAR_FATURAR || '').trim().toUpperCase() === 'SIM'
+                    && perfisMarcados.indexOf(_perfilAtual) !== -1;
                 let usuarioQueMarkou = '';
                 if (isMarcadoFaturar) {
                     try {
@@ -3032,16 +3046,17 @@ ALL_OCS_ITEMS = itemsObj;
             return;
         }
 
-        // Tem baixa parcial — pergunta se fatura completo ou mantém o parcial
+        // Tem baixa parcial — três saídas reais. Antes era um confirm() em que "Cancelar" marcava com o saldo
+        // parcial (não havia como desistir) e o texto era igual ao da janela que aparece depois da baixa.
         if (qtdAberta < qtdOriginal) {
-            const faturarCompleto = confirm(
-                `Baixa parcial registrada — saldo atual: ${fmtInt(qtdAberta)} unidades.\n\nOK → Faturar completo (zera saldo)\nCancelar → Manter saldo parcial`
+            const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
+            showBaixaConfirmacaoModal(
+                `Baixado neste ciclo: ${fmtInt(qtdOriginal - qtdAberta)} · Saldo em aberto: ${fmtInt(qtdAberta)}\n\nTOTAL → dá baixa também no saldo e fatura tudo\nPARCIAL → fatura só o que já foi baixado\nCANCELAR → não marca`,
+                () => _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual, aut),
+                () => _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual, aut),
+                () => { if (checkbox) checkbox.checked = false; },
+                '🧾 Marcar para faturamento'
             );
-            if (faturarCompleto) {
-                _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual, aut);
-            } else {
-                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfilAtual, aut);
-            }
             return;
         }
 
@@ -5209,6 +5224,15 @@ ALL_OCS_ITEMS = itemsObj;
                 }
 
                 const itensMarcados = result.items || [];
+
+                // Marcados sem baixa desde o último faturamento (ex.: o ERP já faturou e a marcação ficou):
+                // o servidor os deixa fora para não faturar o saldo inteiro. alert() bloqueia: precisa ser lido.
+                const semBaixa = result.semBaixa || [];
+                if (semBaixa.length > 0) {
+                    const lista = semBaixa.slice(0, 15).map(it =>
+                        `• OC ${it['ORD. COMPRA']} · ${it['CÓD. CLIENTE']} · ${it.TAMANHO} · QTD aberta ${fmtInt(it['QTD. ABERTA'])} · ${it.MARCAR_FATURAR_USUARIO || 'sem usuário'}`).join('\n');
+                    alert(`${semBaixa.length} item(ns) marcado(s) SEM BAIXA desde o último faturamento ficaram FORA deste relatório — não há o que faturar neles. Confira e desmarque:\n\n${lista}${semBaixa.length > 15 ? '\n…' : ''}`);
+                }
 
                 // Itens marcados sem usuário: herança de versão antiga — limpa automaticamente
                 const semUsuario = itensMarcados.filter(it => !(it.MARCAR_FATURAR_USUARIO || '').trim());

@@ -1,7 +1,7 @@
 # CLAUDE.md — Sistema de Relatório de Pedidos / Expedição
 
 > Lido automaticamente em toda sessão. Atualizar sempre que houver mudança arquitetural.
-> Versão do sistema: **v15.6-SINCRONIZACAO** · Backend em Google Apps Script · Frontend em HTML+JS embutido no Apps Script
+> Versão do sistema: **v15.7-SINCRONIZACAO** (19/11/2026: incidente da marcação depois da NF parcial — 15.22) · Backend em Google Apps Script · Frontend em HTML+JS embutido no Apps Script
 > Última revisão contra o código e dados reais: **30/09/2026** (plano da seção 17 implementado + `Historico_Decisoes`). Se este documento
 > divergir do código, o código descreve o comportamento real — mas as **regras de negócio da seção 1.1 prevalecem**:
 > se o código as viola, é o código que deve ser corrigido. Antes de propor mudanças, ler 1.1, 15.16–15.19 e 17
@@ -323,9 +323,13 @@ resetCiclo = temBaixas && pedidosQtd > 0
   && baselineId !== undefined && pedidosQtd !== baselineId
   && status não é Faturado/Finalizado
 ```
-Efeito: registra CHECKPOINT, limpa MARCAR_FATURAR, MARCAR_FATURAR_USUARIO (col V) e LOTE_EMISSAO.
+Efeito: limpa P (MARCAR_FATURAR), V (usuário), W (LOTE_EMISSAO), X (PERFIL_EMISSAO) e AA na **mesma escrita da
+linha** e só depois grava o CHECKPOINT (desde 19/11/2026 — 15.22). Se a execução morrer antes da gravação, nada fica
+pela metade e a rodada seguinte refaz o reset.
 É o que acontece no faturamento parcial do dia a dia: a origem reduz a QTD depois da NF → novo ciclo.
 Consequência: item marcado cuja QTD muda na origem perde a marcação (precisa ser marcado de novo).
+**Marcação vencida:** item marcado, com QTD aberta e cujo último registro no Baixas_Historico é CHECKPOINT (ciclo já
+faturado, nenhuma baixa nova) → o sync encerra a marcação, sem CHECKPOINT novo (`MARCACAO_ENCERRADA` no histórico).
 
 ---
 
@@ -361,9 +365,13 @@ const qtdAberta      = item['QTD. ABERTA']   || 0;
 const saldoCalculado = qtdOriginal - qtdAberta;
 // Fallback: se não há baixas, qtdOriginal == qtdAberta → saldoCalculado == 0
 // Neste caso usa QTD.ABERTA para não zerar o relatório
-const saldo = saldoCalculado > 0 ? saldoCalculado : qtdAberta;
+if (saldoCalculado <= 0 && qtdAberta > 0) → item vai para `semBaixa` (fora do relatório)
+const saldo = saldoCalculado > 0 ? saldoCalculado : qtdAberta;   // qtdAberta só quando 0
 ```
-**Por que o fallback existe:** quando nenhuma baixa foi registrada (ex: usuário marcou sem dar baixa), `calcularQtdOriginal` retorna `qtdAberta` como fallback → saldo seria 0 sem esta correção.
+**Desde 19/11/2026 (15.22):** item marcado com QTD aberta e sem baixa no ciclo **não entra** no relatório — o antigo
+fallback (`saldo = QTD aberta`) faturaria o saldo inteiro depois de uma NF parcial. O servidor devolve esses itens em
+`semBaixa` e a tela avisa quais ficaram fora. A tela nunca marca item com QTD aberta sem baixa (pede a baixa total antes)
+e `marcarParaFaturar` também recusa.
 
 ### Fluxo de Geração do Relatório
 1. Usuário clica "Gerar Relatório de Faturamento"
@@ -527,6 +535,8 @@ DESCRIÇÃO (sem `[uuid]`) · TAMANHO · LOTE · QTD. ABERTA · LOTE_EMISSAO (FA
 | `FATURADO` | sync: marcado + saiu da origem — registrado **depois** de gravado | col V formatada: `EVELINE (BAIXA1)` |
 | `EXCLUIDO` | tela "excluir inativos" (`excluirItem`) | login da tela (`não informado` se a página antiga não enviar) |
 | `FATURAR_SEM_CARTELA` | `marcarParaFaturar`: item com CARTELA = NÃO marcado com a supervisão identificada (15.20) | login da tela; DETALHE = `Supervisão: NOME — cartela NÃO — perfil — ciente do risco de devolução` |
+| `MARCOU` `DESMARCOU` | `marcarParaFaturar` (fora o caso acima, que já é registrado como FATURAR_SEM_CARTELA) | login da tela; DETALHE = `perfil BAIXA1 — baixado no ciclo: N` |
+| `MARCACAO_ENCERRADA` | sync: reset de ciclo (NF parcial) ou marcação vencida — registrado **depois** de gravada a linha | col V formatada de quem tinha marcado; LOTE_EMISSAO = o FAT-xxx que estava na linha |
 | `REABERTO` | menu 🩹 reparo | conta Google de quem rodou (`menu` se o Google não informar) |
 | `APAGADO_NA_LIMPEZA` | `purgarItensFinalizados`, **antes** de apagar, nos dois modos | nome da col Z (decisão) ou da col V (marcação); `sem nome na linha` |
 
@@ -546,16 +556,18 @@ DESCRIÇÃO (sem `[uuid]`) · TAMANHO · LOTE · QTD. ABERTA · LOTE_EMISSAO (FA
 ```
 handleMarcarFaturar(id, linha, true)
   ├─ qtdAberta <= 0       → _executarMarcarFaturar() direto (sem baixa)
-  ├─ qtdAberta < qtdOriginal  → confirm("Faturar completo ou manter parcial?")
-  │    ├─ OK      → _aplicarBaixaTotalEMarcar() → baixa total + marca
-  │    └─ Cancelar → _executarMarcarFaturar() (mantém saldo parcial)
+  ├─ qtdAberta < qtdOriginal  → baixaConfirmacaoModal com TOTAL / PARCIAL / CANCELAR (desde 19/11/2026)
+  │    ├─ TOTAL    → _aplicarBaixaTotalEMarcar() → baixa total + marca
+  │    ├─ PARCIAL  → _executarMarcarFaturar() (fatura só o baixado)
+  │    └─ CANCELAR → não marca (desmarca a caixa) — no confirm() antigo o "Cancelar" marcava
   └─ qtdAberta == qtdOriginal → confirm("Nenhuma baixa — confirmar total?")
        └─ OK → _aplicarBaixaTotalEMarcar() → baixa total + marca
 ```
 
 ### Modais principais
 - `baixaModal` — baixa parcial: mostra histórico + campo para nova entrada
-- `baixaConfirmacaoModal` — após baixa parcial: opção TOTAL (zera) ou PARCIAL (mantém)
+- `baixaConfirmacaoModal` — após baixa parcial: opção TOTAL (zera) ou PARCIAL (mantém); ao marcar item parcial para
+  faturar ganha título próprio e o botão CANCELAR (`showBaixaConfirmacaoModal(msg, onTotal, onParcial, onCancelar, titulo)`)
 - `cartelaModal` — item com CARTELA = NÃO: abre ao marcar o checkbox (ou Espaço), antes de qualquer pergunta de baixa; não fecha por ESC nem clique fora (15.20)
 - `alertaFaturamentoModal` — desligado desde `ce75202` (06/05/2026): `display:none !important` (15.8)
 - `filtroUsuarioFaturModal` — filtra itens por usuário antes de imprimir
@@ -591,7 +603,9 @@ Se alguém formatar essa coluna como número, os sufixos desaparecem silenciosam
 ### 15.3 SALDO=0 no relatório de faturamento
 Causa: `calcularQtdOriginal()` retorna `qtdAberta` como fallback quando não há baixas → `SALDO = qtdAberta - qtdAberta = 0`.  
 Correção aplicada (branch `claude/fix-invoice-zero-amount-8slzu`): `saldo = saldoCalculado > 0 ? saldoCalculado : qtdAberta`.  
-**Cuidado ao modificar `obterItensMarcadosParaFaturar`:** o fallback para `qtdAberta` é intencional.
+~~**Cuidado ao modificar `obterItensMarcadosParaFaturar`:** o fallback para `qtdAberta` é intencional.~~
+**Substituído em 19/11/2026 (15.22):** o fallback faturaria o saldo inteiro de um item cujo ciclo já foi faturado.
+Item marcado com QTD aberta e sem baixa no ciclo agora fica fora do relatório (`semBaixa`).
 
 ### 15.4 registrarBaixa não é verificada (histórico)
 A versão atual `aplicarBaixa` **reverte o DB** se `registrarBaixa` falhar.  
@@ -932,6 +946,38 @@ inexplicável. A bateria de simulação (`testes/`, seção 18) cobre os dois mo
 
 ---
 
+### 15.22 Incidente 18/11/2026: saldo restante amanheceu "marcado para faturar" depois da NF parcial — CORRIGIDO (19/11)
+- **O que aconteceu:** baixa parcial em 4 itens de uma OC (3 parciais, 1 total), marcação e relatório FAT-xxx; o ERP
+  emitiu a NF exatamente do que foi baixado. O sync das ~19:49 detectou a queda da QTD na origem (reset de ciclo),
+  gravou os 3 CHECKPOINTs às 19:54 dentro de "3. PROCESSANDO" e **morreu no limite de 6 min** antes de "4. APLICANDO",
+  onde a marcação seria limpa. Na rodada seguinte a base do ciclo já era o CHECKPOINT → `resetCiclo` falso → a marcação
+  nunca mais seria limpa. De manhã os 3 itens apareciam marcados no nome de quem marcou, com Saldo Aberto = Qtd. Aberta,
+  e o próximo relatório listaria o **saldo inteiro** (fallback de 15.3).
+- **Por que a execução morria:** `Utilities.formatDate` chamado por linha nas impressões digitais — ~26 mil chamadas por
+  sync para só 31 datas diferentes (etapa 2.5 levou 304 s em 18/11). Também queimava a cota diária de acionadores.
+- **Correções (v15.7):**
+  1. `_formatarDataRapido_`: memoiza por (padrão, instante) — mesma correção do Bahia (26/10). O sync faz uma chamada por
+     data distinta (teste: < 200 chamadas na base, antes ~50 mil no ciclo completo).
+  2. Reset de ciclo atômico: o sync não grava mais CHECKPOINT no meio do processamento. A atualização da linha leva
+     `encerramento` (`_prepararEncerramento_`) e cobre até a AA, com P, V, W, X e AA vazias (antes X ficava e V/W/AA eram
+     limpas num passo separado no fim, sem conferir o ID); o CHECKPOINT é gravado **depois** da linha, em lote
+     (`_registrarCheckpointsEmLote_`, appendRow). Execução interrompida → nada gravado → a rodada seguinte refaz.
+  3. Marcação vencida: item marcado, QTD aberta e último registro do Baixas_Historico = CHECKPOINT
+     (`_idsComCicloSemBaixa_`) → o sync encerra a marcação (sem CHECKPOINT novo). Pega também itens já presos.
+  4. Relatório: item marcado com QTD aberta e sem baixa no ciclo **sai da lista** e volta em `semBaixa`; a tela avisa
+     (alert) quais ficaram fora. Substitui o fallback de 15.3.
+  5. `marcarParaFaturar` recusa QTD aberta sem baixa no ciclo (`semBaixaNoCiclo`, via `_ultimoRegistroBaixa_` com
+     TextFinder) — a tela nunca faz isso (pede a baixa total antes); só chega de página desatualizada. A recusa vem
+     depois da conferência da CARTELA = NÃO.
+  6. Rastro: `MARCOU`/`DESMARCOU` (tela) e `MARCACAO_ENCERRADA` (sync) no `Historico_Decisoes` — antes não havia como
+     saber quem marcou e quando.
+  7. Tela: o item só aparece marcado com P = SIM (antes bastava X); marcar item com baixa parcial abre TOTAL / PARCIAL /
+     CANCELAR (no `confirm()` antigo o "Cancelar" marcava com o saldo parcial e o texto era igual ao da janela pós-baixa).
+- **Achado e NÃO corrigido (decisão pendente):** `index.html` usa `$confirmModal`/`$warningModal`, que não existem. O
+  handler de teclado (↑↓, Espaço, Esc) e `canAutoRefresh()` lançam `ReferenceError` — o atalho Espaço nunca funcionou e
+  a **atualização automática de 30 s morre na primeira tentativa** (só volta a contar após um recarregamento manual).
+  Corrigir liga um refresh a cada 30 s por usuário (mais leituras do DB quando o cache é limpo): decidir antes.
+
 ## 16. SEQUÊNCIA SEGURA PARA MUDANÇAS
 
 Antes de qualquer alteração no código, verificar:
@@ -944,7 +990,9 @@ Antes de qualquer alteração no código, verificar:
    caminhos que gravam `Faturado` (seção 9)
 4. **Afeta sincronização?** → Revisar guard H2, travas de importação (7.3), reset de ciclo, concorrência (15.17)
 5. **Afeta IDs?** → Verificar impacto no Baixas_Historico e recuperação por UUID
-6. **Custa tempo de execução?** → Cota de 90 min/dia de acionadores (seção 13); nada de leitura/escrita por item
+6. **Custa tempo de execução?** → Cota de 90 min/dia de acionadores (seção 13); nada de leitura/escrita por item —
+   nem chamada de serviço por linha (`Utilities.formatDate` → `_formatarDataRapido_`, 15.22). Efeito colateral do sync
+   (CHECKPOINT, histórico) só depois de gravar a linha: a execução pode morrer no limite de 6 min a qualquer momento
 7. **Apaga linhas?** → Ações de usuário usam número de linha — conferir o ID com `_resolverLinhaDoItem_` (15.17)
 8. **Muda identidade ou limpeza?** → Colocar atrás de `_modoAtivo_()` com auditoria no modo SIMULACAO (15.19) e
    rodar os cenários de teste (linhas-irmãs, DESCRIÇÃO corrigida, troca de OC, lote novo ao lado de faturado)
@@ -1029,11 +1077,11 @@ Relatorio_DB), roda o `Código.gs` de verdade e confere o resultado nos dois mod
 | Arquivo | O que confere |
 |---|---|
 | `testes/dados_reais.js` | Em cada base: 2ª rodada do sync com a mesma origem não muda nada; nenhum Faturado sem usuário; nenhum ID/UUID repetido novo; base padrão: 1ª rodada não troca ID |
-| `testes/cenarios.js` | 12 situações do dia a dia: irmã marcada sai (incidente 28/09), DESCRIÇÃO corrigida (1 linha e grupo inteiro), lote novo ao lado de faturado, saída com/sem marcação, importação truncada, faturamento parcial entre irmãs, pendência que volta, reordenação, lote novo no grupo, troca de OC. Em todos: nenhum Faturado sem usuário novo e, no `Historico_Decisoes`, todo Faturado novo registrado com o usuário e nenhum faturamento registrado que não aconteceu |
+| `testes/cenarios.js` | 14 situações do dia a dia (13–14: NF parcial com a execução interrompida antes de gravar e marcação presa sem baixa desde o CHECKPOINT — 15.22): irmã marcada sai (incidente 28/09), DESCRIÇÃO corrigida (1 linha e grupo inteiro), lote novo ao lado de faturado, saída com/sem marcação, importação truncada, faturamento parcial entre irmãs, pendência que volta, reordenação, lote novo no grupo, troca de OC. Em todos: nenhum Faturado sem usuário novo e, no `Historico_Decisoes`, todo Faturado novo registrado com o usuário e nenhum faturamento registrado que não aconteceu |
 | `testes/sequencia.js` | Sequência por OC: aba `original` no layout atual (cabeçalho, "Lote Dilly", DIAS) e no legado; OC nova e completa → col V/Y = 1..n; OC incompleta ou recebida antes do corte → sem número; 2ª rodada não muda |
-| `testes/cartela.js` | Item com CARTELA = NÃO: recusa sem supervisor/ciência (incl. "Não", "NAO", espaços), marca com autorização e grava `FATURAR_SEM_CARTELA` + col AA, dois perfis, desmarcar, histórico indisponível → marcação desfeita, reset de ciclo limpa a AA, payload do relatório |
-| `testes/funcoes.js` | Sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos; `Historico_Decisoes`: respostas do aviso, reparo, marcação, desmarcado durante o sync (não registra), exclusão com/sem login, gravação sem a trava (appendRow), cópia de cada linha apagada com o nome, falha na cópia → nada apagado e o processo automático não marca o dia |
-| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê; alerta de CARTELA NÃO (ESC/clique fora não fecham, Confirmar só com supervisor + ciência, Cancelar desmarca, autorização enviada ao servidor) e HTML do relatório de faturamento. Sem Playwright → pulado |
+| `testes/cartela.js` | Item com CARTELA = NÃO (os itens ganham uma baixa antes de marcar, como na tela): recusa sem supervisor/ciência (incl. "Não", "NAO", espaços), marca com autorização e grava `FATURAR_SEM_CARTELA` + col AA, dois perfis, desmarcar, histórico indisponível → marcação desfeita, reset de ciclo limpa a AA, payload do relatório |
+| `testes/funcoes.js` | Marcação exige baixa no ciclo (recusa, MARCOU/DESMARCOU, SALDO do relatório) e `Utilities.formatDate` uma vez por data no sync (15.22); sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos; `Historico_Decisoes`: respostas do aviso, reparo, marcação, desmarcado durante o sync (não registra), exclusão com/sem login, gravação sem a trava (appendRow), cópia de cada linha apagada com o nome, falha na cópia → nada apagado e o processo automático não marca o dia |
+| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: marcar item parcial (TOTAL / PARCIAL / CANCELAR — cancelar não marca); aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê; alerta de CARTELA NÃO (ESC/clique fora não fecham, Confirmar só com supervisor + ciência, Cancelar desmarca, autorização enviada ao servidor) e HTML do relatório de faturamento. Sem Playwright → pulado |
 | `testes/rodar_todos.js` | Roda tudo; placar; código 1 se falhar (~1 min) |
 
 **Quando rodar:** antes de todo commit que mexa em `Código.gs`, `index.html` ou `testes/`. O hook

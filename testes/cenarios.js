@@ -245,4 +245,47 @@ cenario('12. dois lotes mudam de OC', env => L.gruposDeIrmas(env)[0] || null, (e
   }
 });
 
+// 13) Incidente de 18/11/2026: o ERP fatura a parte baixada e a execução morre (limite de 6 min) entre o
+// processamento e a gravação. Antes o CHECKPOINT do ciclo novo ficava gravado sem a limpeza da marcação: o saldo
+// restante amanheceu "marcado para faturar" no nome de quem marcou e o relatório o listaria inteiro.
+const checkpointsDe = (env, id) => env.ss.getSheetByName('Baixas_Historico').data.filter(r => L.T(r[0]) === id && L.T(r[6]) === 'CHECKPOINT').length;
+const semMarcacao = r => [15, 21, 22, 23, 26].every(c => !L.T(r[c]));
+const zerarCachesDeBaixa = env => require('vm').runInContext('_qtdOriginalCache_ = null; _saldoEfetivoCache_ = null; _ultimaQtdOriginalCache_ = null;', env.ctx);
+cenario('13. NF parcial com a execução interrompida antes de gravar', env => L.linhasSozinhas(env).find(x => Number(L.dbPorId(env, x.id)[9]) >= 3) || null, (env, m) => {
+  const q = Number(L.dbPorId(env, m.id)[9]), b = Math.max(1, Math.floor(q / 3));
+  L.registrarBaixa(env, m.id, b, q - b, q);
+  L.alterarDb(env, m.id, { 9: q - b, 15: 'SIM', 21: L.USUARIO_TESTE, 22: 'FAT-900', 23: 'BAIXA1' });
+  L.imp(env)[m.i][10] = q - b;                                 // a NF da parte baixada reduz a QTD na origem
+  env.ctx.sincronizarPedidosComFonte(true);
+  const original = env.ctx._mesclarAlteracoesConcorrentes_;
+  env.ctx._mesclarAlteracoesConcorrentes_ = () => { throw new Error('Exceeded maximum execution time'); };
+  let morreu = false;
+  try { env.ctx.sincronizarDados(); } catch (e) { morreu = /Exceeded/.test(e.message); }
+  env.ctx._mesclarAlteracoesConcorrentes_ = original;
+  return { q, b, morreu, ckpt: checkpointsDe(env, m.id), marcada: L.T(L.dbPorId(env, m.id)[15]) === 'SIM' };
+}, (env, modo, m, x) => {
+  const r = L.dbPorId(env, m.id);
+  rel.check('rodada interrompida não deixa CHECKPOINT sem a limpeza (nada pela metade)', x.morreu && x.ckpt === 0 && x.marcada, JSON.stringify(x));
+  rel.check('rodada seguinte: marcação some por inteiro (P, V, W, X, AA) e um CHECKPOINT com o saldo',
+    r && semMarcacao(r) && checkpointsDe(env, m.id) === 1 && Number(r[9]) === x.q - x.b, L.resumoLinha(r) + ` X=${L.T(r && r[23])} ckpt=${checkpointsDe(env, m.id)}`);
+  rel.check('histórico: MARCACAO_ENCERRADA com quem marcou e o lote',
+    L.historico(env, 'MARCACAO_ENCERRADA').some(h => L.T(h[4]) === m.id && /USUARIO TESTE/.test(h[2]) && L.T(h[13]) === 'FAT-900'));
+});
+
+// 14) Marcação que ficou presa (versão antiga): marcada, QTD aberta e último registro do histórico = CHECKPOINT.
+cenario('14. marcação presa sem baixa desde o último CHECKPOINT', env => L.linhasSozinhas(env)[4] || null, (env, m) => {
+  const q = Number(L.dbPorId(env, m.id)[9]);
+  L.registrarBaixa(env, m.id, 1, q, q + 1);
+  env.ss.getSheetByName('Baixas_Historico').data.push([m.id, new Date(), 0, q, q, 'FATURAMENTO', 'CHECKPOINT']);
+  L.alterarDb(env, m.id, { 15: 'SIM', 21: L.USUARIO_TESTE, 22: 'FAT-901', 23: 'BAIXA1' });
+  zerarCachesDeBaixa(env);
+  const rel1 = env.ctx.obterItensMarcadosParaFaturar('BAIXA1');
+  return { fora: !rel1.items.some(i => i.uniqueId === m.id) && (rel1.semBaixa || []).some(i => i.uniqueId === m.id) };
+}, (env, modo, m, x) => {
+  const r = L.dbPorId(env, m.id);
+  rel.check('relatório deixa o item fora (não fatura o saldo inteiro) e o devolve em semBaixa', x.fora);
+  rel.check('sync encerra a marcação sem gravar CHECKPOINT novo', r && semMarcacao(r) && checkpointsDe(env, m.id) === 1, L.resumoLinha(r));
+  rel.check('histórico: MARCACAO_ENCERRADA (ciclo anterior)', L.historico(env, 'MARCACAO_ENCERRADA').some(h => L.T(h[4]) === m.id && /ciclo anterior/.test(h[14])));
+});
+
 rel.fim();

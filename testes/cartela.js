@@ -15,6 +15,9 @@ const marcar = (env, r, aut, usuario = 'ANA', perfil = 'BAIXA1') =>
 const desmarcar = (env, r, usuario = 'ANA', perfil = 'BAIXA1') =>
   env.ctx.marcarParaFaturar(L.T(r[0]), linhaDb(env, L.T(r[0])), false, usuario, perfil);
 const intacta = r => !L.T(r[15]) && !L.T(r[21]) && !L.T(r[AA]);
+// Desde 19/11/2026 o servidor só marca item com baixa no ciclo (ou zerado) — como a tela, que pede a baixa total
+// antes. Os itens do teste ganham uma baixa de 1 un. antes de serem marcados.
+const darBaixa = (env, r) => { const id = L.T(r[0]), q = Number(r[9]); L.registrarBaixa(env, id, 1, q - 1, q); L.alterarDb(env, id, { 9: q - 1 }); };
 const sc = env => L.historico(env, 'FATURAR_SEM_CARTELA');
 
 for (const modo of ['SIMULACAO', 'ATIVO']) {
@@ -25,6 +28,7 @@ for (const modo of ['SIMULACAO', 'ATIVO']) {
   const abertos = livres(env);
   if (abertos.length < 5) { rel.pular('menos de 5 itens livres na base'); continue; }
   const [nao, ok, falha, reset, semRegistro] = abertos;
+  [nao, ok, falha, semRegistro].forEach(r => darBaixa(env, r));
   const idNao = L.T(nao[0]);
   L.alterarDb(env, idNao, { 1: 'NÃO' });
   L.alterarDb(env, L.T(ok[0]), { 1: 'OK' });
@@ -106,9 +110,9 @@ for (const modo of ['SIMULACAO', 'ATIVO']) {
   } else {
     L.imp(env)[iOrigem][1] = 'NÃO';
     L.alterarDb(env, resetId, { 1: 'NÃO' });
-    marcar(env, reset, { supervisor: 'MARIA', ciente: true });
     L.registrarBaixa(env, resetId, 1, qtd - 1, qtd);
     L.alterarDb(env, resetId, { 9: qtd - 1 });
+    marcar(env, reset, { supervisor: 'MARIA', ciente: true });
     L.imp(env)[iOrigem][10] = qtd - 1;
     L.sincronizar(env);
     const r = L.dbPorId(env, resetId);

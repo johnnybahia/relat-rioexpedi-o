@@ -245,6 +245,32 @@ function gerarPayload() {
         await page.waitForTimeout(300);
         const ex = (await chamadas('excluirMultiplosItens')).pop();
         rel.check('excluir inativos envia o login (histórico de decisões)', ex && ex[1][1] === usuario, JSON.stringify(ex && ex[1]));
+
+        // ---- marcar item com baixa parcial: TOTAL / PARCIAL / CANCELAR (o confirm antigo marcava no "Cancelar") ----
+        await page.evaluate(() => {
+          document.body.insertAdjacentHTML('beforeend', '<table><tbody><tr id="item-linha-9977" data-item-qtd="12" data-item-qtd-original="323" data-item-cartela="OK"><td><input type="checkbox" class="checkbox-faturar" checked></td></tr></tbody></table>');
+          handleMarcarFaturar('ID-PARCIAL', 9977, true);
+        });
+        await page.waitForTimeout(100);
+        const nMarcar = (await chamadas('marcarParaFaturar')).length;
+        const janelaParcial = await page.$eval('#baixaConfirmacaoModal', el => !el.classList.contains('hidden'));
+        const textoParcial = await page.$eval('#baixa-confirmacao-msg', el => el.textContent);
+        await page.click('#baixa-confirmacao-cancelar-btn', { timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(100);
+        rel.check('marcar item parcial abre TOTAL / PARCIAL / CANCELAR com o baixado e o saldo',
+          janelaParcial && /Baixado neste ciclo: 311/.test(textoParcial) && /Saldo em aberto: 12/.test(textoParcial), textoParcial);
+        rel.check('CANCELAR não marca e desmarca a caixa',
+          (await chamadas('marcarParaFaturar')).length === nMarcar && !(await page.$eval('#item-linha-9977 .checkbox-faturar', c => c.checked)));
+        await page.evaluate(() => { document.querySelector('#item-linha-9977 .checkbox-faturar').checked = true; handleMarcarFaturar('ID-PARCIAL', 9977, true); });
+        await page.waitForTimeout(100);
+        await page.click('#baixa-confirmacao-parcial-btn', { timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(300);
+        const mParcial = (await chamadas('marcarParaFaturar')).pop();
+        rel.check('PARCIAL marca só o baixado', mParcial && mParcial[1][0] === 'ID-PARCIAL' && mParcial[1][2] === true, JSON.stringify(mParcial && mParcial[1]));
+        await page.evaluate(() => showBaixaConfirmacaoModal('x', () => {}, () => {}));
+        rel.check('a janela depois da baixa continua só com TOTAL e PARCIAL',
+          await page.evaluate(() => { const b = document.getElementById('baixa-confirmacao-cancelar-btn'); return !!b && getComputedStyle(b).display === 'none'; }));
+        await page.evaluate(() => hideBaixaConfirmacaoModal());
         if (capturas) {
           await page.setViewportSize({ width: 390, height: 800 });
           await page.waitForTimeout(200);

@@ -79,6 +79,29 @@ class Range {
   setBackground() { return this; } setFontSize() { return this; } setWrap() { return this; }
   setHorizontalAlignment() { return this; } setBorder() { return this; } setNote() { return this; }
   getRow() { return this.r; } getColumn() { return this.c; } getNumRows() { return this.nr; } getNumColumns() { return this.nc; }
+  /** TextFinder (matchEntireCell / matchCase / findAll) — o suficiente para procurar um ID numa coluna. */
+  createTextFinder(texto) {
+    const rg = this, alvo = String(texto);
+    let inteira = false, caso = false;
+    const tf = {
+      matchEntireCell(v) { inteira = v !== false; return tf; },
+      matchCase(v) { caso = v !== false; return tf; },
+      findAll() {
+        const norm = s => (caso ? s : s.toLowerCase());
+        const a = norm(alvo), achados = [];
+        for (let i = 0; i < rg.nr; i++) {
+          const row = rg.sh.data[rg.r - 1 + i] || [];
+          for (let j = 0; j < rg.nc; j++) {
+            const v = row[rg.c - 1 + j];
+            const s = norm(String(v === undefined || v === null ? '' : v));
+            if (inteira ? s === a : s.includes(a)) achados.push(new Range(rg.sh, rg.r + i, rg.c + j, 1, 1));
+          }
+        }
+        return achados;
+      }
+    };
+    return tf;
+  }
 }
 
 class Sheet {
