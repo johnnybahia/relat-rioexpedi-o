@@ -33,7 +33,7 @@ function _formatarDataRapido_(data, padrao) {
   }
   return r;
 }
-const APP_VERSION = '15.7-SINCRONIZACAO';
+const APP_VERSION = '15.8-SINCRONIZACAO';
 
 // CACHE (10 minutos)
 const CACHE_DURATION = 600; // 10 minutos em segundos
@@ -1118,7 +1118,8 @@ function estornarBaixa(uniqueId, planilhaLinha, linhaHistorico, qtdEstornada) {
     limparCache();
 
     Logger.log(`   ✅ QTD restaurada: ${qtdAtual} → ${novaQtd} (DB linha ${linhaNum})`);
-    return { success: true, novaQtd, qtdAnterior: qtdAtual };
+    // qtdOriginal: "Saldo Aberto" da próxima leitura, para a tela gravar na memória (15.23)
+    return { success: true, novaQtd, qtdAnterior: qtdAtual, qtdOriginal: calcularQtdOriginal(uniqueId, novaQtd) };
 
   } catch (e) {
     Logger.log(`❌ estornarBaixa: ${e.message}`);
@@ -1181,7 +1182,10 @@ function aplicarBaixa(uniqueId, planilhaLinha, qtdBaixa, usuarioHtml) {
       id: uniqueId,
       linha: linhaNum,
       novaQtd: novaQtd,
-      zerou: novaQtd === 0
+      zerou: novaQtd === 0,
+      // "Saldo Aberto" que a próxima leitura mostra (calcularQtdOriginal = QTD antes da última baixa do ciclo, que é
+      // esta). A tela grava na memória e não espera a próxima atualização (15.23).
+      qtdOriginal: qtdAtualNum
     };
   } catch (e) {
     Logger.log(`❌ aplicarBaixa: ${e.message}`);
@@ -7571,7 +7575,13 @@ function marcarParaFaturar(uniqueId, planilhaLinha, marcar, usuario, perfil, aut
 
     const usuarioValor = marcar ? String(usuario || '').trim() : '';
     Logger.log(`✓ ${uniqueId} → Marcado para faturar: ${marcar} por "${usuarioValor}" perfil "${perfilNorm}" (linha ${linhaNum}). Perfis ativos: ${novoPerfilEmissao}`);
-    return { success: true, id: uniqueId, linha: linhaNum, marcado: marcar, usuario: usuarioValor };
+    // `estado`: o que foi gravado, com os nomes dos campos do item da tela (_rowToItem_). A tela grava isso na memória e
+    // redesenha a linha a partir dela — antes remendava a linha na tela e podia mostrar o nome com a caixa vazia (15.23).
+    const estado = { MARCAR_FATURAR: novoMarcar, MARCAR_FATURAR_USUARIO: novoUsuarioJson };
+    if (perfilCol !== undefined) estado.PERFIL_EMISSAO = novoPerfilEmissao;
+    if (semCartela || String(valorAnteriorLiberacao || '').trim() !== '') estado.LIBERADO_SEM_CARTELA = novaLiberacao;
+    if (!marcar && perfisList.length === 0 && colMap['LOTE_EMISSAO'] !== undefined) estado.LOTE_EMISSAO = '';
+    return { success: true, id: uniqueId, linha: linhaNum, marcado: marcar, usuario: usuarioValor, estado: estado };
   } catch (e) {
     Logger.log(`❌ marcarParaFaturar: ${e.message}`);
     return { success: false, error: e.message, id: uniqueId || null, linha: planilhaLinha };

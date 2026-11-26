@@ -57,6 +57,29 @@ function gerarPayload() {
     obterNivelUsuario: u => ({ success: true, nivel: u === 'BIA' ? 'PARCIAL' : 'TOTAL', tempoSessao: 15 }),
     fetchAllDataUnified: () => JSON.parse(JSON.stringify(window.__payload)),
     excluirMultiplosItens: items => ({ success: true, processados: items.length, falhas: 0, results: [] }),
+    // Servidor com estado: baixa, estorno e marcação mudam o item do payload (a próxima leitura já vê a mudança)
+    aplicarBaixa: (id, linha, qtd) => {
+      const it = window.__itemPayload(id);
+      if (!it) return { success: true, id: id, linha: linha, novaQtd: 0, zerou: true };
+      const atual = Number(it['QTD. ABERTA']) || 0;
+      if (qtd > atual) return { success: false, error: 'Quantidade de baixa (' + qtd + ') maior que disponível (' + atual + ')' };
+      it['QTD. ABERTA'] = atual - qtd; it['QTD. ORIGINAL'] = atual;
+      return { success: true, id: id, linha: linha, novaQtd: atual - qtd, zerou: atual === qtd, qtdOriginal: atual };
+    },
+    estornarBaixa: (id, linha, linhaHist, qtd) => {
+      const it = window.__itemPayload(id);
+      if (!it) return { success: false, error: 'item não encontrado' };
+      it['QTD. ABERTA'] = (Number(it['QTD. ABERTA']) || 0) + Number(qtd); it['QTD. ORIGINAL'] = it['QTD. ABERTA'];
+      return { success: true, novaQtd: it['QTD. ABERTA'], qtdAnterior: it['QTD. ABERTA'] - Number(qtd), qtdOriginal: it['QTD. ORIGINAL'] };
+    },
+    marcarParaFaturar: (id, linha, marcar, usuario, perfil) => {
+      const it = window.__itemPayload(id);
+      if (!it) return { success: true, id: id, linha: linha, marcado: marcar, usuario: usuario };
+      it.MARCAR_FATURAR = marcar ? 'SIM' : ''; it.PERFIL_EMISSAO = marcar ? perfil : '';
+      it.MARCAR_FATURAR_USUARIO = marcar ? JSON.stringify({ [perfil]: usuario }) : '';
+      return { success: true, id: id, linha: linha, marcado: marcar, usuario: marcar ? usuario : '',
+        estado: { MARCAR_FATURAR: it.MARCAR_FATURAR, MARCAR_FATURAR_USUARIO: it.MARCAR_FATURAR_USUARIO, PERFIL_EMISSAO: it.PERFIL_EMISSAO } };
+    },
     confirmarSaidaFonte: (id, linha, dec) => {
       if (id === window.__falharId) return { success: false, error: 'Este item não está mais pendente (já foi respondido ou voltou à origem). Atualize a tela.' };
       window.__payload.pendentesSaida = window.__payload.pendentesSaida.filter(p => p.uniqueId !== id);
@@ -69,9 +92,17 @@ function gerarPayload() {
       if (nome === 'withSuccessHandler') return fn => __runner(fn, fail);
       if (nome === 'withFailureHandler') return fn => __runner(succ, fn);
       if (nome === 'withUserObject') return () => __runner(succ, fail);
-      return (...args) => { window.__calls.push([nome, args]); const f = window.__respostas[nome]; const r = f ? f(...args) : { success: true }; setTimeout(() => { if (succ) succ(r); }, 20); };
+      // A resposta é calculada na chamada (o servidor leu/gravou nessa hora); __segurar[nome] retém a entrega até __liberar(nome)
+      return (...args) => {
+        window.__calls.push([nome, args]); const f = window.__respostas[nome]; const r = f ? f(...args) : { success: true };
+        const entregar = () => { if (succ) succ(r); };
+        if (window.__segurar[nome]) window.__fila.push({ nome: nome, entregar: entregar }); else setTimeout(entregar, 20);
+      };
     } });
   }
+  window.__segurar = {}; window.__fila = [];
+  window.__liberar = nome => { const i = window.__fila.findIndex(x => x.nome === nome); if (i < 0) return false; window.__fila.splice(i, 1)[0].entregar(); return true; };
+  window.__itemPayload = id => { for (const o of window.__payload.ordCompras || []) for (const it of o.items || []) if (it.uniqueId === id) return it; return null; };
   window.google = { script: { run: __runner(null, null) } };
   </script>`;
   const html = fs.readFileSync(process.env.INDEX_HTML || path.join(__dirname, '..', 'index.html'), 'utf8').replace('<head>', '<head>' + stub);
@@ -245,6 +276,9 @@ function gerarPayload() {
         await page.waitForTimeout(300);
         const ex = (await chamadas('excluirMultiplosItens')).pop();
         rel.check('excluir inativos envia o login (histórico de decisões)', ex && ex[1][1] === usuario, JSON.stringify(ex && ex[1]));
+        // A janela de sucesso da exclusão recarrega a página em 3 s: no meio dos testes seguintes zerava window.__calls
+        // e o estado da tela (era a falha intermitente do teste do teclado)
+        await page.evaluate(() => { clearInterval(_successCountdownTimer); document.getElementById('successModal').classList.add('hidden'); });
 
         // ---- marcar item com baixa parcial: TOTAL / PARCIAL / CANCELAR (o confirm antigo marcava no "Cancelar") ----
         await page.evaluate(() => {
@@ -302,7 +336,118 @@ function gerarPayload() {
         const nMarcarTeclas = (await chamadas('marcarParaFaturar')).length;
         await page.keyboard.press('ArrowDown'); await page.keyboard.press(' '); await page.keyboard.press('Escape');
         await page.waitForTimeout(100);
-        rel.check('teclado: atalhos de linha desligados (nenhuma tecla marca para faturar)', (await chamadas('marcarParaFaturar')).length === nMarcarTeclas);
+        rel.check('teclado: atalhos de linha desligados (nenhuma tecla marca para faturar)', (await chamadas('marcarParaFaturar')).length === nMarcarTeclas, JSON.stringify((await chamadas('marcarParaFaturar')).slice(nMarcarTeclas)) + ' foco: ' + await page.evaluate(() => document.activeElement && (document.activeElement.id || document.activeElement.className || document.activeElement.tagName)));
+
+        // ---- marcação × tela redesenhada no meio (incidente de 26/11/2026: nome do usuário com a caixa vazia e a Qtd. antiga) ----
+        await page.evaluate(() => { document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden')); $loader.classList.add('hidden'); });
+        await page.waitForTimeout(2500); // recargas agendadas pelos testes anteriores terminam antes
+        const linhaDe = id => page.evaluate(id => {
+          const tr = [...document.querySelectorAll('tr[data-unique-id]')].find(t => t.dataset.uniqueId === id);
+          if (!tr) return null;
+          const cb = tr.querySelector('.checkbox-faturar'), b = tr.querySelector('.faturar-badge-usuario');
+          return { marcado: !!(cb && cb.checked), travado: !!(cb && cb.disabled), nome: b ? b.textContent.trim() : '',
+            qtd: Number(tr.querySelector('td.qtd-aberta').textContent.replace(/\D/g, '')), cor: !!tr.style.outline,
+            qtdNoBotaoBaixa: (() => { const m = /"QTD\. ABERTA":(\d+)/.exec(tr.querySelector('.btn-baixa').getAttribute('onclick')); return m ? Number(m[1]) : null; })() };
+        }, id);
+        const naLinha = (id, sel) => page.evaluate(([id, sel]) => [...document.querySelectorAll('tr[data-unique-id]')].find(t => t.dataset.uniqueId === id).querySelector(sel).click(), [id, sel]);
+        const segurar = nomes => page.evaluate(n => { window.__segurar = {}; n.forEach(x => { window.__segurar[x] = true; }); }, nomes);
+        const liberar = nome => page.evaluate(n => window.__liberar(n), nome);
+        const livres = await page.evaluate(() => [...document.querySelectorAll('tr[data-unique-id]')].filter(tr => {
+          const c = tr.querySelector('.checkbox-faturar');
+          return c && !c.checked && !c.disabled && tr.dataset.itemCartela === 'OK' && Number(tr.dataset.itemQtd) > 1
+            && Number(tr.dataset.itemQtd) === Number(tr.dataset.itemQtdOriginal);
+        }).slice(0, 3).map(tr => ({ id: tr.dataset.uniqueId, qtd: Number(tr.dataset.itemQtd) })));
+        if (livres.length < 3) {
+          rel.pular('menos de 3 itens livres (CARTELA OK, sem baixa) na tela');
+        } else {
+          const [a, d, f] = livres;
+          await page.evaluate(() => { window.__confirmResp = true; });
+          // A — a foto: a atualização lê antes da baixa, o usuário marca e a resposta da atualização chega no meio
+          await segurar(['fetchAllDataUnified', 'aplicarBaixa', 'marcarParaFaturar']);
+          await page.evaluate(() => carregarListaOcs(true, true));
+          await naLinha(a.id, '.checkbox-faturar');
+          await liberar('aplicarBaixa');
+          await liberar('fetchAllDataUnified');
+          await liberar('marcarParaFaturar');
+          await segurar([]);
+          const eA = await linhaDe(a.id);
+          rel.check('atualização no meio da marcação: caixa marcada, com o nome e a Qtd. zerada (antes: nome com a caixa vazia e a Qtd. antiga)',
+            eA && eA.marcado && eA.nome === usuario && eA.qtd === 0 && eA.qtdNoBotaoBaixa === 0 && !eA.travado, JSON.stringify(eA));
+          await page.evaluate(() => aplicarFiltros());
+          const eB = await linhaDe(a.id);
+          rel.check('busca/filtro depois de marcar não volta a linha ao estado antigo', eB && eB.marcado && eB.nome === usuario && eB.qtd === 0, JSON.stringify(eB));
+          await page.evaluate(() => carregarListaOcs(true, true));
+          await page.waitForTimeout(300);
+          const eA2 = await linhaDe(a.id);
+          rel.check('a atualização seguinte (dados do servidor) mostra o mesmo', eA2 && eA2.marcado && eA2.nome === usuario && eA2.qtd === 0, JSON.stringify(eA2));
+
+          // C — desmarcar com a atualização chegando no meio
+          await segurar(['fetchAllDataUnified', 'marcarParaFaturar']);
+          await page.evaluate(() => carregarListaOcs(true, true));
+          await naLinha(a.id, '.checkbox-faturar');
+          await liberar('fetchAllDataUnified');
+          await liberar('marcarParaFaturar');
+          await segurar([]);
+          const eC = await linhaDe(a.id);
+          rel.check('desmarcar com atualização no meio: caixa vazia, sem nome e sem a cor', eC && !eC.marcado && !eC.nome && !eC.cor && !eC.travado, JSON.stringify(eC));
+
+          // D — enquanto grava, a caixa fica marcada e travada mesmo com a tela redesenhada (busca/filtro)
+          await segurar(['aplicarBaixa', 'marcarParaFaturar']);
+          await naLinha(d.id, '.checkbox-faturar');
+          await page.evaluate(() => aplicarFiltros());
+          const eD1 = await linhaDe(d.id);
+          await liberar('aplicarBaixa');
+          const eD2 = await linhaDe(d.id);
+          await liberar('marcarParaFaturar');
+          await segurar([]);
+          const eD3 = await linhaDe(d.id);
+          rel.check('enquanto grava: caixa marcada e travada, sem nome, mesmo com a tela redesenhada',
+            eD1 && eD1.marcado && eD1.travado && !eD1.nome && eD2 && eD2.marcado && eD2.travado && eD2.qtd === 0, JSON.stringify([eD1, eD2]));
+          rel.check('terminada a gravação: marcada, com o nome e destravada', eD3 && eD3.marcado && eD3.nome === usuario && !eD3.travado, JSON.stringify(eD3));
+
+          // E — chamada que não volta não segura a atualização para sempre
+          const teto = await page.evaluate(() => {
+            try {
+              document.querySelectorAll('.modal-overlay').forEach(m => m.classList.add('hidden'));
+              $loader.classList.add('hidden');
+              if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+              const r = [canAutoRefresh()];
+              const t = _iniciarAcao_('ID-TETO');
+              r.push(canAutoRefresh(), _haAcoesPendentes_(Date.now() + 61000));
+              _terminarAcao_(t);
+              r.push(canAutoRefresh());
+              return r;
+            } catch (e) { return ['erro: ' + e.message]; }
+          });
+          rel.check('atualização espera a ação em andamento; sem resposta em 60 s deixa de esperar',
+            teto[0] === true && teto[1] === false && teto[2] === false && teto[3] === true, JSON.stringify(teto));
+
+          // F — baixa pela janela 📦 Baixa com a atualização chegando no meio; G — estorno
+          await segurar(['fetchAllDataUnified', 'aplicarBaixa']);
+          await page.evaluate(() => carregarListaOcs(true, true));
+          await naLinha(f.id, '.btn-baixa');
+          await page.evaluate(() => { document.getElementById('nova-baixa-input').value = '1'; document.getElementById('baixa-confirm-btn').click(); });
+          await liberar('aplicarBaixa');
+          await page.evaluate(() => document.getElementById('baixa-confirmacao-parcial-btn').click());
+          await liberar('fetchAllDataUnified');
+          await segurar([]);
+          const eF = await linhaDe(f.id);
+          rel.check('baixa pela janela com atualização no meio: linha e botão Baixa com o saldo novo',
+            eF && eF.qtd === f.qtd - 1 && eF.qtdNoBotaoBaixa === f.qtd - 1, JSON.stringify(eF));
+          await page.evaluate(id => {
+            const it = [].concat(...Object.values(ALL_OCS_ITEMS).map(o => o.items || [])).find(i => i.uniqueId === id);
+            currentBaixaItem = JSON.parse(JSON.stringify(it));
+            _executarEstorno(2, 1, it.planilhaLinha, null);
+          }, f.id);
+          await page.waitForTimeout(150);
+          await page.evaluate(() => aplicarFiltros());
+          const eG = await linhaDe(f.id);
+          rel.check('estorno: a linha mostra a Qtd. devolvida (também depois da busca)', eG && eG.qtd === f.qtd && eG.qtdNoBotaoBaixa === f.qtd, JSON.stringify(eG));
+          await page.waitForTimeout(2300); // recarga agendada pela baixa
+          const quebradas = await page.evaluate(() => [...document.querySelectorAll('tr[data-unique-id]')]
+            .filter(tr => { const cb = tr.querySelector('.checkbox-faturar'); return cb && !cb.checked && tr.querySelector('.faturar-badge-usuario'); }).length);
+          rel.check('nenhuma linha com o nome do usuário e a caixa vazia', quebradas === 0, `${quebradas} linha(s)`);
+        }
         if (capturas) {
           await page.setViewportSize({ width: 390, height: 800 });
           await page.waitForTimeout(200);
