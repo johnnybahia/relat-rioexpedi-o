@@ -244,8 +244,29 @@ for (const modo of ['SIMULACAO', 'ATIVO']) {
     r1.success === true && L.historico(env, 'MARCOU').some(h => L.T(h[4]) === id && h[2] === 'ANA' && /baixado no ciclo: 2/.test(h[14])), JSON.stringify(r1));
   const it = ctx.obterItensMarcadosParaFaturar('BAIXA1').items.find(i => i.uniqueId === id);
   rel.check('relatório: SALDO = o baixado no ciclo (2)', it && it.SALDO === 2, JSON.stringify(it && it.SALDO));
+  // A tela grava na memória o que o servidor devolve (26/11/2026, 15.23): tem que ser o mesmo que a próxima leitura traz
+  const lerTela = () => ctx.fetchAllDataUnified(Date.now()).ordCompras.reduce((a, o) => a.concat(o.items || []), []).find(i => i.uniqueId === id);
+  const linhaId = () => L.db(env).findIndex(r => L.T(r[0]) === id) + 1;
+  const campos = ['MARCAR_FATURAR', 'MARCAR_FATURAR_USUARIO', 'PERFIL_EMISSAO'];
+  const t1 = lerTela();
+  rel.check('marcar devolve o estado gravado = o da próxima leitura (P, V, X)',
+    r1.estado && campos.every(k => r1.estado[k] === t1[k]), JSON.stringify([r1.estado, campos.map(k => t1[k])]));
   marcar(false);
   rel.check('desmarcar registra DESMARCOU', L.historico(env, 'DESMARCOU').some(h => L.T(h[4]) === id));
+  const rd = ctx.marcarParaFaturar(id, linhaId(), false, 'ANA', 'BAIXA1');
+  const t2 = lerTela();
+  rel.check('desmarcar devolve o estado gravado = o da próxima leitura', rd.estado && campos.every(k => rd.estado[k] === t2[k]),
+    JSON.stringify([rd.estado, campos.map(k => t2[k])]));
+  zerarCaches();
+  const rb = ctx.aplicarBaixa(id, linhaId(), 1, 'ANA');
+  const tb = lerTela();
+  rel.check('baixa devolve a Qtd. aberta e o "Saldo Aberto" da próxima leitura',
+    rb.success && rb.novaQtd === tb['QTD. ABERTA'] && rb.qtdOriginal === tb['QTD. ORIGINAL'], JSON.stringify([rb, tb['QTD. ABERTA'], tb['QTD. ORIGINAL']]));
+  const re = ctx.estornarBaixa(id, linhaId(), env.ss.getSheetByName('Baixas_Historico').data.length, 1);
+  const te = lerTela();
+  rel.check('estorno devolve a Qtd. aberta e o "Saldo Aberto" da próxima leitura',
+    re.success && re.novaQtd === te['QTD. ABERTA'] && re.qtdOriginal === te['QTD. ORIGINAL'] && te['QTD. ABERTA'] === q - 2,
+    JSON.stringify([re, te['QTD. ABERTA'], te['QTD. ORIGINAL']]));
   env.ss.getSheetByName('Baixas_Historico').data.push([id, new Date(), 0, q - 2, q - 2, 'FATURAMENTO', 'CHECKPOINT']);
   zerarCaches();
   const r2 = marcar(true);

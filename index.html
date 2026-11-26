@@ -1491,6 +1491,47 @@
     let _arWatchdogId  = null;  // watchdog: reinicia se GAS travar
     let _arScheduledAt = null;  // quando o próximo refresh foi agendado
 
+    // ==== AÇÕES EM ANDAMENTO × ATUALIZAÇÃO DA TELA (incidente de 26/11/2026 — CLAUDE.md 15.23) ====
+    // Marcar, desmarcar, baixa e estorno passam por aqui. Enquanto houver ação em andamento a atualização automática
+    // espera, e a resposta de uma atualização que começou antes ou durante uma ação é descartada: ela foi lida antes da
+    // gravação e redesenharia a linha com o estado antigo (era a "caixa vazia com o nome do usuário e a Qtd. antiga").
+    const ACAO_TEMPO_MAX_MS = 60000;      // chamada sem resposta em 60 s deixa de segurar a atualização
+    const _acoesEmAndamento = new Map();  // token → { inicio, uniqueId, marcar }
+    let _acaoSeq = 0;
+    let _versaoAcoes = 0;                 // muda no início e no fim de toda ação
+
+    function _iniciarAcao_(uniqueId, marcar) {
+        const token = ++_acaoSeq;
+        _acoesEmAndamento.set(token, { inicio: Date.now(), uniqueId: uniqueId, marcar: marcar });
+        _versaoAcoes++;
+        return token;
+    }
+
+    function _terminarAcao_(token) {
+        if (_acoesEmAndamento.delete(token)) _versaoAcoes++;
+    }
+
+    function _haAcoesPendentes_(agora = Date.now()) {
+        for (const a of _acoesEmAndamento.values()) if (agora - a.inicio <= ACAO_TEMPO_MAX_MS) return true;
+        return false;
+    }
+
+    /** Marcação/desmarcação em andamento neste item: a caixa é desenhada no estado pedido e travada. */
+    function _marcacaoEmAndamento_(uniqueId) {
+        const agora = Date.now();
+        let achada = null;
+        for (const a of _acoesEmAndamento.values()) {
+            if (a.uniqueId === uniqueId && a.marcar !== undefined && agora - a.inicio <= ACAO_TEMPO_MAX_MS) achada = a;
+        }
+        return achada;
+    }
+
+    /** Roda fn quando não houver ação em andamento (consulta a cada 0,5 s). */
+    function _quandoSemAcoes_(fn) {
+        if (!_haAcoesPendentes_()) { fn(); return; }
+        setTimeout(() => _quandoSemAcoes_(fn), 500);
+    }
+
     // ==== ELEMENTOS DO DOM ====
     const $loader = document.getElementById('loader');
     const $loadingText = document.getElementById('loading-text');
@@ -1961,11 +2002,20 @@
         warningModalShown = false;
 
         const cacheBuster = Date.now(); // Cache buster
-        
+        const versaoNaLeitura = _versaoAcoes;
+
         google.script.run
             .withSuccessHandler(response => {
                 console.log("✅ Resposta recebida:", response);
                 try {
+                if (_versaoAcoes !== versaoNaLeitura || _haAcoesPendentes_()) {
+                    // Lida antes (ou no meio) de uma gravação do usuário: aplicar apagaria o que ele acabou de fazer.
+                    // Silenciosa: a próxima atualização automática traz os dados. Pedida pelo usuário: refaz assim que
+                    // as ações terminarem.
+                    console.log('⏭️ Atualização descartada: houve gravação do usuário durante a leitura');
+                    if (!silentRefresh) _quandoSemAcoes_(() => carregarListaOcs(isRefresh, silentRefresh));
+                    return;
+                }
                 if (response && response.success) {
                     // Backend v15.5 retorna: { success, ordCompras, allItems, stats, meta }
                     console.log("🔍 DEBUG - Resposta completa:", response);
@@ -2190,44 +2240,7 @@ ALL_OCS_ITEMS = itemsObj;
   totalInactiveItems = 0;
   const tipoFilter = document.querySelector('input[name="filter-tipo"]:checked')?.value || 'all';
 
-  FILTERED_OCS_INFO.forEach(ocInfo => {
-    const ocData = ALL_OCS_ITEMS[ocInfo.ordCompra];
-    if (!ocData || !ocData.items || ocData.items.length === 0) return;
-
-    let items = ocData.items.filter(i => i.Status?.toLowerCase() !== 'excluido');
-
-    // Aplicar filtro de tipo (METROS/PARES) aos itens
-    if (tipoFilter !== 'all') {
-      items = items.filter(item => {
-        const tamanho = (item.TAMANHO || '').toUpperCase();
-        if (tipoFilter === 'metros') {
-          return tamanho.includes('MM');
-        } else if (tipoFilter === 'pares') {
-          return tamanho.includes('CM');
-        }
-        return true;
-      });
-    }
-
-    if (items.length === 0) return;
-
-    // Separa itens por DT. ENTREGA — cada data vira um card independente
-    const _byDate = new Map();
-    items.forEach(item => {
-      const chave = formatarData(item['DT. ENTREGA']) || 'N/A';
-      if (!_byDate.has(chave)) _byDate.set(chave, []);
-      _byDate.get(chave).push(item);
-    });
-
-    _byDate.forEach((groupItems, dateKey) => {
-      const hasFaturados = groupItems.some(i => i.Status?.toLowerCase() === 'faturado');
-      const prazoMin     = calcularPrazoMinimo(groupItems);
-      const prazoKey     = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
-      // Anotação de data no ocInfo apenas quando há múltiplas datas
-      const ocInfoCard   = _byDate.size > 1 ? { ...ocInfo, dateGroup: dateKey } : ocInfo;
-      cards.push({ ocInfo: ocInfoCard, items: groupItems, hasFaturados, prazoKey, ocKey: String(ocInfo.ordCompra || '') });
-    });
-  });
+  FILTERED_OCS_INFO.forEach(ocInfo => { cards.push(..._cartoesDaOc_(ocInfo, tipoFilter)); });
 
   console.log(`📊 cards: ${cards.length} total`);
 
@@ -2247,6 +2260,98 @@ ALL_OCS_ITEMS = itemsObj;
   updateVisibleRows();
   updateTotaisGerais();
 }
+
+    /** Cartões de uma OC, como a tela desenha: sem Excluido, filtro METROS/PARES, um cartão por DT. ENTREGA. */
+    function _cartoesDaOc_(ocInfo, tipoFilter) {
+        const cards = [];
+        const ocData = ALL_OCS_ITEMS[ocInfo.ordCompra];
+        if (!ocData || !ocData.items || ocData.items.length === 0) return cards;
+
+        let items = ocData.items.filter(i => i.Status?.toLowerCase() !== 'excluido');
+
+        // Aplicar filtro de tipo (METROS/PARES) aos itens
+        if (tipoFilter !== 'all') {
+            items = items.filter(item => {
+                const tamanho = (item.TAMANHO || '').toUpperCase();
+                if (tipoFilter === 'metros') {
+                    return tamanho.includes('MM');
+                } else if (tipoFilter === 'pares') {
+                    return tamanho.includes('CM');
+                }
+                return true;
+            });
+        }
+
+        if (items.length === 0) return cards;
+
+        // Separa itens por DT. ENTREGA — cada data vira um card independente
+        const _byDate = new Map();
+        items.forEach(item => {
+            const chave = formatarData(item['DT. ENTREGA']) || 'N/A';
+            if (!_byDate.has(chave)) _byDate.set(chave, []);
+            _byDate.get(chave).push(item);
+        });
+
+        _byDate.forEach((groupItems, dateKey) => {
+            const hasFaturados = groupItems.some(i => i.Status?.toLowerCase() === 'faturado');
+            const prazoMin     = calcularPrazoMinimo(groupItems);
+            const prazoKey     = (prazoMin === null || isNaN(prazoMin)) ? Infinity : prazoMin;
+            // Anotação de data no ocInfo apenas quando há múltiplas datas
+            const ocInfoCard   = _byDate.size > 1 ? { ...ocInfo, dateGroup: dateKey } : ocInfo;
+            cards.push({ ocInfo: ocInfoCard, items: groupItems, hasFaturados, prazoKey, ocKey: String(ocInfo.ordCompra || '') });
+        });
+        return cards;
+    }
+
+    function _idDoCartao_(ocInfo) {
+        const ocIdLimpo    = String(ocInfo.ordCompra).replace(/[^a-zA-Z0-9-]/g, '');
+        const dateIdSuffix = ocInfo.dateGroup ? '-' + String(ocInfo.dateGroup).replace(/[^a-zA-Z0-9]/g, '') : '';
+        return "card-" + ocIdLimpo + dateIdSuffix;
+    }
+
+    // ==== A TELA SEGUE A MEMÓRIA (ALL_OCS_ITEMS) — incidente de 26/11/2026 ====
+    // Toda ação que deu certo grava o resultado do servidor no item da memória e redesenha o cartão inteiro com o mesmo
+    // código da tela completa. Antes as ações remendavam a linha na tela (sem marcar a caixa, Qtd. na linha antiga) e a
+    // memória ficava velha: busca, filtro ou atualização redesenhavam o estado antigo.
+
+    /** Item na memória pelo ID (a linha da planilha só desempata IDs repetidos). */
+    function _itemNaMemoria_(uniqueId, linha) {
+        let achado = null;
+        for (const oc in ALL_OCS_ITEMS) {
+            const lista = ALL_OCS_ITEMS[oc] && ALL_OCS_ITEMS[oc].items;
+            if (!lista) continue;
+            for (const item of lista) {
+                if (!item || item.uniqueId !== uniqueId) continue;
+                if (Number(item.planilhaLinha) === Number(linha)) return { item: item, oc: oc };
+                if (!achado) achado = { item: item, oc: oc };
+            }
+        }
+        return achado;
+    }
+
+    /** Grava campos no item da memória e redesenha o cartão dele. Devolve false se o item não está na memória. */
+    function _atualizarItemNaTela_(uniqueId, linha, campos) {
+        const achado = _itemNaMemoria_(uniqueId, linha);
+        if (!achado) return false;
+        if (campos) Object.assign(achado.item, campos);
+        _redesenharCartaoDoItem_(achado.oc, uniqueId);
+        return true;
+    }
+
+    function _redesenharCartaoDoItem_(oc, uniqueId) {
+        const ocInfo = FILTERED_OCS_INFO.find(o => String(o.ordCompra) === String(oc));
+        if (!ocInfo) return false;  // OC fora do filtro: aparece certa quando for desenhada
+        const tipoFilter = document.querySelector('input[name="filter-tipo"]:checked')?.value || 'all';
+        const cartao = _cartoesDaOc_(ocInfo, tipoFilter).find(c => c.items.some(i => i.uniqueId === uniqueId));
+        if (!cartao || !document.getElementById(_idDoCartao_(cartao.ocInfo))) return false;
+        renderOcCard(cartao.ocInfo, { ok: true, items: cartao.items });
+        allVisibleRows = Array.from(document.querySelectorAll('.item-table tbody tr'));
+        const el = document.getElementById(_idDoCartao_(cartao.ocInfo));
+        if (el) attachRowClickListeners(Array.from(el.querySelectorAll('.item-table tbody tr')));
+        updateTotaisGerais();
+        _atualizarBadgeFaturar();
+        return true;
+    }
 
 
 
@@ -2300,9 +2405,7 @@ ALL_OCS_ITEMS = itemsObj;
 
         let card = document.createElement("div");
         card.className = "card";
-        const ocIdLimpo   = String(ocInfo.ordCompra).replace(/[^a-zA-Z0-9-]/g, '');
-        const dateIdSuffix = ocInfo.dateGroup ? '-' + String(ocInfo.dateGroup).replace(/[^a-zA-Z0-9]/g, '') : '';
-        const cardId = "card-" + ocIdLimpo + dateIdSuffix;
+        const cardId = _idDoCartao_(ocInfo);
         
         let existingCard = document.getElementById(cardId);
         if (existingCard) {
@@ -2402,12 +2505,14 @@ ALL_OCS_ITEMS = itemsObj;
                         usuarioQueMarkou = (_ujson && typeof _ujson === 'object') ? (String(_ujson[_perfilAtual] || '').trim()) : '';
                     } catch(e) { usuarioQueMarkou = String(item.MARCAR_FATURAR_USUARIO || '').trim(); }
                 }
-                const corUsuario = (isMarcadoFaturar && usuarioQueMarkou) ? _getUsuarioColor(usuarioQueMarkou) : null;
+                // Marcação gravando no servidor: caixa no estado pedido e travada; nome e cor só depois que o servidor confirmar
+                const _gravando = _marcacaoEmAndamento_(item.uniqueId);
+                const corUsuario = (!_gravando && isMarcadoFaturar && usuarioQueMarkou) ? _getUsuarioColor(usuarioQueMarkou) : null;
 
                 const qtdOriginal = item['QTD. ORIGINAL'] || item['QTD. ABERTA'] || 0;
                 const qtdAberta = item['QTD. ABERTA'] || 0;
 
-                const classeMarcado = isMarcadoFaturar ? 'item-marcado-faturar' : '';
+                const classeMarcado = (isMarcadoFaturar && !_gravando) ? 'item-marcado-faturar' : '';
                 const _osCorPalette = (!corUsuario && _osColors) ? (_osColors.get(String(item['CÓD. OS'] ?? '')) || null) : null;
                 const inlineStyle = corUsuario
                     ? `style="background-color:${corUsuario.bg}; outline:2px solid ${corUsuario.border}; outline-offset:-2px;"`
@@ -2441,18 +2546,18 @@ ALL_OCS_ITEMS = itemsObj;
 
                     if (!isFaturado) {
                         bodyHtml += ` <button class="btn-baixa" onclick='handleBaixa(${JSON.stringify(item).replace(/'/g, "&apos;")})'>📦 Baixa</button>`;
-                        const checkedAttr = isMarcadoFaturar ? 'checked' : '';
+                        const checkedAttr = (_gravando ? _gravando.marcar : isMarcadoFaturar) ? 'checked' : '';
                         const outrousuario = isMarcadoFaturar && usuarioQueMarkou && _usuarioAtual && usuarioQueMarkou.toLowerCase() !== _usuarioAtual.toLowerCase();
-                        const cbDisabled = outrousuario ? 'disabled' : '';
+                        const cbDisabled = (outrousuario || _gravando) ? 'disabled' : '';
                         const _uEsc = _escapeHtml(usuarioQueMarkou);
                         const _uAtualEsc = _escapeHtml(_usuarioAtual);
-                        const cbTitle = isMarcadoFaturar
+                        const cbTitle = _gravando ? 'Gravando no servidor…' : isMarcadoFaturar
                             ? (outrousuario
                                 ? `Marcado por: ${_uEsc} — apenas ${_uEsc} pode desmarcar`
                                 : `Marcado por: ${_uEsc || _uAtualEsc} — clique para desmarcar`)
                             : 'Marcar para faturamento';
                         const cbStyle = outrousuario ? 'opacity:0.5; cursor:not-allowed;' : '';
-                        const badgeHtml = (isMarcadoFaturar && usuarioQueMarkou)
+                        const badgeHtml = (!_gravando && isMarcadoFaturar && usuarioQueMarkou)
                             ? (() => { const c = _getUsuarioColor(usuarioQueMarkou); return c ? `<span class="faturar-badge-usuario" style="background-color:${c.border};">${_uEsc}</span>` : ''; })()
                             : '';
                         bodyHtml += ` <input type="checkbox" class="checkbox-faturar" ${checkedAttr} ${cbDisabled} onchange="handleMarcarFaturar('${item.uniqueId}', ${item.planilhaLinha}, this.checked)" title="${cbTitle}" style="${cbStyle}" data-marcado-por="${_uEsc}">${badgeHtml}`;
@@ -2545,8 +2650,9 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     // Função para adicionar listeners de clique nas linhas
-    function attachRowClickListeners() {
-        allVisibleRows.forEach((row, index) => {
+    // linhas: só as de um cartão redesenhado (sem repetir o listener nas outras); padrão = todas
+    function attachRowClickListeners(linhas) {
+        (linhas || allVisibleRows).forEach(row => {
             row.addEventListener('click', (e) => {
                 // Ignora cliques em inputs, buttons e links
                 if (e.target.tagName === 'INPUT' ||
@@ -2561,9 +2667,9 @@ ALL_OCS_ITEMS = itemsObj;
 
                 // Seleciona nova linha
                 row.classList.add('keyboard-selected');
-                currentRowIndex = index;
+                currentRowIndex = allVisibleRows.indexOf(row);
 
-                console.log(`🖱️ Linha ${index} selecionada via clique`);
+                console.log(`🖱️ Linha ${currentRowIndex} selecionada via clique`);
             });
         });
     }
@@ -2999,21 +3105,6 @@ ALL_OCS_ITEMS = itemsObj;
         return _userColorMap[key];
     }
 
-    function _aplicarCorUsuarioLinha(row, usuarioQueMarkou) {
-        const cor = _getUsuarioColor(usuarioQueMarkou);
-        if (cor) {
-            row.style.backgroundColor = cor.bg;
-            row.style.outline = `2px solid ${cor.border}`;
-            row.style.outlineOffset = '-2px';
-            row.dataset.marcadoPor = usuarioQueMarkou;
-        } else {
-            row.style.backgroundColor = '';
-            row.style.outline = '';
-            row.style.outlineOffset = '';
-            delete row.dataset.marcadoPor;
-        }
-    }
-
     // ==== FUNÇÃO PARA MARCAR/DESMARCAR ITEM PARA FATURAMENTO ====
     function handleMarcarFaturar(uniqueId, linha, marcar) {
         const sessao = _getSessaoLocal();
@@ -3040,6 +3131,7 @@ ALL_OCS_ITEMS = itemsObj;
     }
 
     function _fluxoMarcarFaturar(uniqueId, linha, row, usuarioAtual, perfilAtual, aut) {
+        row = _linhaNaTela_(uniqueId, linha) || row; // a tela pode ter sido redesenhada com a janela de cartela aberta
         const qtdAberta = row ? Number(row.dataset.itemQtd || 0) : 0;
         const qtdOriginal = row ? Number(row.dataset.itemQtdOriginal || 0) : 0;
 
@@ -3073,88 +3165,121 @@ ALL_OCS_ITEMS = itemsObj;
         _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfilAtual, aut);
     }
 
+    // Baixa + marcação são UMA ação: a caixa fica marcada e travada do clique até a marcação voltar do servidor.
     function _aplicarBaixaTotalEMarcar(uniqueId, linha, qtdAberta, row, usuarioAtual, perfil, aut) {
-        const checkbox = row ? row.querySelector('.checkbox-faturar') : null;
-        if (checkbox) checkbox.disabled = true;
+        const token = _iniciarAcao_(uniqueId, true);
+        _mostrarGravando_(uniqueId, linha);
 
         google.script.run
             .withSuccessHandler(result => {
-                if (!result.success) {
-                    showError('Erro ao aplicar baixa: ' + (result.error || 'Erro desconhecido'));
-                    if (checkbox) { checkbox.disabled = false; checkbox.checked = false; }
+                if (!result || !result.success) {
+                    _terminarAcao_(token);
+                    showError('Erro ao aplicar baixa: ' + ((result && result.error) || 'Erro desconhecido'));
+                    _fimDaMarcacao_(uniqueId, linha, null, false);
                     return;
                 }
-                if (row) {
-                    row.dataset.itemQtd = '0';
-                    const qtdAbertaCell = row.querySelector('.qtd-aberta');
-                    if (qtdAbertaCell) qtdAbertaCell.textContent = fmtInt(0);
-                }
-                if (checkbox) checkbox.disabled = false;
-                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfil, aut);
+                _registrarBaixaNaTela_(uniqueId, linha, result);
+                _executarMarcarFaturar(uniqueId, linha, true, usuarioAtual, perfil, aut, token, true);
             })
             .withFailureHandler(error => {
+                _terminarAcao_(token);
                 showError('Falha ao aplicar baixa: ' + error.message);
-                if (checkbox) { checkbox.disabled = false; checkbox.checked = false; }
+                _fimDaMarcacao_(uniqueId, linha, null, false);
             })
             .aplicarBaixa(uniqueId, linha, qtdAberta, usuarioAtual);
     }
 
-    function _executarMarcarFaturar(uniqueId, linha, marcar, usuarioAtual, perfil, aut) {
+    // token: ação já aberta pela baixa (_aplicarBaixaTotalEMarcar); depoisDaBaixa: a baixa já foi gravada
+    function _executarMarcarFaturar(uniqueId, linha, marcar, usuarioAtual, perfil, aut, token, depoisDaBaixa) {
+        const acao = token || _iniciarAcao_(uniqueId, marcar);
+        if (!token) _mostrarGravando_(uniqueId, linha);
+        const perfilNorm = perfil || 'BAIXA1';
+        const avisoBaixa = depoisDaBaixa ? 'A baixa foi registrada, mas a marcação para faturar falhou — marque o item de novo.\n\n' : '';
+
         google.script.run
             .withSuccessHandler(result => {
                 console.log('✓ Resultado da marcação:', result);
-                if (result.success) {
-                    const row = document.getElementById(`item-linha-${linha}`);
-                    if (row) {
-                        if (marcar) {
-                            row.classList.add('item-marcado-faturar');
-                            _aplicarCorUsuarioLinha(row, usuarioAtual);
-                            const cb = row.querySelector('.checkbox-faturar');
-                            if (cb) {
-                                const cor = _getUsuarioColor(usuarioAtual);
-                                cb.title = `Marcado por: ${usuarioAtual} — apenas ${usuarioAtual} pode desmarcar`;
-                                cb.dataset.marcadoPor = usuarioAtual;
-                                let badge = row.querySelector('.faturar-badge-usuario');
-                                if (!badge) {
-                                    badge = document.createElement('span');
-                                    badge.className = 'faturar-badge-usuario';
-                                    cb.parentNode.insertBefore(badge, cb.nextSibling);
-                                }
-                                badge.textContent = usuarioAtual;
-                                if (cor) badge.style.backgroundColor = cor.border;
-                            }
-                        } else {
-                            row.classList.remove('item-marcado-faturar');
-                            _aplicarCorUsuarioLinha(row, null);
-                            const cb = row.querySelector('.checkbox-faturar');
-                            if (cb) {
-                                cb.title = 'Marcar para faturamento';
-                                cb.disabled = false;
-                                delete cb.dataset.marcadoPor;
-                            }
-                            const badge = row.querySelector('.faturar-badge-usuario');
-                            if (badge) badge.remove();
-                        }
-                    }
+                _terminarAcao_(acao);
+                if (result && result.success) {
+                    // Estado gravado pelo servidor (P, V, X…); servidor antigo sem `estado`: mesmo cálculo aqui
+                    const achado = _itemNaMemoria_(uniqueId, linha);
+                    const estado = result.estado || (achado ? _estadoMarcacaoLocal_(achado.item, marcar, perfilNorm, usuarioAtual) : null);
                     console.log(`✅ Item ${marcar ? 'marcado' : 'desmarcado'} para faturamento!`);
-                    _atualizarBadgeFaturar();
+                    _fimDaMarcacao_(uniqueId, linha, estado, marcar);
                 } else {
-                    if (result.bloqueado) {
-                        showError(result.error);
-                    } else {
-                        showError('Erro ao marcar item: ' + (result.error || 'Erro desconhecido'));
-                    }
-                    const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
-                    if (checkbox) checkbox.checked = !marcar;
+                    const erro = (result && result.error) || 'Erro desconhecido';
+                    showError(avisoBaixa + (result && result.bloqueado ? erro : 'Erro ao marcar item: ' + erro));
+                    _fimDaMarcacao_(uniqueId, linha, null, !marcar);
                 }
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao marcar item:', error);
-                showError('Falha ao marcar item: ' + error.message);
-                const checkbox = document.querySelector(`#item-linha-${linha} .checkbox-faturar`);
-                if (checkbox) checkbox.checked = !marcar;
+                _terminarAcao_(acao);
+                showError(avisoBaixa + 'Falha ao marcar item: ' + error.message);
+                _fimDaMarcacao_(uniqueId, linha, null, !marcar);
             })
-            .marcarParaFaturar(uniqueId, linha, marcar, usuarioAtual, perfil || 'BAIXA1', aut || null);
+            .marcarParaFaturar(uniqueId, linha, marcar, usuarioAtual, perfilNorm, aut || null);
+    }
+
+    /** Linha do item na tela: pelo número da linha se ainda for dele; senão procura pelo ID. */
+    function _linhaNaTela_(uniqueId, linha) {
+        const porLinha = document.getElementById(`item-linha-${linha}`);
+        if (porLinha && (!porLinha.dataset.uniqueId || porLinha.dataset.uniqueId === uniqueId)) return porLinha;
+        return Array.from(document.querySelectorAll('tr[data-unique-id]')).find(tr => tr.dataset.uniqueId === uniqueId) || null;
+    }
+
+    /** Início da gravação: redesenha o cartão (caixa travada no estado pedido). Linha fora da memória: só trava. */
+    function _mostrarGravando_(uniqueId, linha) {
+        if (_atualizarItemNaTela_(uniqueId, linha, null)) return;
+        const tr = _linhaNaTela_(uniqueId, linha);
+        const cb = tr && tr.querySelector('.checkbox-faturar');
+        if (cb) cb.disabled = true;
+    }
+
+    /** Fim da marcação: grava o estado na memória e redesenha (erro: estado null → volta ao que estava). */
+    function _fimDaMarcacao_(uniqueId, linha, estado, marcadoSemMemoria) {
+        if (!_atualizarItemNaTela_(uniqueId, linha, estado)) {
+            const tr = _linhaNaTela_(uniqueId, linha);
+            const cb = tr && tr.querySelector('.checkbox-faturar');
+            if (cb) { cb.disabled = false; cb.checked = !!marcadoSemMemoria; }
+        }
+        _atualizarBadgeFaturar();
+    }
+
+    /** Baixa gravada: Qtd. aberta e "Saldo Aberto" na memória iguais aos da próxima leitura, e o cartão redesenhado. */
+    function _registrarBaixaNaTela_(uniqueId, linha, result) {
+        const achado = _itemNaMemoria_(uniqueId, linha);
+        const qtdAntes = achado ? (Number(achado.item['QTD. ABERTA']) || 0) : 0;
+        const temOriginal = result.qtdOriginal !== undefined && result.qtdOriginal !== null;
+        return _atualizarItemNaTela_(uniqueId, linha, {
+            'QTD. ABERTA': Number(result.novaQtd) || 0,
+            'QTD. ORIGINAL': temOriginal ? Number(result.qtdOriginal) : qtdAntes  // calcularQtdOriginal: Qtd. antes da última baixa
+        });
+    }
+
+    /** Mesmo cálculo de marcarParaFaturar no servidor — só para servidor antigo, que não devolve `estado`. */
+    function _estadoMarcacaoLocal_(item, marcar, perfil, usuario) {
+        const perfis = String(item.PERFIL_EMISSAO || '').split(',').map(s => s.trim()).filter(Boolean);
+        let mapa = {};
+        try {
+            const j = JSON.parse(item.MARCAR_FATURAR_USUARIO || '{}');
+            if (j && typeof j === 'object' && !Array.isArray(j)) mapa = j;
+        } catch (e) {
+            if (item.MARCAR_FATURAR_USUARIO && perfis.length === 1) mapa[perfis[0]] = String(item.MARCAR_FATURAR_USUARIO).trim();
+        }
+        if (marcar) {
+            if (perfis.indexOf(perfil) === -1) perfis.push(perfil);
+            mapa[perfil] = String(usuario || '').trim();
+        } else {
+            const i = perfis.indexOf(perfil);
+            if (i !== -1) perfis.splice(i, 1);
+            delete mapa[perfil];
+        }
+        return {
+            MARCAR_FATURAR: perfis.length ? 'SIM' : '',
+            MARCAR_FATURAR_USUARIO: perfis.length ? JSON.stringify(mapa) : '',
+            PERFIL_EMISSAO: perfis.join(',')
+        };
     }
 
     // ==== ALERTA: ITEM SEM CARTELA (CARTELA = NÃO) ====
@@ -3330,9 +3455,11 @@ ALL_OCS_ITEMS = itemsObj;
         if (!currentBaixaItem) return;
         const idSnapshot = currentBaixaItem.uniqueId;
         const plLinha = planilhaLinha;
+        const acao = _iniciarAcao_(idSnapshot);
 
         google.script.run
             .withSuccessHandler(result => {
+                _terminarAcao_(acao);
                 if (!result || !result.success) {
                     showError('Erro ao estornar baixa: ' + ((result && result.error) || 'Erro desconhecido'));
                     if (rowEl) {
@@ -3344,22 +3471,17 @@ ALL_OCS_ITEMS = itemsObj;
                 // Remove a linha do histórico visualmente
                 if (rowEl) rowEl.remove();
 
-                // Atualiza QTD no modal e na linha da tabela principal
+                // Memória + cartão (vale mesmo se a janela já foi fechada)
+                const campos = { 'QTD. ABERTA': Number(result.novaQtd) || 0 };
+                if (result.qtdOriginal !== undefined && result.qtdOriginal !== null) campos['QTD. ORIGINAL'] = Number(result.qtdOriginal);
+                _atualizarItemNaTela_(idSnapshot, plLinha, campos);
+
+                // Atualiza QTD no modal
                 if (currentBaixaItem && currentBaixaItem.uniqueId === idSnapshot) {
                     const novaQtd = result.novaQtd;
                     currentBaixaItem['QTD. ABERTA'] = novaQtd;
                     $baixaQtdAberta.textContent = fmtInt(novaQtd);
                     $baixaMaxQtd.textContent = fmtInt(novaQtd);
-
-                    const row = document.getElementById(`item-linha-${plLinha}`);
-                    if (row) {
-                        row.dataset.itemQtd = String(novaQtd);
-                        const cells = row.querySelectorAll('td');
-                        const offset = (cells[0] && cells[0].querySelector('.item-checkbox')) ? 1 : 0;
-                        const qtdCell = cells[5 + offset];
-                        if (qtdCell) qtdCell.textContent = fmtInt(novaQtd);
-                    }
-                    updateTotaisGerais();
 
                     if ($historicoBaixasLista.querySelectorAll('.historico-baixa-item').length === 0) {
                         $historicoBaixasLista.innerHTML = '<div class="historico-baixas-empty">Nenhuma baixa nesta sessão.</div>';
@@ -3367,6 +3489,7 @@ ALL_OCS_ITEMS = itemsObj;
                 }
             })
             .withFailureHandler(err => {
+                _terminarAcao_(acao);
                 showError('Falha ao estornar: ' + ((err && err.message) || 'Erro desconhecido'));
                 if (rowEl) {
                     const btn = rowEl.querySelector('.btn-estornar');
@@ -3421,46 +3544,36 @@ ALL_OCS_ITEMS = itemsObj;
         $baixaConfirmBtn.disabled = true;
         $baixaConfirmBtn.textContent = 'Processando...';
 
+        // Capturados antes da chamada: a janela pode ser fechada enquanto o servidor grava (currentBaixaItem vira null)
+        const idBaixa = currentBaixaItem.uniqueId;
+        const linhaBaixa = currentBaixaItem.planilhaLinha;
+        const acao = _iniciarAcao_(idBaixa);
+
         google.script.run
             .withSuccessHandler(result => {
                 console.log('✅ Baixa aplicada:', result);
+                _terminarAcao_(acao);
 
-                if (result.success) {
+                if (result && result.success) {
                     console.log('✅ Baixa aplicada com sucesso!');
-                    // Captura dados necessários antes de fechar o modal (hideBaixaModal zera currentBaixaItem)
-                    const planilhaLinha = currentBaixaItem.planilhaLinha;
+                    // Memória + cartão: Qtd., "Saldo Aberto" e o botão Baixa já com o saldo novo
+                    _registrarBaixaNaTela_(idBaixa, linhaBaixa, result);
+                    const janelaDoItem = !!(currentBaixaItem && currentBaixaItem.uniqueId === idBaixa);
 
-                    // Atualiza item
-                    currentBaixaItem['QTD. ABERTA'] = result.novaQtd;
-
-                    // Atualiza modal
-                    $baixaQtdAberta.textContent = fmtInt(result.novaQtd);
-                    $baixaMaxQtd.textContent = fmtInt(result.novaQtd);
-
-                    // Limpa input
-                    $novaBaixaInput.value = '';
+                    if (janelaDoItem) {
+                        currentBaixaItem['QTD. ABERTA'] = result.novaQtd;
+                        $baixaQtdAberta.textContent = fmtInt(result.novaQtd);
+                        $baixaMaxQtd.textContent = fmtInt(result.novaQtd);
+                        $novaBaixaInput.value = '';
+                    }
 
                     if (result.zerou) {
-                        hideBaixaModal();
+                        if (janelaDoItem) hideBaixaModal();
                         showSuccessModal('Baixa aplicada! Quantidade zerada.', { noReload: true });
                         setTimeout(() => carregarListaOcs(true, true), 2100);
-                    } else {
+                    } else if (janelaDoItem) {
                         const saldoRestante = result.novaQtd;
                         const itemParaBaixa = { ...currentBaixaItem };
-
-                        // Atualiza a linha na tabela imediatamente
-                        const row = document.getElementById(`item-linha-${planilhaLinha}`);
-                        if (row) {
-                            row.dataset.itemQtd = String(saldoRestante);
-                            const cells = row.querySelectorAll('td');
-                            const hasCheckbox = cells[0] && cells[0].querySelector('.item-checkbox');
-                            const offset = hasCheckbox ? 1 : 0;
-                            const qtdAbertaCell = cells[5 + offset];
-                            if (qtdAbertaCell) {
-                                qtdAbertaCell.textContent = fmtInt(saldoRestante);
-                            }
-                        }
-                        updateTotaisGerais();
 
                         hideBaixaModal();
 
@@ -3469,9 +3582,12 @@ ALL_OCS_ITEMS = itemsObj;
                             `Baixa parcial registrada — saldo atual: ${fmtInt(saldoRestante)} unidades.\n\nTOTAL → Faturar completo (zera saldo)\nPARCIAL → Manter saldo parcial`,
                             () => {
                                 // TOTAL: aplica baixa do saldo restante para zerar
+                                const acaoTotal = _iniciarAcao_(itemParaBaixa.uniqueId);
                                 google.script.run
                                     .withSuccessHandler(r => {
+                                        _terminarAcao_(acaoTotal);
                                         if (r && r.success) {
+                                            _registrarBaixaNaTela_(itemParaBaixa.uniqueId, itemParaBaixa.planilhaLinha, r);
                                             showSuccessModal('Saldo zerado! Baixa total aplicada.', { noReload: true });
                                         } else {
                                             showError('Erro ao zerar saldo: ' + ((r && r.error) || 'Erro desconhecido'));
@@ -3479,6 +3595,7 @@ ALL_OCS_ITEMS = itemsObj;
                                         setTimeout(() => carregarListaOcs(true, true), 2100);
                                     })
                                     .withFailureHandler(err => {
+                                        _terminarAcao_(acaoTotal);
                                         showError('Falha ao zerar saldo: ' + err.message);
                                     })
                                     .aplicarBaixa(itemParaBaixa.uniqueId, itemParaBaixa.planilhaLinha, saldoRestante, usuario);
@@ -3491,7 +3608,7 @@ ALL_OCS_ITEMS = itemsObj;
                         );
                     }
                 } else {
-                    showError('Erro ao aplicar baixa: ' + (result.error || 'Erro desconhecido'));
+                    showError('Erro ao aplicar baixa: ' + ((result && result.error) || 'Erro desconhecido'));
                 }
 
                 $baixaConfirmBtn.disabled = false;
@@ -3499,11 +3616,12 @@ ALL_OCS_ITEMS = itemsObj;
             })
             .withFailureHandler(error => {
                 console.error('❌ Erro ao aplicar baixa:', error);
+                _terminarAcao_(acao);
                 showError('Falha ao aplicar baixa: ' + error.message);
                 $baixaConfirmBtn.disabled = false;
                 $baixaConfirmBtn.textContent = 'Adicionar Baixa';
             })
-            .aplicarBaixa(currentBaixaItem.uniqueId, currentBaixaItem.planilhaLinha, qtdBaixa, (_getSessaoLocal() || {}).usuario || '');
+            .aplicarBaixa(idBaixa, linhaBaixa, qtdBaixa, (_getSessaoLocal() || {}).usuario || '');
     }
 
     // ==== NAVEGAÇÃO POR TECLADO ====
@@ -6084,8 +6202,9 @@ ALL_OCS_ITEMS = itemsObj;
         // Qualquer janela aberta (.modal-overlay visível), o carregamento ou alguém digitando adiam o refresh (tenta de
         // novo em 3 s). Antes a lista começava por $confirmModal/$warningModal, que não existem: a função dava erro na
         // primeira chamada e a atualização automática morria — a tela só atualizava com F5/Atualizar (19/11/2026).
+        // Ação gravando no servidor também adia (26/11/2026): a leitura sairia de antes da gravação.
         const isLoading = !$loader.classList.contains('hidden');
-        return !_janelaAberta_() && !isLoading && !_digitando_();
+        return !_janelaAberta_() && !isLoading && !_digitando_() && !_haAcoesPendentes_();
     }
 
     /** Alguma janela (.modal-overlay) visível? Sem retângulos = display:none (inclusive por !important). */

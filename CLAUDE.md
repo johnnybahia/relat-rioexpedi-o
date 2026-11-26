@@ -1,7 +1,7 @@
 # CLAUDE.md — Sistema de Relatório de Pedidos / Expedição
 
 > Lido automaticamente em toda sessão. Atualizar sempre que houver mudança arquitetural.
-> Versão do sistema: **v15.7-SINCRONIZACAO** (19/11/2026: incidente da marcação depois da NF parcial — 15.22) · Backend em Google Apps Script · Frontend em HTML+JS embutido no Apps Script
+> Versão do sistema: **v15.8-SINCRONIZACAO** (26/11/2026: nome do usuário com a caixa de faturar vazia — 15.23) · Backend em Google Apps Script · Frontend em HTML+JS embutido no Apps Script
 > Última revisão contra o código e dados reais: **30/09/2026** (plano da seção 17 implementado + `Historico_Decisoes`). Se este documento
 > divergir do código, o código descreve o comportamento real — mas as **regras de negócio da seção 1.1 prevalecem**:
 > se o código as viola, é o código que deve ser corrigido. Antes de propor mudanças, ler 1.1, 15.16–15.19 e 17
@@ -498,10 +498,10 @@ linha; sem a trava em 20 s, gravam linha a linha com `appendRow` (atômica).
 ### Chamadas ao backend (`google.script.run`)
 ```javascript
 fetchAllDataUnified(cacheBuster)              // carrega todos os dados
-marcarParaFaturar(id, linha, marcar, user, perfil, autorizacaoCartela) // marca/desmarca para NF; autorizacaoCartela = {supervisor, ciente:true}, obrigatória se CARTELA = NÃO (15.20)
-aplicarBaixa(id, linha, qtd, user)           // registra baixa parcial
+marcarParaFaturar(id, linha, marcar, user, perfil, autorizacaoCartela) // marca/desmarca para NF; autorizacaoCartela = {supervisor, ciente:true}, obrigatória se CARTELA = NÃO (15.20); devolve `estado` = campos gravados (P, V, X, AA, W) com os nomes do item da tela (15.23)
+aplicarBaixa(id, linha, qtd, user)           // registra baixa parcial; devolve novaQtd e qtdOriginal ("Saldo Aberto" da próxima leitura — 15.23)
 obterHistoricoSessaoBaixas(id)               // histórico da sessão atual
-estornarBaixa(id, linhaDB, linhaHist, qtd)  // estorna baixa específica
+estornarBaixa(id, linhaDB, linhaHist, qtd)  // estorna baixa específica; devolve novaQtd e qtdOriginal (15.23)
 editarUltimaBaixa(id, linhaDB, novaQtd, user)
 obterItensMarcadosParaFaturar()             // para gerar relatório
 gerarNumeroLoteEmissao()                    // FAT-001, FAT-002...
@@ -551,6 +551,15 @@ DESCRIÇÃO (sem `[uuid]`) · TAMANHO · LOTE · QTD. ABERTA · LOTE_EMISSAO (FA
   sessão): é atribuição, não prova forte.
 - Volume: ~100 linhas por dia útil (decisões + cópias da limpeza), ~25 mil/ano. Sem rotação automática; arquivar à
   mão (copiar para outro arquivo) se passar de ~100 mil linhas.
+
+### A tela segue a memória (desde 26/11/2026 — 15.23)
+- Ação que deu certo (marcar, desmarcar, baixa pela caixa ou pela janela "📦 Baixa", estorno) grava o que o servidor
+  devolveu no item de `ALL_OCS_ITEMS` e redesenha o cartão com o mesmo `renderOcCard` da tela inteira
+  (`_atualizarItemNaTela_`). Nenhuma ação remenda a linha na tela.
+- Ação em andamento (`_iniciarAcao_`/`_terminarAcao_`): a atualização automática espera; leitura que começou antes ou
+  durante uma ação é descartada (`_versaoAcoes`). Sem resposta em 60 s a ação deixa de segurar (`ACAO_TEMPO_MAX_MS`).
+- Do clique até a resposta da marcação a caixa fica no estado pedido e travada ("Gravando no servidor…"), sem nome e
+  sem cor — inclusive se a tela for redesenhada (`_marcacaoEmAndamento_`). Baixa + marcação contam como uma ação só.
 
 ### Fluxo de marcação para faturamento (checkbox)
 ```
@@ -982,6 +991,29 @@ inexplicável. A bateria de simulação (`testes/`, seção 18) cobre os dois mo
   funcionaram**. Ficaram desligados (`ATALHOS_TECLADO_LINHAS = false`): ligar mudaria a rolagem da página (Espaço/↑↓) e
   criaria um jeito de marcar para faturar com uma tecla depois de clicar numa linha.
 
+### 15.23 Incidente 26/11/2026: nome do usuário com a caixa de faturar vazia e a Qtd. antiga — CORRIGIDO (26/11)
+- **Sintoma (foto dos usuários):** linha com a cor e o nome de quem marcou (VIRLENE), caixa de faturar vazia e Qtd. Aberta
+  igual ao saldo (240) — "não deu baixa nem marcou". No servidor estava certo (baixa de 240 + marcado): o nome só era posto
+  depois que o servidor confirmava a marcação, que só é enviada depois da baixa. Tentar de novo dava "Quantidade de baixa
+  (240) maior que disponível (0)".
+- **Causa:** a tela tinha duas verdades — a memória (`ALL_OCS_ITEMS`, trocada só por uma leitura) e a linha na tela,
+  remendada pelas ações. Quando a tela era redesenhada no meio da marcação (atualização automática de 2 min, que só funciona
+  desde 19/11 — 15.22; busca/filtro; recarga de 2,1 s depois de uma baixa) com dados lidos antes da baixa, a resposta da
+  marcação pintava nome e cor na linha nova mas não marcava a caixa, e a Qtd. zerada ia para a linha antiga, que já tinha
+  saído da tela. Busca/filtro depois de marcar também voltavam a linha ao estado antigo (a memória nunca era atualizada).
+- **Correção (index.html):** ver "A tela segue a memória" (seção 14). Também: marcação que falha depois da baixa avisa que
+  a baixa foi feita e pede para marcar de novo; janela "📦 Baixa" e estorno passam pelo mesmo caminho (antes remendavam só
+  a célula da Qtd. e o botão Baixa guardava a Qtd. antiga); fechar a janela de baixa no meio da gravação não dá mais erro
+  de JavaScript.
+- **Servidor (Código.gs):** `marcarParaFaturar` devolve `estado`; `aplicarBaixa` e `estornarBaixa` devolvem `qtdOriginal`.
+  Testado que é igual ao que `fetchAllDataUnified` devolve na leitura seguinte. Servidor antigo (sem `estado`) → a tela
+  calcula igual (`_estadoMarcacaoLocal_`).
+- **Testes:** `testes/tela.js` segura respostas do servidor (`__segurar`/`__liberar`) e reproduz a ordem do incidente. Com o
+  `index.html` anterior 7 checagens falham (inclusive o estado exato da foto); com o atual, todas passam.
+- **Fora do alcance:** outro usuário (ou outra aba) continua vendo o estado antigo até a própria atualização (até 2 min); se
+  agir sobre ele, o servidor recusa (baixa maior que o disponível, marcação sem baixa no ciclo). Excluir inativos e o aviso de
+  conferência não passam pelo controle de ação (já recarregam a tela depois).
+
 ## 16. SEQUÊNCIA SEGURA PARA MUDANÇAS
 
 Antes de qualquer alteração no código, verificar:
@@ -1002,6 +1034,8 @@ Antes de qualquer alteração no código, verificar:
    rodar os cenários de teste (linhas-irmãs, DESCRIÇÃO corrigida, troca de OC, lote novo ao lado de faturado)
 9. **Testes verdes?** → `node testes/rodar_todos.js` antes de todo commit de código (o hook bloqueia se falhar);
    bug corrigido → cenário novo em `testes/cenarios.js` que falha sem a correção e passa com ela (seção 18)
+10. **Mexe na tela depois de uma ação?** → gravar o resultado do servidor no item de `ALL_OCS_ITEMS` e redesenhar com
+   `_atualizarItemNaTela_`; abrir e fechar a ação com `_iniciarAcao_`/`_terminarAcao_`. Nunca remendar a linha na tela (15.23)
 
 **Funções com maior superfície de impacto** (cuidado máximo):
 - `sincronizarDados()` — toca todos os itens do DB
@@ -1053,7 +1087,10 @@ irmãs 100% idênticas — o dano fica contido a um aviso, nunca a um faturament
 não existem (erro de JavaScript depois do sucesso; `reorderCards` não rodava) — chamadas removidas; a auditoria podia
 perder linhas se o sync e uma resposta ao aviso gravassem ao mesmo tempo — agora sob a trava do documento.
 
-**Pendências conhecidas:** decisão manual dos 9 pares do incidente; `corrigirFaturadosComSaldoAberto()` segue no
+**Pendências conhecidas:** relatório de faturamento com 2+ baixas no mesmo ciclo conta só a última no SALDO
+(`QTD. ORIGINAL` = QTD antes da última baixa — `_getUltimaQtdOriginalCache_`); reproduzido no simulador em 26/11 (baixas
+4.584 + 9.168 de 13.752 → SALDO 9.168); caminho comum: baixa parcial + TOTAL ao marcar; não corrigido. Decisão manual dos
+9 pares do incidente; `corrigirFaturadosComSaldoAberto()` segue no
 menu (reverte todo Faturado com QTD>0 para Ativo sem pendência — não usar; o sync depois os manda para o aviso);
 a página não é responsiva no celular (tabelas largas; o aviso é); repositório público com dados reais no histórico
 (CSVs antigos) e nos PDFs `OC_482500*.PDF` — decisão do usuário tornar privado.
@@ -1084,8 +1121,8 @@ Relatorio_DB), roda o `Código.gs` de verdade e confere o resultado nos dois mod
 | `testes/cenarios.js` | 14 situações do dia a dia (13–14: NF parcial com a execução interrompida antes de gravar e marcação presa sem baixa desde o CHECKPOINT — 15.22): irmã marcada sai (incidente 28/09), DESCRIÇÃO corrigida (1 linha e grupo inteiro), lote novo ao lado de faturado, saída com/sem marcação, importação truncada, faturamento parcial entre irmãs, pendência que volta, reordenação, lote novo no grupo, troca de OC. Em todos: nenhum Faturado sem usuário novo e, no `Historico_Decisoes`, todo Faturado novo registrado com o usuário e nenhum faturamento registrado que não aconteceu |
 | `testes/sequencia.js` | Sequência por OC: aba `original` no layout atual (cabeçalho, "Lote Dilly", DIAS) e no legado; OC nova e completa → col V/Y = 1..n; OC incompleta ou recebida antes do corte → sem número; 2ª rodada não muda |
 | `testes/cartela.js` | Item com CARTELA = NÃO (os itens ganham uma baixa antes de marcar, como na tela): recusa sem supervisor/ciência (incl. "Não", "NAO", espaços), marca com autorização e grava `FATURAR_SEM_CARTELA` + col AA, dois perfis, desmarcar, histórico indisponível → marcação desfeita, reset de ciclo limpa a AA, payload do relatório |
-| `testes/funcoes.js` | Marcação exige baixa no ciclo (recusa, MARCOU/DESMARCOU, SALDO do relatório) e `Utilities.formatDate` uma vez por data no sync (15.22); sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos; `Historico_Decisoes`: respostas do aviso, reparo, marcação, desmarcado durante o sync (não registra), exclusão com/sem login, gravação sem a trava (appendRow), cópia de cada linha apagada com o nome, falha na cópia → nada apagado e o processo automático não marca o dia |
-| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado: marcar item parcial (TOTAL / PARCIAL / CANCELAR — cancelar não marca); atualização automática (sem erro, adia com janela aberta ou digitação, dispara a cada 2 min e busca os dados) e atalhos de teclado desligados; aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê; alerta de CARTELA NÃO (ESC/clique fora não fecham, Confirmar só com supervisor + ciência, Cancelar desmarca, autorização enviada ao servidor) e HTML do relatório de faturamento. Sem Playwright → pulado |
+| `testes/funcoes.js` | Respostas de marcar/desmarcar/baixa/estorno iguais à leitura seguinte (15.23); marcação exige baixa no ciclo (recusa, MARCOU/DESMARCOU, SALDO do relatório) e `Utilities.formatDate` uma vez por data no sync (15.22); sentinela, reparo dos faturados sem usuário, dados do aviso (`pendentesSaida`), `confirmarSaidaFonte` (TOTAL/PARCIAL, resposta dupla, linha desatualizada), limpeza diária nos dois modos; `Historico_Decisoes`: respostas do aviso, reparo, marcação, desmarcado durante o sync (não registra), exclusão com/sem login, gravação sem a trava (appendRow), cópia de cada linha apagada com o nome, falha na cópia → nada apagado e o processo automático não marca o dia |
+| `testes/tela.js` | `index.html` no Chromium (Playwright) com `google.script.run` simulado (respostas podem ser seguradas: `__segurar`/`__liberar`): tela redesenhada no meio da marcação, da desmarcação e da baixa pela janela, busca depois de marcar, caixa travada enquanto grava, teto de 60 s, estorno (15.23); marcar item parcial (TOTAL / PARCIAL / CANCELAR — cancelar não marca); atualização automática (sem erro, adia com janela aberta ou digitação, dispara a cada 2 min e busca os dados) e atalhos de teclado desligados; aviso abre para TOTAL, respostas, erros, "Responder depois", pendência nova, selo; "excluir inativos" envia o login; PARCIAL não vê; alerta de CARTELA NÃO (ESC/clique fora não fecham, Confirmar só com supervisor + ciência, Cancelar desmarca, autorização enviada ao servidor) e HTML do relatório de faturamento. Sem Playwright → pulado |
 | `testes/rodar_todos.js` | Roda tudo; placar; código 1 se falhar (~1 min) |
 
 **Quando rodar:** antes de todo commit que mexa em `Código.gs`, `index.html` ou `testes/`. O hook
